@@ -1,0 +1,36 @@
+{
+  "format_version": "1.21.50",
+  "minecraft:block": {
+    "description": {
+      "identifier": "diorama:map_table",
+      "menu_category": {
+        "category": "items"
+      }
+    },
+    "components": {
+      "minecraft:geometry": "minecraft:geometry.full_block",
+      "minecraft:material_instances": {
+        "*": {
+          "texture": "diorama:map_table_side",
+          "render_method": "opaque"
+        },
+        "up": {
+          "texture": "diorama:map_table_top",
+          "render_method": "opaque"
+        },
+        "down": {
+          "texture": "diorama:map_table_bottom",
+          "render_method": "opaque"
+        }
+      },
+      "minecraft:destructible_by_mining": {
+        "seconds_to_destroy": 2.5
+      },
+      "minecraft:destructible_by_explosion": {
+        "explosion_resistance": 10
+      },
+      "minecraft:light_dampening": 15,
+      "minecraft:map_color": "#6b4f2a"
+    }
+  }
+}

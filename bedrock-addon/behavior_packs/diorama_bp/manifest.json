@@ -1,0 +1,46 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Diorama Map",
+    "description": "Angled voxel map, waypoints, death markers and compass for Bedrock. Ported from the Diorama Fabric mod (MIT, Dara Adedeji).",
+    "uuid": "376794a4-2303-44bb-b8a9-86f617c551b8",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 21, 90]
+  },
+  "modules": [
+    {
+      "type": "data",
+      "uuid": "8b1c0a44-6d3e-4f21-9c57-2a0f9b7d41c2",
+      "version": [0, 1, 0]
+    },
+    {
+      "type": "script",
+      "language": "javascript",
+      "uuid": "c4a72f10-9e58-4b6d-83a1-5f2d7c0e9b34",
+      "entry": "scripts/main.js",
+      "version": [0, 1, 0]
+    }
+  ],
+  "dependencies": [
+    {
+      "uuid": "2d6c7057-1055-4d22-8599-53200d4a17b6",
+      "version": [0, 1, 0]
+    },
+    {
+      "module_name": "@minecraft/server",
+      "version": "1.17.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "1.3.0"
+    }
+  ],
+  "metadata": {
+    "authors": ["Diorama Bedrock Port"],
+    "license": "MIT",
+    "url": "https://github.com/SunkenInTime/diorama",
+    "generated_with": {
+      "diorama_bp": ["0.1.0"]
+    }
+  }
+}

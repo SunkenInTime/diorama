@@ -1,0 +1,18 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "diorama:waypoint_marker",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/diorama/waypoint_marker"
+      },
+      "geometry": {
+        "default": "geometry.diorama_waypoint"
+      },
+      "render_controllers": ["controller.render.default"]
+    }
+  }
+}

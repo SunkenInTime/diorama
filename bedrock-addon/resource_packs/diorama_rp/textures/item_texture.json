@@ -1,0 +1,12 @@
+{
+  "resource_pack_name": "diorama",
+  "texture_name": "atlas.items",
+  "texture_data": {
+    "diorama:waypoint_tool": {
+      "textures": "textures/items/waypoint_tool"
+    },
+    "diorama:settings_tool": {
+      "textures": "textures/items/settings_tool"
+    }
+  }
+}

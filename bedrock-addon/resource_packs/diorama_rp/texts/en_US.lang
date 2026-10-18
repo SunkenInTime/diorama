@@ -1,0 +1,58 @@
+## Diorama Bedrock - US English
+## Used by the behavior pack (forms, actionbar) and by pack references.
+
+pack.name=Diorama
+pack.description=Ray-traced angled voxel map for Bedrock: build a diorama of the terrain, lock the camera and read the world at a glance.
+
+## --- Pack objects -------------------------------------------------------
+item.diorama:waypoint_tool.name=Waypoint Tool
+item.diorama:settings_tool.name=Diorama Settings
+tile.diorama:map_table.name=Map Table
+entity.diorama:waypoint_marker.name=Waypoint Marker
+item.spawn_egg.entity.diorama:waypoint_marker.name=Spawn Waypoint Marker
+
+## Compatibility aliases (older/other lookup styles).
+item.diorama:waypoint_tool=Waypoint Tool
+item.diorama:settings_tool=Diorama Settings
+tile.diorama:map_table=Map Table
+entity.diorama:waypoint_marker=Waypoint Marker
+
+## --- Forms --------------------------------------------------------------
+diorama.form.close=Close
+diorama.form.settings.title=Diorama Settings
+diorama.form.settings.body=Choose how the diorama map looks and behaves.
+diorama.form.settings.style=Map style
+diorama.form.settings.depth_shading=Depth shading
+diorama.form.settings.cave_slice=Cave slice
+diorama.form.settings.radar=Entity radar
+diorama.form.settings.rebuild=Rebuild map
+diorama.form.map.title=Diorama Map
+diorama.form.map.body=Pan and zoom the diorama, or jump to a waypoint.
+diorama.form.map.pan_north=Pan north
+diorama.form.map.pan_south=Pan south
+diorama.form.map.pan_east=Pan east
+diorama.form.map.pan_west=Pan west
+diorama.form.map.zoom_in=Zoom in
+diorama.form.map.zoom_out=Zoom out
+diorama.form.map.recenter=Recenter on me
+diorama.form.waypoints.title=Waypoints
+diorama.form.waypoints.body=Your saved places in this world.
+diorama.form.waypoints.add=Add waypoint here
+diorama.form.waypoints.list=Waypoint list
+diorama.form.waypoints.share=Share in chat
+diorama.form.waypoints.teleport=Teleport
+diorama.form.waypoints.delete=Delete
+diorama.form.waypoints.none=No waypoints yet.
+
+## --- Feedback -----------------------------------------------------------
+diorama.msg.waypoint_added=Waypoint added.
+diorama.msg.waypoint_deleted=Waypoint deleted.
+diorama.msg.waypoint_shared=Waypoint shared in chat.
+diorama.msg.waypoint_full=Waypoint list is full.
+diorama.msg.radar_off=Entity radar is off on this server.
+diorama.msg.minimap_disabled=This server has disabled minimaps.
+diorama.msg.fair_play=Fair play: cave slices only show what you have seen.
+diorama.msg.map_rebuilding=Rebuilding the diorama...
+diorama.msg.map_ready=Diorama ready.
+diorama.msg.map_too_large=That area is too large to build at this quality.
+diorama.hud.badge=Diorama

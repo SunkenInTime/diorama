@@ -1,0 +1,58 @@
+## Diorama Bedrock - 简体中文
+## 供行为包（表单、物品栏提示）与资源包引用。
+
+pack.name=立体地图 Diorama
+pack.description=为基岩版重制的等距体素地图：把地形搭成立体模型，锁定视角即可一眼看清周围世界。
+
+## --- 包内对象 -----------------------------------------------------------
+item.diorama:waypoint_tool.name=路径点工具
+item.diorama:settings_tool.name=Diorama 设置
+tile.diorama:map_table.name=地图台
+entity.diorama:waypoint_marker.name=路径点标记
+item.spawn_egg.entity.diorama:waypoint_marker.name=生成路径点标记
+
+## 兼容写法（部分版本/查询方式使用不带 .name 的键）。
+item.diorama:waypoint_tool=路径点工具
+item.diorama:settings_tool=Diorama 设置
+tile.diorama:map_table=地图台
+entity.diorama:waypoint_marker=路径点标记
+
+## --- 表单 --------------------------------------------------------------
+diorama.form.close=关闭
+diorama.form.settings.title=Diorama 设置
+diorama.form.settings.body=选择立体地图的显示方式与行为。
+diorama.form.settings.style=地图风格
+diorama.form.settings.depth_shading=深度着色
+diorama.form.settings.cave_slice=洞穴切片
+diorama.form.settings.radar=实体雷达
+diorama.form.settings.rebuild=重建地图
+diorama.form.map.title=Diorama 地图
+diorama.form.map.body=平移、缩放立体地图，或跳转到路径点。
+diorama.form.map.pan_north=向北平移
+diorama.form.map.pan_south=向南平移
+diorama.form.map.pan_east=向东平移
+diorama.form.map.pan_west=向西平移
+diorama.form.map.zoom_in=放大
+diorama.form.map.zoom_out=缩小
+diorama.form.map.recenter=回到我身边
+diorama.form.waypoints.title=路径点
+diorama.form.waypoints.body=本世界中保存的地点。
+diorama.form.waypoints.add=在此添加路径点
+diorama.form.waypoints.list=路径点列表
+diorama.form.waypoints.share=分享到聊天栏
+diorama.form.waypoints.teleport=传送
+diorama.form.waypoints.delete=删除
+diorama.form.waypoints.none=还没有路径点。
+
+## --- 提示 --------------------------------------------------------------
+diorama.msg.waypoint_added=已添加路径点。
+diorama.msg.waypoint_deleted=已删除路径点。
+diorama.msg.waypoint_shared=已把路径点分享到聊天栏。
+diorama.msg.waypoint_full=路径点数量已达上限。
+diorama.msg.radar_off=该服务器已关闭实体雷达。
+diorama.msg.minimap_disabled=该服务器已禁用小地图。
+diorama.msg.fair_play=公平模式：洞穴切片只显示你已看到过的区域。
+diorama.msg.map_rebuilding=正在重建立体地图……
+diorama.msg.map_ready=Diorama 已就绪。
+diorama.msg.map_too_large=该范围过大，无法按当前精度构建。
+diorama.hud.badge=Diorama
