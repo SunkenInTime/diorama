@@ -126,7 +126,7 @@ EXPECTED_CONTROLS = {
         "/settings_root/rows/row_size/value",
         "/settings_root/rows/row_zoom/value",
     ),
-
+}
 
 
 class Report(object):
@@ -174,10 +174,18 @@ def check_python(report):
         report.error("python", "no scripts under %s" % (SCRIPTS,))
         return
     for path in files:
+        handle = open(path, "rb")
         try:
-            py_compile.compile(path, doraise=True, cfile=os.devnull)
-        except Exception as exc:  # noqa: BLE001
+            source = handle.read()
+        finally:
+            handle.close()
+        try:
+            # compile() checks the syntax without writing a .pyc anywhere.
+            compile(source, path, "exec")
+        except SyntaxError as exc:
             report.error("python", "%s does not compile: %s" % (path, exc))
+        except ValueError as exc:
+            report.error("python", "%s cannot be compiled: %s" % (path, exc))
 
     mod_main = os.path.join(SCRIPTS, "modMain.py")
     if not os.path.isfile(mod_main):
@@ -284,20 +292,45 @@ def _check_version(value, where, report):
             return
 
 
-def _all_controls(node, prefix, found):
-    """Collect every control path defined under a namespace object."""
-    if not isinstance(node, dict):
-        return
-    for name, value in node.items():
-        if name in ("namespace", "ui_defs", "screen_name"):
-            continue
-        base = name
-        if "@" in base:
-            base = base.split("@", 1)[0]
+def collect_paths(data, templates, namespace):
+    """Every control path a namespace exposes, following ``@namespace.control``.
+
+    A control written as ``"minimap@diorama.minimap_panel"`` owns the name
+    ``minimap`` but takes its children from ``diorama.minimap_panel``, so the
+    walk has to merge the template before recursing - otherwise the validator
+    reports controls the JSON clearly has.
+    """
+    found = set()
+
+    def walk(name, value, prefix):
+        base = name.split("@", 1)[0]
         path = prefix + "/" + base
         found.add(path)
+        merged = {}
+        if "@" in name:
+            template = name.split("@", 1)[1]
+            if "." in template:
+                tns, tname = template.split(".", 1)
+                tdef = templates.get(tns, {}).get(tname)
+                if isinstance(tdef, dict):
+                    merged.update(tdef)
         if isinstance(value, dict):
-            _all_controls(value.get("controls"), path, found)
+            merged.update(value)
+        elif value is None:
+            pass
+        controls = merged.get("controls")
+        if isinstance(controls, list):
+            for entry in controls:
+                if not isinstance(entry, dict):
+                    continue
+                for child_name, child_value in entry.items():
+                    walk(child_name, child_value, path)
+
+    for name, value in data.items():
+        if name in ("namespace", "ui_defs", "ui_def", "screen_name", "files"):
+            continue
+        if isinstance(value, (dict, list)):
+            walk(name, value, "")
     return found
 
 
@@ -325,6 +358,7 @@ def check_ui(report):
     namespace_controls = {}
     textures = set()
     files = {}
+    templates = {}
     for entry in entries:
         relative = entry if isinstance(entry, str) else ""
         path = os.path.join(RP, relative.replace("/", os.sep))
@@ -342,8 +376,12 @@ def check_ui(report):
         namespace = data.get("namespace")
         if not isinstance(namespace, str) or not namespace:
             report.error(where, "missing \"namespace\"")
-        found = namespace_controls.setdefault(namespace or "?", set())
-        _all_controls(data, "", found)
+        template_map = templates.setdefault(namespace or "?", {})
+        for control_name, control_value in data.items():
+            if control_name in ("namespace", "ui_defs", "ui_def", "screen_name", "files"):
+                continue
+            template_map[control_name.split("@", 1)[0]] = control_value
+        namespace_controls[namespace or "?"] = set()
         raw_handle = open(path, "rb")
         try:
             raw = raw_handle.read().decode("utf-8")
@@ -351,6 +389,9 @@ def check_ui(report):
             raw_handle.close()
         for texture in TEXTURE_RE.findall(raw):
             textures.add(texture)
+
+    for namespace, template_map in templates.items():
+        namespace_controls[namespace] = collect_paths(template_map, templates, namespace)
 
     for texture in sorted(textures):
         candidate = os.path.join(RP, texture.replace("/", os.sep))
@@ -366,11 +407,17 @@ def check_ui(report):
             raw = raw_handle.read().decode("utf-8")
         finally:
             raw_handle.close()
-        for namespace, control in set(INHERIT_RE.findall(raw)) | set(REFERENCE_RE.findall(raw)):
+        references = set(REFERENCE_RE.findall(raw))
+        for _control_name, namespace, control in INHERIT_RE.findall(raw):
+            references.add((namespace, control))
+        for namespace, control in references:
+            if namespace == "common":
+                # common.base_screen and friends are the engine's own namespace.
+                continue
             known = namespace_controls.get(namespace)
             if known is None:
                 report.error("ui:refs", "%s references unknown namespace %r" % (name, namespace))
-            elif ("/" + control) not in known and control not in ("base_screen",):
+            elif ("/" + control) not in known:
                 report.warn(
                     "ui:refs",
                     "%s references @%s.%s which is not defined in that namespace"
@@ -383,8 +430,9 @@ def check_ui(report):
         if data is None:
             report.error("ui:layout", "%s.json is not listed in _ui_def.json" % (screen,))
             continue
-        defined = set()
-        _all_controls(data, "", defined)
+        defined = collect_paths(
+            dict((k, v) for k, v in data.items()), templates, data.get("namespace") or "?"
+        )
         for wanted in paths:
             if wanted in defined:
                 continue

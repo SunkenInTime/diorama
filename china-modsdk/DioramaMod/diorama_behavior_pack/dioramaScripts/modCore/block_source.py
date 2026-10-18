@@ -205,7 +205,7 @@ class SyntheticWorld(object):
     regression check for the projection and shading code.
     """
 
-    def __init__(self, radius_x=40, radius_z=90, z_origin=10, sea_level=6, max_height=44):
+    def __init__(self, radius_x=40, radius_z=118, z_origin=2, sea_level=6, max_height=44):
         self.radius_x = int(radius_x)
         self.radius_z = int(radius_z)
         self.z_origin = int(z_origin)

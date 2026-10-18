@@ -31,7 +31,7 @@ from modCore import block_source, geometry, png  # noqa: E402
 from preview_bake import bake_grid  # noqa: E402
 from modCore.map_style import PREVIEW  # noqa: E402
 from modCore.projection import Projection  # noqa: E402
-from modCore.baker import SAMPLES  # noqa: E402
+FAST_SAMPLES = ((0.5, 0.5),)
 
 RP = os.path.join(
     HERE, os.pardir, "DioramaMod", "diorama_resource_pack", "textures", "ui", "diorama_atlas.png"
@@ -61,7 +61,7 @@ def main(argv=None):
         0,
         tiles,
         tiles,
-        SAMPLES if args.samples == 1 else None,
+        FAST_SAMPLES if args.samples == 1 else None,
         False,
         lambda key: print("baking %r ..." % (key,)),
     )

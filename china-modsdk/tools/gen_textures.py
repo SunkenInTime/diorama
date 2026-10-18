@@ -201,8 +201,8 @@ def main(argv=None):
         args.force,
         written,
     )
-    ensure(os.path.join(ui, "diorama_badge.png"), badge, 32, args.force, written)
-    ensure(os.path.join(ui, "diorama_grid.png"), grid, 16, args.force, written)
+    ensure(os.path.join(ui, "diorama_badge.png"), badge(), 32, args.force, written)
+    ensure(os.path.join(ui, "diorama_grid.png"), grid(), 16, args.force, written)
     ensure(
         os.path.join(ui, "diorama_tile.png"),
         solid((255, 255, 255), 255),
@@ -275,7 +275,7 @@ def main(argv=None):
     )
 
     for pack in (args.out, BP):
-        ensure(os.path.join(pack, "pack_icon.png"), pack_icon, 64, args.force, written)
+        ensure(os.path.join(pack, "pack_icon.png"), pack_icon(), 64, args.force, written)
 
     for path in written:
         print("wrote %s" % (path,))
