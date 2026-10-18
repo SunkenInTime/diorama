@@ -28,6 +28,10 @@ Saved maps and waypoints live in `.minecraft/diorama/`, one folder per world. On
 - `B` adds a waypoint where you stand, and `U` opens the waypoint list.
 - `=` and `-` zoom the minimap. Map settings and hiding the minimap have keys too, unbound by default.
 
+## Community ports
+
+- [Diorama NeoForge](https://github.com/gilvex/diorama-neoforge) — an unofficial Minecraft 1.21.1 / NeoForge port. Downloads, screenshots, test notes and support are available in its separate repository.
+
 ## Building
 
 Needs JDK 25. Gradle downloads everything else.
