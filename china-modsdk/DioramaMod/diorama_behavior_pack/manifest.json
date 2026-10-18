@@ -1,0 +1,24 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Diorama \u5730\u56fe\u884c\u4e3a\u5305",
+    "description": "Diorama angled voxel map, waypoints, radar. China Edition ModSDK port of the Fabric mod (MIT).",
+    "uuid": "7c1f0a52-3b6e-4d18-9a4f-2e5b8c0d41a7",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {
+      "description": "Diorama behavior data (Python scripts live in dioramaScripts/)",
+      "type": "data",
+      "uuid": "b3d94c61-0f2a-47c5-8e11-6a7d5f2c98b4",
+      "version": [0, 1, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["Diorama China ModSDK port"],
+    "license": "MIT",
+    "url": "https://github.com/SunkenInTime/diorama",
+    "product_type": "mod"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "ui_defs": [
+    "ui/diorama_common.json",
+    "ui/diorama_hud.json",
+    "ui/diorama_map.json",
+    "ui/diorama_waypoints.json",
+    "ui/diorama_settings.json"
+  ]
+}

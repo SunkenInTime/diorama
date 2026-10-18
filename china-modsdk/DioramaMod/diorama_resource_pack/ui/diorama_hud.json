@@ -1,0 +1,14 @@
+{
+  "diorama_hud": {
+    "type": "panel",
+    "size": ["28%", "28%"],
+    "anchor_from": "top_right",
+    "anchor_to": "top_right",
+    "offset": [-12, 12],
+    "controls": [
+      { "map_frame": { "type": "image", "texture": "textures/ui/diorama_badge", "size": ["100%", "100%"] } },
+      { "tile_grid": { "type": "stack_grid", "collection_name": "diorama_tiles", "size": ["88%", "88%"], "offset": ["6%", "6%"], "grid_dimensions": [16, 16], "bindings": [{ "binding_name": "#diorama_tile_payload", "binding_type": "collection", "binding_collection_name": "diorama_tiles", "binding_condition": "always_when_visible" }] } },
+      { "badge": { "type": "label", "text": "Diorama", "color": [1, 0.75, 0.2], "anchor_from": "bottom_right", "anchor_to": "bottom_right" } }
+    ]
+  }
+}

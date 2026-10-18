@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Diorama \u5730\u56fe\u8d44\u6e90\u5305",
+    "description": "Diorama UI, textures and localisation for the China Edition ModSDK port.",
+    "uuid": "4a8e2d70-95c3-4b1f-8d26-71f0c3b5e9a2",
+    "version": [0, 1, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {
+      "description": "Diorama resource data",
+      "type": "resources",
+      "uuid": "e6b1f834-2c47-4d90-a5b3-8f21d6c07e35",
+      "version": [0, 1, 0]
+    }
+  ],
+  "metadata": {
+    "authors": ["Diorama China ModSDK port"],
+    "license": "MIT",
+    "url": "https://github.com/SunkenInTime/diorama"
+  },
+  "dependencies": [
+    {
+      "uuid": "7c1f0a52-3b6e-4d18-9a4f-2e5b8c0d41a7",
+      "version": [0, 1, 0]
+    }
+  ]
+}

@@ -12,7 +12,9 @@ const state = new Map();
 
 function playerKey(player) { return player.name; }
 function readJson(key, fallback) {
-  return safe(() => JSON.parse(String(world.getDynamicProperty(key) ?? "")), fallback) ?? fallback;
+  const raw = safe(() => world.getDynamicProperty(key));
+  if (typeof raw !== "string" || raw.length === 0) return fallback;
+  try { return JSON.parse(raw) ?? fallback; } catch (_) { return fallback; }
 }
 function writeJson(key, value) { safe(() => world.setDynamicProperty(key, JSON.stringify(value))); }
 function settings() { return readJson(SETTINGS_KEY, { hud: true, range: 64, pitch: 50 }); }

@@ -41,3 +41,12 @@ replay_*.log
 
 # game logs from local runs
 logs/
+
+# Python test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Bedrock package build outputs
+bedrock-addon/dist/
+china-modsdk/build/

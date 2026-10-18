@@ -87,8 +87,9 @@ RP_PACK="$OUT/diorama_rp.mcpack"
 rm -f "$ADDON" "$BP_PACK" "$RP_PACK"
 
 ( cd "$STAGE" && zip -rq -X "$ADDON" behavior_packs resource_packs )
-( cd "$STAGE" && zip -rq -X "$BP_PACK" behavior_packs )
-( cd "$STAGE" && zip -rq -X "$RP_PACK" resource_packs )
+# A .mcpack is itself one pack: manifest.json must be at archive root.
+( cd "$BP_DIR" && zip -rq -X "$BP_PACK" . -x '*.DS_Store' -x '__MACOSX/*' -x '*.bak' -x '*/node_modules/*' -x '*.git*' )
+( cd "$RP_DIR" && zip -rq -X "$RP_PACK" . -x '*.DS_Store' -x '__MACOSX/*' -x '*.bak' -x '*/node_modules/*' -x '*.git*' )
 
 log "完成:"
 for f in "$ADDON" "$BP_PACK" "$RP_PACK"; do
