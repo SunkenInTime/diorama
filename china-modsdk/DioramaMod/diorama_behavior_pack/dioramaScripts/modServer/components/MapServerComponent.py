@@ -63,13 +63,28 @@ class MapServerComponent(object):
 
     # -- settings ------------------------------------------------------
 
+    @staticmethod
+    def _sender_id(args):
+        args = args or {}
+        return (args.get("__playerId") or args.get("playerId") or
+                args.get("__id") or args.get("entityId") or args.get("id"))
+
     def on_settings(self, args):
-        player_id = args.get("playerId") or args.get("__playerId")
+        player_id = self._sender_id(args)
         if player_id:
             self._settings[player_id] = args.get("settings") or {}
 
     def _view_for(self, player_id):
         return ServerSettingsView(self._settings.get(player_id))
+
+    def _dimension_for(self, player_id):
+        resolver = getattr(self.server, "dimension_of", None)
+        if player_id and callable(resolver):
+            try:
+                return int(resolver(player_id))
+            except Exception:
+                pass
+        return self.server.dimension_id
 
     def _source_for(self, dimension_id):
         source = self._sources.get(dimension_id)
@@ -83,7 +98,9 @@ class MapServerComponent(object):
                 min_y=self.server.min_y,
                 max_y=self.server.max_y,
                 roof=self.server.roof_for(dimension_id),
-                top_y=self.server.top_y,
+                top_y=(self.server.bounds_for(dimension_id)[1] - 1
+                       if callable(getattr(self.server, "bounds_for", None))
+                       else self.server.top_y),
             )
             self._sources[dimension_id] = source
         return source
@@ -91,7 +108,7 @@ class MapServerComponent(object):
     # -- picks ---------------------------------------------------------
 
     def on_pick_request(self, args):
-        player_id = args.get("playerId") or args.get("__playerId")
+        player_id = self._sender_id(args)
         try:
             u = float(args.get("u", 0.0))
             v = float(args.get("v", 0.0))
@@ -103,7 +120,8 @@ class MapServerComponent(object):
         layer = int(layer)
         view = self._view_for(player_id)
         projection = Projection(view.pitch_degrees)
-        source = self._source_for(self.server.dimension_id)
+        dimension_id = self._dimension_for(player_id)
+        source = self._source_for(dimension_id)
         spot = pick.standing_spot(
             source,
             u,
@@ -125,7 +143,7 @@ class MapServerComponent(object):
     # -- tiles ---------------------------------------------------------
 
     def on_tile_request(self, args):
-        player_id = args.get("playerId") or args.get("__playerId")
+        player_id = self._sender_id(args)
         key = self._key_from_args(args)
         if key is None:
             return
@@ -173,7 +191,8 @@ class MapServerComponent(object):
         self.bake_and_send(player_id, key)
 
     def bake_and_send(self, player_id, key):
-        cache_key = (self.server.dimension_id, key.cache_key())
+        dimension_id = self._dimension_for(player_id)
+        cache_key = (dimension_id, key.cache_key())
         cached = self._tiles.get(cache_key)
         if cached is not None:
             if player_id:
@@ -185,7 +204,7 @@ class MapServerComponent(object):
         try:
             image = bake_tile(
                 key,
-                self._source_for(self.server.dimension_id),
+                self._source_for(dimension_id),
                 style=style_for({"pitch_degrees": view.pitch_degrees}),
                 geometry=geometry,
                 projection=Projection(view.pitch_degrees),

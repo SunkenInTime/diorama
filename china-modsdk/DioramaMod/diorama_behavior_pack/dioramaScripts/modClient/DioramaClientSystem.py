@@ -236,8 +236,10 @@ class DioramaClientSystem(ClientSystem):
             pos = self.player_position()
             if pos is None:
                 return
-            key = TileKey(TileKey.SURFACE, 0, 0, 0).tile_for(pos[0], pos[2], GEOMETRY)
-            self.map.request_pick(pos[0], pos[2], key.layer)
+            projection = self.projection()
+            u, v = projection.world_to_map(pos[0], pos[1], pos[2])
+            key = TileKey(TileKey.SURFACE, 0, 0, 0).tile_for(u, v, GEOMETRY)
+            self.map.request_pick(u, v, key.layer)
         elif verb == "share":
             nearest = self.waypoints.nearest_to_player()
             if nearest is not None:
@@ -313,7 +315,7 @@ class DioramaClientSystem(ClientSystem):
     def on_map_tap(self, u, v):
         pos = self.map.local_standing_spot(u, v)
         if pos is not None:
-            self.waypoints.add_at(u, v, pos[2], name=None)
+            self.waypoints.add_at(pos[0], pos[1], pos[2], name=None)
             self.hud.notice("\u5df2\u5728 %d, %d, %d \u6dfb\u52a0\u8def\u5f84\u70b9" % pos)
         else:
             self.map.request_pick(u, v)

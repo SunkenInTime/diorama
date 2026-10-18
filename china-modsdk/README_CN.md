@@ -7,8 +7,8 @@
 
 - `diorama_core/`：标准库纯 Python 核心与 101 个离线测试，包含斜角投影、DDA 体素采样、LOD、MipMap、路径点与雷达几何。
 - `DioramaMod/diorama_behavior_pack/dioramaScripts/modCore/`：可放入 ModSDK 行为包的核心移植，包含 baker、palette、block source、mipmaps、pick、waypoint store 等。
-- `modClient/main.py`：客户端适配边界；UiInitFinished 后创建 HUD，接收服务端 tile payload。
-- `modServer/main.py`：服务端采样/通知适配边界；具体 SDK 事件名集中在此处替换。
+- `modClient/DioramaClientSystem.py`：客户端系统与 UI 适配；UiInitFinished 后创建 HUD，接收服务端 tile payload。
+- `modServer/DioramaServerSystem.py`：服务端系统与采样/通知适配；具体 SDK 事件名集中在此处替换。
 - `diorama_resource_pack/ui/diorama_hud.json`：16×16 collection binding 的 HUD 网格原型。
 
 ## 测试

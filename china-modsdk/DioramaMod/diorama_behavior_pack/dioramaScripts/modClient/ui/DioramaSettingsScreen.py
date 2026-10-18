@@ -85,9 +85,9 @@ class DioramaSettingsScreen(ScreenNode):
         """Refresh every label from the current settings object."""
         for path, field in TOGGLES:
             value = getattr(settings, field, None)
-            ui_base.set_text(self, path, self._on_off(value))
+            ui_base.set_text(self, path + "/label", self._on_off(value))
         for path, field, cycler in VALUES:
-            ui_base.set_text(self, path, "%s" % (getattr(settings, field, "?"),))
+            ui_base.set_text(self, path + "/label", "%s" % (getattr(settings, field, "?"),))
         ui_base.set_text(self, "/summary_label", _summary(settings))
         return True
 

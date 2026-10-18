@@ -71,9 +71,9 @@ the only source, and where sources disagree (for example on whether
 |---|---|---|---|
 | Behaviour pack needs an `entities/` directory even with no entities | `entities/README.md` | `tools/validate.py` errors if absent | The pack may not load; keep the directory |
 | Python scripts live in `behavior_pack/<scriptPackage>/` with `modMain.py` at that root | whole scaffold | Fixed by the layout | Move `dioramaScripts/` and update `modCommon/modConfig.py` paths |
-| UI definition manifest is `ui/_ui_def.json` | resource pack | Validator accepts `_ui_defs.json` too and warns | Rename/copy the file |
+| UI definition manifest is `ui/_ui_defs.json` | resource pack | Validator accepts `_ui_def.json` as an alternate and warns | Rename/copy the file |
 | Several UI files may share one namespace | `ui/*.json` | Validator checks cross-namespace references | Rename namespace keys and `RegisterUI` definitions together |
-| `texts/*.lang` are JSON objects | resource pack | Validator enforces JSON + matching keys | Convert to `key=value` if your build is old |
+| `texts/*.lang` use `key=value` lines | resource pack | Validator parses key/value lines and checks matching keys | Keep comments with `##`; do not convert to JSON |
 | Python runtime is 2.7 | all scripts | Every module is 2.7/3-compatible | Py3-only builds work unchanged apart from `unicode`/`long` shims |
 
 ## Deliberately **not** assumed

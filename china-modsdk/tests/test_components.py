@@ -39,13 +39,14 @@ try:
     from dioramaScripts.modServer.components.RadarServerComponent import RadarServerComponent
 
     AVAILABLE = True
+    SURFACE = TileKey.SURFACE
 except ImportError as exc:  # pragma: no cover - only when the tree is incomplete
     IMPORT_ERROR = exc
     AVAILABLE = False
+    SURFACE = None
 
 STONE = "minecraft:stone"
 AIR = "minecraft:air"
-SURFACE = TileKey.SURFACE
 
 
 # -- fake engine -----------------------------------------------------------

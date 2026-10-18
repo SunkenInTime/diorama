@@ -51,9 +51,10 @@ style resolves.
   into the `hud` namespace. It only *adds* two controls and one `root_panel`
   modification; it never redefines vanilla controls. Delete the file to remove the
   badge.
-- Bedrock's stable Script API cannot upload runtime textures, so the angled voxel
-  map itself is built in the world and viewed through a locked camera; this pack
-  supplies only static chrome. Dynamic readouts (coordinates, waypoint distance)
-  arrive through the actionbar/title from the BP scripts.
+- Bedrock's stable Script API cannot upload runtime textures. This legacy Add-On
+  does **not** implement the angled voxel map; it supplies static chrome and
+  waypoint visuals only. Dynamic readouts (coordinates, waypoint distance) arrive
+  through the actionbar/title from the BP scripts. The China ModSDK implementation
+  lives under `china-modsdk/`.
 - Custom languages are not registered; `languages.json` lists only `en_US` and
   `zh_CN`, both of which ship.

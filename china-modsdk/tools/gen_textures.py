@@ -270,7 +270,7 @@ def main(argv=None):
         os.path.join(ui, "diorama_atlas.png"),
         solid((0, 0, 0), 0),
         16,
-        args.force,
+        False,  # bake_atlas.py owns this file; never clobber a baked atlas
         written,
     )
 

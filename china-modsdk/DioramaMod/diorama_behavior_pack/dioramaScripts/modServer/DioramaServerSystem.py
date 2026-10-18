@@ -125,6 +125,7 @@ class DioramaServerSystem(ServerSystem):
         self._last_tick = now
         self._tick_count += 1
         self.map.tick()
+        self.radar.tick()
 
     def on_chat(self, args):
         safe("ServerChatEvent", self._handle_chat, args)
