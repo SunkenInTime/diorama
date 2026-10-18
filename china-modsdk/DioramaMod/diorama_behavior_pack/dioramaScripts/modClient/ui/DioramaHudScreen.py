@@ -15,6 +15,9 @@ from dioramaScripts.modClient.ui import ui_base
 
 ScreenNode = ui_base.screen_node_cls()
 
+#: Content root declared in diorama_hud.json's $screen_content.
+CONTENT_ROOT = "/hud_root"
+
 COMPASS_DIRECTIONS = ("n", "ne", "e", "se", "s", "sw", "w", "nw")
 
 #: Where each corner puts the frame, as an ``(anchor, offset sign)`` pair.
@@ -30,6 +33,7 @@ class DioramaHudScreen(ScreenNode):
     """Always-on HUD: the minimap frame plus coordinates, compass and biome."""
 
     USES_BASE_SCREEN = True
+    CONTENT_ROOT = CONTENT_ROOT
 
     def __init__(self, namespace, name, param):
         ScreenNode.__init__(self, namespace, name, param)

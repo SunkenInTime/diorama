@@ -19,6 +19,9 @@ from dioramaScripts.modClient.ui import ui_base
 
 ScreenNode = ui_base.screen_node_cls()
 
+#: Content root declared in diorama_map.json's $screen_content.
+CONTENT_ROOT = "/map_root"
+
 #: Marker texture per waypoint kind / radar kind.
 WAYPOINT_SPRITE = "textures/ui/diorama_marker_waypoint"
 DEATH_SPRITE = "textures/ui/diorama_marker_death"
@@ -32,6 +35,7 @@ class DioramaMapScreen(ScreenNode):
     """Pan/zoom map with markers."""
 
     USES_BASE_SCREEN = True
+    CONTENT_ROOT = CONTENT_ROOT
 
     def __init__(self, namespace, name, param):
         ScreenNode.__init__(self, namespace, name, param)

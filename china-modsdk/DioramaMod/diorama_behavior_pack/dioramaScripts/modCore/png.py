@@ -88,10 +88,17 @@ def write_indexed_square(path, size, colour_fn):
     return write_png(path, size, size, rows)
 
 
-def abgr_rows(pixels, size):
-    """Turn a baker pixel buffer (packed ABGR) into PNG-ordered RGBA rows."""
+def abgr_rows(pixels, size, height=None):
+    """Turn a baker pixel buffer (packed ABGR) into PNG-ordered RGBA rows.
+
+    ``size`` is the width; ``height`` defaults to a square image, which is what
+    a single tile is. A stitched atlas is still square today, but the parameter
+    keeps the door open for an oblong one.
+    """
+    if height is None:
+        height = size
     rows = []
-    for y in range(size):
+    for y in range(height):
         base = y * size
         row = []
         for x in range(size):

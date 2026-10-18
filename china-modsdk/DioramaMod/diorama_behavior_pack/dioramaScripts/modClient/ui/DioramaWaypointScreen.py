@@ -15,6 +15,9 @@ from dioramaScripts.modClient.ui import ui_base
 
 ScreenNode = ui_base.screen_node_cls()
 
+#: Content root declared in diorama_waypoints.json's $screen_content.
+CONTENT_ROOT = "/waypoints_root"
+
 ROW_LIMIT = 24
 
 
@@ -22,6 +25,7 @@ class DioramaWaypointScreen(ScreenNode):
     """The waypoint list and its actions."""
 
     USES_BASE_SCREEN = True
+    CONTENT_ROOT = CONTENT_ROOT
 
     def __init__(self, namespace, name, param):
         ScreenNode.__init__(self, namespace, name, param)
@@ -38,17 +42,17 @@ class DioramaWaypointScreen(ScreenNode):
 
     def install_handlers(self, on_select, on_add, on_share, on_import, on_delete, on_close, on_recolor=None):
         if on_add is not None:
-            ui_base.on_touch_up(self, "/add_button", self._guard(on_add))
+            ui_base.on_touch_up(self, "/action_row/add_button", self._guard(on_add))
         if on_share is not None:
-            ui_base.on_touch_up(self, "/share_button", self._guard(lambda: on_share(self.selected_id)))
+            ui_base.on_touch_up(self, "/action_row/share_button", self._guard(lambda: on_share(self.selected_id)))
         if on_import is not None:
-            ui_base.on_touch_up(self, "/import_button", self._guard(lambda: on_import(self.selected_id)))
+            ui_base.on_touch_up(self, "/action_row/import_button", self._guard(lambda: on_import(self.selected_id)))
         if on_delete is not None:
-            ui_base.on_touch_up(self, "/delete_button", self._guard(lambda: on_delete(self.selected_id)))
+            ui_base.on_touch_up(self, "/action_row/delete_button", self._guard(lambda: on_delete(self.selected_id)))
         if on_recolor is not None:
-            ui_base.on_touch_up(self, "/recolor_button", self._guard(lambda: on_recolor(self.selected_id)))
+            ui_base.on_touch_up(self, "/action_row/recolor_button", self._guard(lambda: on_recolor(self.selected_id)))
         if on_close is not None:
-            ui_base.on_touch_up(self, "/close_button", self._guard(on_close))
+            ui_base.on_touch_up(self, "/action_row/close_button", self._guard(on_close))
         self._on_select = on_select
 
     def _guard(self, callback):

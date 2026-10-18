@@ -65,11 +65,16 @@ def minimap_screen_cls():
 
 
 def resolve(screen, path, uses_base_screen=True):
-    """Full control path for a screen that may inherit ``common.base_screen``."""
+    """Full control path for a screen that may inherit ``common.base_screen``.
+
+    A screen whose JSON uses ``"$screen_content": "diorama.<root>"`` exposes its
+    controls at ``BASE_SCREEN_PATH + "/<root>" + path``; each screen declares
+    that root as ``CONTENT_ROOT`` so the rest of the Python can use short paths.
+    """
     if not path.startswith("/"):
         path = "/" + path
     if uses_base_screen and getattr(screen, "USES_BASE_SCREEN", True):
-        return modConfig.BASE_SCREEN_PATH + path
+        return modConfig.BASE_SCREEN_PATH + getattr(screen, "CONTENT_ROOT", "") + path
     return path
 
 
