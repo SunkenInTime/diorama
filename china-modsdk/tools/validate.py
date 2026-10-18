@@ -10,7 +10,8 @@ Checks, in the order they are useful when something is wrong:
    on a plain PC).
 2. **Manifests** - JSON parses, required fields exist, UUIDs are RFC 4122 and
    unique, versions are three non-negative ints, module types are known.
-3. **JSON UI** - every file in ``_ui_def.json`` (or ``_ui_defs.json``) exists,
+3. **JSON UI** - every file in ``_ui_defs.json`` (the canonical name; the
+   single-``f`` ``_ui_def.json`` is accepted with a warning) exists,
    parses, declares a namespace, and each ``texture`` it references resolves to
    a real file; each ``@<namespace>.<control>`` reference resolves to a control
    defined somewhere in the same namespace.
@@ -336,14 +337,17 @@ def collect_paths(data, templates, namespace):
 
 def check_ui(report):
     ui_dir = os.path.join(RP, "ui")
-    defs_path = os.path.join(ui_dir, "_ui_def.json")
+    defs_path = os.path.join(ui_dir, "_ui_defs.json")
     if not os.path.isfile(defs_path):
-        alt = os.path.join(ui_dir, "_ui_defs.json")
+        alt = os.path.join(ui_dir, "_ui_def.json")
         if os.path.isfile(alt):
-            report.warn("ui", "using _ui_defs.json; the China Edition guide names it _ui_def.json")
+            report.warn(
+                "ui",
+                "using _ui_def.json; the China Edition guide names it _ui_defs.json",
+            )
             defs_path = alt
         else:
-            report.error("ui", "neither _ui_def.json nor _ui_defs.json exists")
+            report.error("ui", "neither _ui_defs.json nor _ui_def.json exists")
             return
     defs = read_json(defs_path, report, "ui:defs")
     entries = []
@@ -364,7 +368,7 @@ def check_ui(report):
         path = os.path.join(RP, relative.replace("/", os.sep))
         where = "ui:%s" % (relative,)
         if not os.path.isfile(path):
-            report.error(where, "listed in _ui_def.json but not found on disk")
+            report.error(where, "listed in _ui_defs.json but not found on disk")
             continue
         data = read_json(path, report, where)
         if data is None:
@@ -428,7 +432,7 @@ def check_ui(report):
     for screen, paths in EXPECTED_CONTROLS.items():
         data = files.get(screen)
         if data is None:
-            report.error("ui:layout", "%s.json is not listed in _ui_def.json" % (screen,))
+            report.error("ui:layout", "%s.json is not listed in _ui_defs.json" % (screen,))
             continue
         defined = collect_paths(
             dict((k, v) for k, v in data.items()), templates, data.get("namespace") or "?"

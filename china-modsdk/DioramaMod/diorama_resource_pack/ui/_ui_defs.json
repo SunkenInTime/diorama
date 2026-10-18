@@ -4,6 +4,7 @@
     "ui/diorama_hud.json",
     "ui/diorama_map.json",
     "ui/diorama_waypoints.json",
-    "ui/diorama_settings.json"
+    "ui/diorama_settings.json",
+    "ui/diorama_label.json"
   ]
 }

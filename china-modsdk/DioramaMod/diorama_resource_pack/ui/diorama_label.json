@@ -1,0 +1,29 @@
+{
+  "namespace": "diorama",
+
+  "main@common.base_screen": {
+    "$screen_content": "diorama.label_root",
+    "absorbs_input": false,
+    "always_accepts_input": false,
+    "force_render_below": true,
+    "is_showing_menu": false,
+    "render_game_behind": true,
+    "render_only_when_topmost": false,
+    "should_steal_mouse": false
+  },
+
+  "label_root": {
+    "type": "panel",
+    "size": ["100%", "100%"],
+    "controls": [
+      { "label_icon@diorama.marker_icon": {} },
+      { "label_text@diorama.text_white": {
+          "text": "Waypoint",
+          "anchor_from": "top_middle",
+          "anchor_to": "bottom_middle",
+          "offset": [0, -2]
+        }
+      }
+    ]
+  }
+}
