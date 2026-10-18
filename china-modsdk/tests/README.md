@@ -64,11 +64,18 @@ repo or be called `modCore`.
 | `test_map_style.py` | `map_style` | clamps, sun/shadow vectors, fluent builders, serialisation |
 | `test_settings.py` | `settings` | clamped player settings, derived zoom/style, server view |
 | `test_png.py` | `png` | PNG bytes re-parsed and decoded with an independent chunk walker |
+| `test_scaffold.py` | scaffold tree (not `modCore`) | pack manifests and UUID uniqueness, `_ui_defs.json` ↔ UI files, referenced textures exist, lang parity, `tools/validate.py --strict` |
 
 The projection, DDA/heightmap sampling, LOD/mipmap and waypoint maths the port
 needs are all exercised. Lighting, shading and rendering are only touched
 through the router-level `baker`/`radar` tests; they need game data to check
 further.
+
+`test_scaffold.py` is deliberately *not* written against the core interface: it
+reads `DioramaMod/` and `tools/` as files, so it keeps passing under
+`--core my_core` and catches a renamed UI control or a missing texture even when
+the maths are fine. It also runs the validator as a subprocess, which is the
+same gate the release checklist uses.
 
 All generated files (PNG output, waypoint stores) go to `tempfile` directories
 and are removed by the tests.
