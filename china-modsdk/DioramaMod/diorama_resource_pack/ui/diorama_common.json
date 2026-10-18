@@ -1,0 +1,87 @@
+{
+  "namespace": "diorama",
+
+  "text_white": {
+    "type": "label",
+    "color": [1.0, 1.0, 1.0],
+    "shadow": true,
+    "font_type": "smooth",
+    "font_size": "normal"
+  },
+
+  "text_dim": {
+    "type": "label",
+    "color": [0.78, 0.80, 0.84],
+    "shadow": true,
+    "font_type": "smooth",
+    "font_size": "small"
+  },
+
+  "text_gold": {
+    "type": "label",
+    "color": [1.0, 0.76, 0.24],
+    "shadow": true,
+    "font_type": "smooth",
+    "font_size": "normal"
+  },
+
+  "panel_solid": {
+    "type": "image",
+    "texture": "textures/ui/diorama_panel",
+    "size": ["100%", "100%"],
+    "nineslice_size": 4,
+    "layer": -1,
+    "alpha": 0.92
+  },
+
+  "button_default": {
+    "type": "image",
+    "texture": "textures/ui/diorama_button",
+    "size": ["100%", "100%"],
+    "nineslice_size": 3
+  },
+
+  "button_hover": {
+    "type": "image",
+    "texture": "textures/ui/diorama_button_hover",
+    "size": ["100%", "100%"],
+    "nineslice_size": 3
+  },
+
+  "button_label": {
+    "type": "label",
+    "color": [1.0, 1.0, 1.0],
+    "shadow": true,
+    "anchor_from": "center",
+    "anchor_to": "center",
+    "font_type": "smooth"
+  },
+
+  "marker_icon": {
+    "type": "image",
+    "texture": "textures/ui/diorama_marker_waypoint",
+    "size": [12, 12],
+    "anchor_from": "center",
+    "anchor_to": "center",
+    "layer": 3
+  },
+
+  "diorama_button": {
+    "type": "button",
+    "size": [96, 24],
+    "controls": [
+      { "default@diorama.button_default": {} },
+      { "hover@diorama.button_hover": { "visible": false } },
+      { "label@diorama.button_label": { "text": "Button" } }
+    ]
+  },
+
+  "diorama_row": {
+    "type": "panel",
+    "size": ["100%", 20],
+    "controls": [
+      { "row_label@diorama.text_dim": { "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } },
+      { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "namespace": "diorama",
+
+  "main@common.base_screen": {
+    "$screen_content": "diorama.map_root",
+    "absorbs_input": true,
+    "force_render_below": false,
+    "is_showing_menu": true,
+    "render_game_behind": true,
+    "render_only_when_topmost": true,
+    "should_steal_mouse": false
+  },
+
+  "map_root": {
+    "type": "panel",
+    "size": ["100%", "100%"],
+    "controls": [
+      { "backdrop@diorama.panel_solid": { "alpha": 0.86 } },
+      { "title_label@diorama.text_gold": { "anchor_from": "top_middle", "anchor_to": "top_middle", "offset": [0, 6] } },
+
+      { "map_panel": {
+          "type": "button",
+          "size": ["80%", "74%"],
+          "anchor_from": "center",
+          "anchor_to": "center",
+          "offset": [0, 0],
+          "controls": [
+            { "atlas": {
+                "type": "image",
+                "texture": "textures/ui/diorama_atlas",
+                "size": [512, 512],
+                "anchor_from": "center",
+                "anchor_to": "center",
+                "layer": 0
+              }
+            },
+            { "grid": {
+                "type": "image",
+                "texture": "textures/ui/diorama_grid",
+                "size": ["100%", "100%"],
+                "layer": 1,
+                "visible": false
+              }
+            },
+            { "markers": {
+                "type": "panel",
+                "size": ["100%", "100%"],
+                "layer": 2,
+                "controls": [
+                  { "marker_template": {
+                      "type": "image",
+                      "texture": "textures/ui/diorama_marker_waypoint",
+                      "size": [12, 12],
+                      "anchor_from": "center",
+                      "anchor_to": "center",
+                      "visible": false,
+                      "controls": [
+                        { "label@diorama.text_dim": { "anchor_from": "top_middle", "anchor_to": "bottom_middle", "offset": [0, -2] } }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+
+      { "footer_label@diorama.text_dim": { "anchor_from": "bottom_middle", "anchor_to": "bottom_middle", "offset": [0, -34] } },
+
+      { "button_row": {
+          "type": "panel",
+          "size": ["80%", 24],
+          "anchor_from": "bottom_middle",
+          "anchor_to": "bottom_middle",
+          "offset": [0, -8],
+          "controls": [
+            { "zoom_in_button@diorama.diorama_button": { "size": [44, 22], "offset": [0, 0], "controls": [{ "label@diorama.button_label": { "text": "+" } }] } },
+            { "zoom_out_button@diorama.diorama_button": { "size": [44, 22], "offset": [50, 0], "controls": [{ "label@diorama.button_label": { "text": "-" } }] } },
+            { "recenter_button@diorama.diorama_button": { "size": [70, 22], "offset": [100, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5b9a\u4f4d" } }] } },
+            { "waypoint_button@diorama.diorama_button": { "size": [70, 22], "offset": [176, 0], "controls": [{ "label@diorama.button_label": { "text": "\u8def\u5f84\u70b9" } }] } },
+            { "settings_button@diorama.diorama_button": { "size": [70, 22], "offset": [252, 0], "controls": [{ "label@diorama.button_label": { "text": "\u8bbe\u7f6e" } }] } },
+            { "close_button@diorama.diorama_button": { "size": [56, 22], "offset": [328, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5173\u95ed" } }] } }
+          ]
+        }
+      }
+    ]
+  }
+}

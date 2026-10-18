@@ -1,14 +1,69 @@
 {
-  "diorama_hud": {
+  "namespace": "diorama",
+
+  "main@common.base_screen": {
+    "$screen_content": "diorama.hud_root",
+    "absorbs_input": false,
+    "always_accepts_input": false,
+    "force_render_below": true,
+    "is_showing_menu": false,
+    "render_game_behind": true,
+    "render_only_when_topmost": false,
+    "should_steal_mouse": false
+  },
+
+  "hud_root": {
     "type": "panel",
-    "size": ["28%", "28%"],
+    "size": ["100%", "100%"],
+    "layer": 1,
+    "controls": [
+      { "minimap@diorama.minimap_panel": {} },
+      { "coord_label@diorama.text_white": { "anchor_from": "top_left", "anchor_to": "top_left", "offset": [8, 30] } },
+      { "bearing_label@diorama.text_gold": { "anchor_from": "top_left", "anchor_to": "top_left", "offset": [8, 46] } },
+      { "biome_label@diorama.text_dim": { "anchor_from": "top_left", "anchor_to": "top_left", "offset": [8, 62] } },
+      { "waypoint_label@diorama.text_white": { "anchor_from": "bottom_middle", "anchor_to": "bottom_middle", "offset": [0, -40] } },
+      { "tile_status_label@diorama.text_dim": { "anchor_from": "bottom_right", "anchor_to": "bottom_right", "offset": [-6, -6] } },
+      { "notice_label@diorama.text_gold": { "anchor_from": "bottom_middle", "anchor_to": "bottom_middle", "offset": [0, -58] } },
+      { "add_button@diorama.diorama_button": { "size": [70, 20], "anchor_from": "top_left", "anchor_to": "top_left", "offset": [8, 78], "controls": [{ "label@diorama.button_label": { "text": "+ \u8def\u5f84\u70b9" } }] } },
+      { "hide_button@diorama.diorama_button": { "size": [70, 20], "anchor_from": "top_left", "anchor_to": "top_left", "offset": [8, 100], "controls": [{ "label@diorama.button_label": { "text": "\u9690\u85cf" } }] } }
+    ]
+  },
+
+  "minimap_panel": {
+    "type": "panel",
+    "size": [128, 128],
     "anchor_from": "top_right",
     "anchor_to": "top_right",
-    "offset": [-12, 12],
+    "offset": [-8, 8],
+    "layer": 1,
     "controls": [
-      { "map_frame": { "type": "image", "texture": "textures/ui/diorama_badge", "size": ["100%", "100%"] } },
-      { "tile_grid": { "type": "stack_grid", "collection_name": "diorama_tiles", "size": ["88%", "88%"], "offset": ["6%", "6%"], "grid_dimensions": [16, 16], "bindings": [{ "binding_name": "#diorama_tile_payload", "binding_type": "collection", "binding_collection_name": "diorama_tiles", "binding_condition": "always_when_visible" }] } },
-      { "badge": { "type": "label", "text": "Diorama", "color": [1, 0.75, 0.2], "anchor_from": "bottom_right", "anchor_to": "bottom_right" } }
+      { "map_frame@diorama.panel_solid": {} },
+      { "tile_grid": {
+          "type": "stack_grid",
+          "collection_name": "diorama_tiles",
+          "size": ["88%", "88%"],
+          "offset": ["6%", "6%"],
+          "grid_dimensions": [16, 16],
+          "bindings": [
+            {
+              "binding_name": "#diorama_tile_payload",
+              "binding_type": "collection",
+              "binding_collection_name": "diorama_tiles",
+              "binding_condition": "always_when_visible"
+            }
+          ]
+        }
+      },
+      { "compass": {
+          "type": "image",
+          "texture": "textures/ui/diorama_compass_n",
+          "size": [18, 18],
+          "anchor_from": "top_middle",
+          "anchor_to": "top_middle",
+          "offset": [0, -9],
+          "layer": 2
+        }
+      }
     ]
   }
 }

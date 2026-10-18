@@ -1,0 +1,65 @@
+{
+  "namespace": "diorama",
+
+  "main@common.base_screen": {
+    "$screen_content": "diorama.settings_root",
+    "absorbs_input": true,
+    "force_render_below": false,
+    "is_showing_menu": true,
+    "render_game_behind": true,
+    "render_only_when_topmost": true,
+    "should_steal_mouse": false
+  },
+
+  "settings_root": {
+    "type": "panel",
+    "size": ["100%", "100%"],
+    "controls": [
+      { "backdrop@diorama.panel_solid": { "alpha": 0.9 } },
+      { "title_label@diorama.text_gold": { "text": "Diorama \u00b7 \u8bbe\u7f6e", "anchor_from": "top_middle", "anchor_to": "top_middle", "offset": [0, 6] } },
+
+      { "rows": {
+          "type": "panel",
+          "size": ["76%", "74%"],
+          "anchor_from": "center",
+          "anchor_to": "center",
+          "offset": [0, -6],
+          "controls": [
+            { "row_minimap@diorama.diorama_row": { "offset": [0, 0], "controls": [{ "row_label@diorama.text_dim": { "text": "\u8ff7\u4f60\u5730\u56fe", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_compass@diorama.diorama_row": { "offset": [0, 22], "controls": [{ "row_label@diorama.text_dim": { "text": "\u6307\u5357\u9488", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_coordinates@diorama.diorama_row": { "offset": [0, 44], "controls": [{ "row_label@diorama.text_dim": { "text": "\u5750\u6807", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_biome@diorama.diorama_row": { "offset": [0, 66], "controls": [{ "row_label@diorama.text_dim": { "text": "\u751f\u7269\u7fa4\u7cfb", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_radar_players@diorama.diorama_row": { "offset": [0, 88], "controls": [{ "row_label@diorama.text_dim": { "text": "\u96f7\u8fbe \u00b7 \u73a9\u5bb6", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_radar_hostile@diorama.diorama_row": { "offset": [0, 110], "controls": [{ "row_label@diorama.text_dim": { "text": "\u96f7\u8fbe \u00b7 \u654c\u5bf9", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_radar_neutral@diorama.diorama_row": { "offset": [0, 132], "controls": [{ "row_label@diorama.text_dim": { "text": "\u96f7\u8fbe \u00b7 \u4e2d\u7acb", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_radar_passive@diorama.diorama_row": { "offset": [0, 154], "controls": [{ "row_label@diorama.text_dim": { "text": "\u96f7\u8fbe \u00b7 \u53cb\u597d", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_range@diorama.diorama_row": { "offset": [0, 176], "controls": [{ "row_label@diorama.text_dim": { "text": "\u96f7\u8fbe\u8303\u56f4", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "value@diorama.diorama_button": { "size": [46, 18], "anchor_from": "right_middle", "anchor_to": "right_middle", "controls": [{ "label@diorama.button_label": { "text": "32" } }] } }] } },
+            { "row_size@diorama.diorama_row": { "offset": [0, 198], "controls": [{ "row_label@diorama.text_dim": { "text": "\u8ff7\u4f60\u5730\u56fe\u5c3a\u5bf8", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "value@diorama.diorama_button": { "size": [46, 18], "anchor_from": "right_middle", "anchor_to": "right_middle", "controls": [{ "label@diorama.button_label": { "text": "128" } }] } }] } },
+            { "row_zoom@diorama.diorama_row": { "offset": [0, 220], "controls": [{ "row_label@diorama.text_dim": { "text": "\u7f29\u653e\u7ea7\u522b", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "value@diorama.diorama_button": { "size": [46, 18], "anchor_from": "right_middle", "anchor_to": "right_middle", "controls": [{ "label@diorama.button_label": { "text": "3" } }] } }] } },
+            { "row_death@diorama.diorama_row": { "offset": [0, 242], "controls": [{ "row_label@diorama.text_dim": { "text": "\u6b7b\u4ea1\u6807\u8bb0", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_outlines@diorama.diorama_row": { "offset": [0, 264], "controls": [{ "row_label@diorama.text_dim": { "text": "\u8f6e\u5ed3\u7ebf", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_rounded_fog@diorama.diorama_row": { "offset": [0, 286], "controls": [{ "row_label@diorama.text_dim": { "text": "\u5706\u6da6\u8ff7\u96fe", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_depth@diorama.diorama_row": { "offset": [0, 308], "controls": [{ "row_label@diorama.text_dim": { "text": "\u6df1\u5ea6\u5149\u5f71", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_grid@diorama.diorama_row": { "offset": [0, 330], "controls": [{ "row_label@diorama.text_dim": { "text": "\u533a\u5757\u7f51\u683c", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } },
+            { "row_fog_of_war@diorama.diorama_row": { "offset": [0, 352], "controls": [{ "row_label@diorama.text_dim": { "text": "\u4e25\u683c\u63a2\u7d22\u9650\u5236", "offset": [4, 0], "anchor_from": "left_middle", "anchor_to": "left_middle" } }, { "toggle@diorama.diorama_button": { "size": [30, 18], "anchor_from": "right_middle", "anchor_to": "right_middle" } }] } }
+          ]
+        }
+      },
+
+      { "summary_label@diorama.text_dim": { "anchor_from": "bottom_middle", "anchor_to": "bottom_middle", "offset": [0, -34] } },
+
+      { "button_row": {
+          "type": "panel",
+          "size": ["40%", 24],
+          "anchor_from": "bottom_middle",
+          "anchor_to": "bottom_middle",
+          "offset": [0, -8],
+          "controls": [
+            { "reset_button@diorama.diorama_button": { "size": [80, 22], "offset": [0, 0], "controls": [{ "label@diorama.button_label": { "text": "\u6062\u590d\u9ed8\u8ba4" } }] } },
+            { "done_button@diorama.diorama_button": { "size": [80, 22], "offset": [90, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5b8c\u6210" } }] } }
+          ]
+        }
+      }
+    ]
+  }
+}

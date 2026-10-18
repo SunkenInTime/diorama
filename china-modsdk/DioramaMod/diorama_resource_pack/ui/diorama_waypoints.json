@@ -1,0 +1,64 @@
+{
+  "namespace": "diorama",
+
+  "main@common.base_screen": {
+    "$screen_content": "diorama.waypoints_root",
+    "absorbs_input": true,
+    "force_render_below": false,
+    "is_showing_menu": true,
+    "render_game_behind": true,
+    "render_only_when_topmost": true,
+    "should_steal_mouse": false
+  },
+
+  "waypoints_root": {
+    "type": "panel",
+    "size": ["100%", "100%"],
+    "controls": [
+      { "backdrop@diorama.panel_solid": { "alpha": 0.88 } },
+      { "title_label@diorama.text_gold": { "text": "Diorama \u00b7 \u8def\u5f84\u70b9", "anchor_from": "top_middle", "anchor_to": "top_middle", "offset": [0, 6] } },
+      { "count_label@diorama.text_dim": { "anchor_from": "top_right", "anchor_to": "top_right", "offset": [-12, 10] } },
+
+      { "list_panel": {
+          "type": "panel",
+          "size": ["70%", "60%"],
+          "anchor_from": "center",
+          "anchor_to": "center",
+          "offset": [0, -8],
+          "controls": [
+            { "row_template": {
+                "type": "button",
+                "size": ["100%", 18],
+                "visible": false,
+                "controls": [
+                  { "row_initial@diorama.text_gold": { "anchor_from": "left_middle", "anchor_to": "left_middle", "offset": [4, 0] } },
+                  { "row_label@diorama.text_white": { "anchor_from": "left_middle", "anchor_to": "left_middle", "offset": [22, 0] } },
+                  { "row_selected@diorama.text_gold": { "anchor_from": "right_middle", "anchor_to": "right_middle", "offset": [-4, 0] } }
+                ]
+              }
+            }
+          ]
+        }
+      },
+
+      { "hint_label@diorama.text_dim": { "anchor_from": "bottom_middle", "anchor_to": "bottom_middle", "offset": [0, -34] } },
+
+      { "action_row": {
+          "type": "panel",
+          "size": ["70%", 24],
+          "anchor_from": "bottom_middle",
+          "anchor_to": "bottom_middle",
+          "offset": [0, -8],
+          "controls": [
+            { "add_button@diorama.diorama_button": { "size": [56, 22], "offset": [0, 0], "controls": [{ "label@diorama.button_label": { "text": "\u65b0\u5efa" } }] } },
+            { "share_button@diorama.diorama_button": { "size": [56, 22], "offset": [62, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5206\u4eab" } }] } },
+            { "import_button@diorama.diorama_button": { "size": [56, 22], "offset": [124, 0], "controls": [{ "label@diorama.button_label": { "text": "\u6dfb\u52a0" } }] } },
+            { "recolor_button@diorama.diorama_button": { "size": [56, 22], "offset": [186, 0], "controls": [{ "label@diorama.button_label": { "text": "\u989c\u8272" } }] } },
+            { "delete_button@diorama.diorama_button": { "size": [56, 22], "offset": [248, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5220\u9664" } }] } },
+            { "close_button@diorama.diorama_button": { "size": [56, 22], "offset": [310, 0], "controls": [{ "label@diorama.button_label": { "text": "\u5173\u95ed" } }] } }
+          ]
+        }
+      }
+    ]
+  }
+}
