@@ -166,3 +166,9 @@ stonecutter parameters {
 		}
 	}
 }
+
+// gradle.properties turns on configure-on-demand, but Stonecutter's switch and refresh tasks read
+// every version's source sets, which each version's own script adds; without this they skip
+// src/gametest and src/gameshim. Configure every version first. (At the end of this script:
+// earlier, the versions' scripts run before Stonecutter has set them up.)
+if (gradle.startParameter.taskNames.any { "active project" in it }) evaluationDependsOnChildren()
