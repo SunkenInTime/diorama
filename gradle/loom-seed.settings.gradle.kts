@@ -1,24 +1,26 @@
 // Loom keeps the Minecraft jars it builds for each Fabric version in this checkout's
-// .gradle/loom-cache, not in the shared Gradle home, because Fabric API's injected interfaces
-// change them. Building them takes about five minutes, so every new git worktree used to spend
-// that before its first task. A new worktree now copies them from another checkout of this repo
-// that has finished building them with the same Loom, and Loom builds only what's still missing.
+// .gradle/loom-cache, not in the shared Gradle home, because what Fabric API adds to Minecraft
+// changes them. Building them takes about five minutes, so every new git worktree used to spend that
+// before its first task. Now a checkout saves them to a snapshot in the Gradle home once they're
+// built, and a checkout that has none yet copies the newest snapshot instead of building them.
 //
-// A checkout offers its jars only between builds: the marker below is removed when a build starts
-// (Loom may rewrite jars while it configures) and written once every project has configured. The
-// copy goes to a staging folder and is kept only if the other checkout's marker didn't change
-// while it was being copied.
+// A snapshot is only taken right after every project has configured, before any task runs: Loom
+// finishes or rebuilds its jars while configuring, and tasks like genSources rewrite them later.
+// Every jar has to read back whole first, and a snapshot appears under its final name only once
+// it's complete. Jar names don't change between Loom versions even when their contents might, so
+// a checkout that copied a snapshot keeps a note of its Loom version until a configured build
+// confirms it matches.
 
 import java.io.File
-import java.nio.file.Files
+import java.util.Properties
+import java.util.zip.ZipFile
 
 val cache = rootDir.resolve(".gradle/loom-cache")
-val marker = cache.resolve("seed-ready.properties")
-val staging = cache.resolve("seeding")
 val folders = listOf("minecraftMaven", "remapped_mods")
+val store = gradle.gradleUserHomeDir.resolve("diorama-loom-seed")
+val copiedFrom = cache.resolve("seeded-from.properties")
 
-marker.delete()
-val seededLoom = seedLoomCache()
+seedLoomCache()
 
 gradle.projectsEvaluated {
 	val loom = rootProject.allprojects.asSequence()
@@ -26,53 +28,87 @@ gradle.projectsEvaluated {
 		.firstOrNull { it.javaClass.name.startsWith("net.fabricmc.loom.") }
 		?.let { it.javaClass.classLoader.loadClass("net.fabricmc.loom.LoomGradlePlugin").getField("LOOM_VERSION").get(null) as String }
 		?: return@projectsEvaluated
-	if (seededLoom != null && seededLoom != loom) {
-		// Jar names don't change between Loom versions even when what Loom puts in them does.
-		folders.forEach { cache.resolve(it).deleteRecursively() }
-		throw GradleException("Copied Loom's Minecraft jars from a checkout built with Loom $seededLoom, but this one resolved Loom $loom. Removed them; run the build again and Loom will build its own.")
+	properties(copiedFrom)?.getProperty("loom")?.let { copied ->
+		if (copied != loom) {
+			folders.forEach { cache.resolve(it).deleteRecursively() }
+			copiedFrom.delete()
+			throw GradleException("Copied Loom's Minecraft jars from a snapshot built with Loom $copied, but this checkout resolved Loom $loom. Removed them; run the build again and Loom will build its own.")
+		}
+		copiedFrom.delete()
 	}
-	if (cache.resolve("minecraftMaven").isDirectory) marker.writeText("loom=$loom\nbuilt=${System.currentTimeMillis()}\n")
+	// Configure-on-demand leaves some projects' jars as an earlier build left them.
+	if (!gradle.startParameter.isConfigureOnDemand) saveSnapshot(loom)
 }
 
-/** Returns the Loom version of the checkout it copied from, or null when it copied nothing. */
-fun seedLoomCache(): String? {
-	val dotGit = rootDir.resolve(".git")
-	// Only a linked worktree has a .git file, and only its first build has no jars yet.
-	if (!dotGit.isFile || cache.resolve("minecraftMaven").exists()) return null
-	staging.deleteRecursively()
-	val gitDir = rootDir.resolve(dotGit.readText().trim().removePrefix("gitdir:").trim()).canonicalFile
-	val commonDir = gitDir.resolve("commondir").takeIf { it.isFile }?.let { gitDir.resolve(it.readText().trim()).canonicalFile } ?: return null
-	val checkouts = listOf(commonDir.parentFile) + (commonDir.resolve("worktrees").listFiles() ?: emptyArray())
-		.mapNotNull { meta -> meta.resolve("gitdir").takeIf(File::isFile)?.let { meta.resolve(it.readText().trim()).canonicalFile.parentFile } }
-	val donor = checkouts
-		.map { it.resolve(".gradle/loom-cache") }
-		.filter { it.canonicalFile != cache.canonicalFile }
-		.mapNotNull { candidate -> runCatching { candidate to readMarker(candidate) }.getOrNull()?.takeIf { it.second != null } }
-		.maxByOrNull { (_, ready) -> ready!!.getProperty("built").toLong() }
-		?: return null
-	val (source, ready) = donor
+fun seedLoomCache() {
+	if (cache.resolve("minecraftMaven").exists()) return
+	val snapshot = snapshots().maxByOrNull { it.second.getProperty("created").toLong() } ?: return
+	val (source, manifest) = snapshot
+	val staging = cache.resolve("seeding")
 	val started = System.nanoTime()
 	try {
-		folders.forEach { source.resolve(it).takeIf(File::isDirectory)?.copyRecursively(staging.resolve(it)) }
-		if (readMarker(source) != ready) {
-			println("Not copying Loom's Minecraft jars: ${source.parentFile.parentFile} started a build while they were being copied")
-			staging.deleteRecursively()
-			return null
-		}
-		folders.forEach { folder -> staging.resolve(folder).takeIf(File::isDirectory)?.let { Files.move(it.toPath(), cache.resolve(folder).toPath()) } }
-	} catch (failure: Exception) {
-		println("Not copying Loom's Minecraft jars from ${source.parentFile.parentFile}: $failure")
 		staging.deleteRecursively()
-		return null
+		folders.forEach { source.resolve(it).takeIf(File::isDirectory)?.copyRecursively(staging.resolve(it)) }
+		cache.mkdirs()
+		copiedFrom.writeText("loom=${manifest.getProperty("loom")}\nsnapshot=${source.name}\n")
+		folders.forEach { folder -> staging.resolve(folder).takeIf(File::isDirectory)?.let { if (!it.renameTo(cache.resolve(folder))) error("could not move $it into place") } }
+	} catch (failure: Exception) {
+		println("Not copying Loom's Minecraft jars from $source: $failure")
+		folders.forEach { cache.resolve(it).deleteRecursively() }
+		copiedFrom.delete()
+		return
+	} finally {
+		staging.deleteRecursively()
 	}
-	staging.deleteRecursively()
-	val megabytes = folders.sumOf { folder -> cache.resolve(folder).walkTopDown().filter(File::isFile).sumOf(File::length) } shr 20
-	println("Copied %d MB of Loom's Minecraft jars from %s in %.1f s".format(megabytes, source.parentFile.parentFile, (System.nanoTime() - started) / 1e9))
-	return ready!!.getProperty("loom")
+	println("Copied %d MB of Loom's Minecraft jars from %s in %.1f s".format(size(cache) shr 20, source, (System.nanoTime() - started) / 1e9))
 }
 
-fun readMarker(cache: File): java.util.Properties? {
-	val file = cache.resolve("seed-ready.properties")
-	if (!file.isFile) return null
-	return java.util.Properties().apply { file.reader().use { load(it) } }
+fun saveSnapshot(loom: String) {
+	val ours = files(cache)
+	if (ours.isEmpty()) return
+	val newest = snapshots().filter { it.second.getProperty("loom") == loom }.maxByOrNull { it.second.getProperty("created").toLong() }
+	if (newest != null && files(newest.first).entries.containsAll(ours.entries)) return
+	val started = System.nanoTime()
+	val broken = ours.keys.filter { it.endsWith(".jar") || it.endsWith(".jar.backup") }.firstOrNull { !readsWhole(cache.resolve(it)) }
+	if (broken != null) {
+		println("Not saving Loom's Minecraft jars for new worktrees: $broken doesn't read back whole")
+		return
+	}
+	val created = System.currentTimeMillis()
+	val partial = store.resolve(".partial-$created-${ProcessHandle.current().pid()}")
+	try {
+		folders.forEach { cache.resolve(it).takeIf(File::isDirectory)?.copyRecursively(partial.resolve(it)) }
+		partial.resolve("snapshot.properties").writeText("loom=$loom\ncreated=$created\nfrom=$rootDir\n")
+		if (!partial.renameTo(store.resolve("$created-${ProcessHandle.current().pid()}"))) error("could not rename $partial")
+	} catch (failure: Exception) {
+		println("Not saving Loom's Minecraft jars for new worktrees: $failure")
+		return
+	} finally {
+		partial.deleteRecursively()
+	}
+	// Keep the newest two; anything older than an hour can't still be in the middle of a copy.
+	val hourAgo = created - 3_600_000
+	snapshots().sortedByDescending { it.second.getProperty("created").toLong() }.drop(2)
+		.filter { it.second.getProperty("created").toLong() < hourAgo }.forEach { it.first.deleteRecursively() }
+	store.listFiles { file -> file.name.startsWith(".partial-") && file.lastModified() < hourAgo }?.forEach { it.deleteRecursively() }
+	println("Saved %d MB of Loom's Minecraft jars for new worktrees in %.1f s".format(size(cache) shr 20, (System.nanoTime() - started) / 1e9))
 }
+
+/** Complete snapshots with their manifests; anything unreadable is skipped. */
+fun snapshots(): List<Pair<File, Properties>> = (store.listFiles() ?: emptyArray())
+	.filter { it.isDirectory && !it.name.startsWith(".") }
+	.mapNotNull { dir -> properties(dir.resolve("snapshot.properties"))?.takeIf { it.getProperty("loom") != null && it.getProperty("created")?.toLongOrNull() != null }?.let { dir to it } }
+
+fun properties(file: File): Properties? = runCatching { Properties().apply { file.reader().use { load(it) } } }.getOrNull()
+
+/** Relative path to size, for the folders Loom keeps per checkout. */
+fun files(root: File): Map<String, Long> = folders.flatMap { folder ->
+	root.resolve(folder).walkTopDown().filter { it.isFile }.map { it.relativeTo(root).invariantSeparatorsPath to it.length() }.toList()
+}.toMap()
+
+fun size(root: File): Long = files(root).values.sum()
+
+/** Reads every entry, so a truncated or half-written jar fails its checksum here. */
+fun readsWhole(jar: File): Boolean = runCatching {
+	ZipFile(jar).use { zip -> zip.entries().asSequence().forEach { entry -> zip.getInputStream(entry).use { it.readAllBytes() } } }
+}.isSuccess
