@@ -38,3 +38,45 @@ stonecutter {
 }
 
 rootProject.name = "diorama"
+
+// Loom keeps the Minecraft jars it builds for each Fabric version in this checkout's
+// .gradle/loom-cache, not in the shared Gradle home, because Fabric API's injected interfaces
+// change them. Building them takes about five minutes, so every new git worktree used to spend
+// that before its first task. Their names carry a hash of everything that went into them, so a
+// jar another checkout already built is the same jar: a new worktree copies them from the
+// checkout that built them most recently, and Loom builds only what's still missing.
+seedLoomCache()
+
+fun seedLoomCache() {
+	val dotGit = rootDir.resolve(".git")
+	val cache = rootDir.resolve(".gradle/loom-cache")
+	// Only a linked worktree has a .git file, and only its first build has no cache yet.
+	if (!dotGit.isFile || cache.resolve("minecraftMaven").exists()) return
+	val gitDir = File(dotGit.readText().trim().removePrefix("gitdir:").trim())
+	val commonDir = gitDir.resolve("commondir").takeIf { it.isFile }
+		?.let { gitDir.resolve(it.readText().trim()).canonicalFile } ?: return
+	val checkouts = listOf(commonDir.parentFile) + (commonDir.resolve("worktrees").listFiles() ?: emptyArray())
+		.mapNotNull { it.resolve("gitdir").takeIf(File::isFile)?.readText()?.trim()?.let { path -> File(path).parentFile } }
+	val source = checkouts
+		.map { it.resolve(".gradle/loom-cache") }
+		.filter { it.canonicalFile != cache.canonicalFile && it.resolve("minecraftMaven").isDirectory }
+		.maxByOrNull { candidate -> candidate.resolve("minecraftMaven").walkTopDown().maxOfOrNull { it.lastModified() } ?: 0L }
+		?: return
+	val started = System.nanoTime()
+	var copied = 0L
+	for (folder in listOf("minecraftMaven", "remapped_mods")) {
+		val from = source.resolve(folder)
+		from.walkTopDown().filter { it.isFile && !it.name.endsWith(".seeding") }.forEach { file ->
+			// A jar the other checkout is still writing has no central directory yet; Loom builds it here instead.
+			if (file.extension == "jar" && runCatching { java.util.zip.ZipFile(file).close() }.isFailure) return@forEach
+			val target = cache.resolve(folder).resolve(file.relativeTo(from))
+			val partial = File(target.path + ".seeding")
+			target.parentFile.mkdirs()
+			file.copyTo(partial, overwrite = true)
+			java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+			copied += target.length()
+		}
+	}
+	val seconds = (System.nanoTime() - started) / 1e9
+	println("Copied %d MB of Loom's Minecraft jars from %s in %.1f s".format(copied shr 20, source.parentFile.parentFile, seconds))
+}
