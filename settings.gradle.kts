@@ -38,7 +38,3 @@ stonecutter {
 }
 
 rootProject.name = "diorama"
-
-// A new git worktree copies Loom's Minecraft jars from another checkout instead of spending about
-// five minutes rebuilding them.
-apply(from = "gradle/loom-seed.settings.gradle.kts")
