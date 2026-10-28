@@ -181,6 +181,55 @@ public final class ChunkSnapshot {
 	}
 
 	/**
+	 * RESEARCH (#152): a chunk built from somewhere other than the game, such as another map
+	 * mod's files. {@code around} is the biome sections of it and its eight neighbours, indexed
+	 * like {@link #biomes}; {@code surface} and {@code solid} are per column, like the heightmaps.
+	 */
+	@SuppressWarnings("unchecked")
+	private ChunkSnapshot(int chunkX, int chunkZ, @Nullable LevelChunkSection[] sections, @Nullable PalettedContainerRO<Holder<Biome>>[] @Nullable [] around,
+		@Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, int[] surface, int[] solid, ClientLevel level) {
+		this.chunkX = chunkX;
+		this.chunkZ = chunkZ;
+		this.minSectionY = level.getMinSectionY();
+		this.states = new PalettedContainer[sections.length];
+		this.uniform = new BlockState[sections.length];
+		for (int i = 0; i < sections.length; i++) {
+			LevelChunkSection section = sections[i];
+			if (section != null && !section.hasOnlyAir()) {
+				BlockState single = Sections.singleValue(section.getStates());
+				if (single != null) {
+					this.uniform[i] = single;
+				} else {
+					this.states[i] = section.getStates();
+				}
+			}
+		}
+		this.biomes = around;
+		this.biomeZoomSeed = ((BiomeManagerAccessor) level.getBiomeManager()).diorama$biomeZoomSeed();
+		this.blendRadius = Minecraft.getInstance().options.biomeBlendRadius().get();
+		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
+		this.hasSkyLight = level.dimensionType().hasSkyLight();
+		this.blockLight = blockLight;
+		this.skyLight = skyLight;
+		int top = Integer.MIN_VALUE;
+		int floor = Integer.MAX_VALUE;
+		for (int i = 0; i < 256; i++) {
+			top = Math.max(top, surface[i]);
+			floor = Math.min(floor, solid[i]);
+			this.surface[i] = surface[i];
+		}
+		this.maxY = top <= level.getMinY() ? Integer.MIN_VALUE : top;
+		this.floorY = floor - 24;
+		this.copycats = null;
+	}
+
+	/** RESEARCH (#152): see the constructor. */
+	public static ChunkSnapshot built(int chunkX, int chunkZ, @Nullable LevelChunkSection[] sections, @Nullable PalettedContainerRO<Holder<Biome>>[] @Nullable [] around,
+		@Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, int[] surface, int[] solid, ClientLevel level) {
+		return new ChunkSnapshot(chunkX, chunkZ, sections, around, blockLight, skyLight, surface, solid, level);
+	}
+
+	/**
 	 * The blocks of a chunk the singleplayer server read from the world's save; see the
 	 * constructor. Call on the server thread.
 	 */

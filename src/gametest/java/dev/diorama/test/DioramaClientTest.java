@@ -207,6 +207,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("tracked-players")) {
 			trackedPlayers(context);
 		}
+		if (tests.contains("xaero-map-import")) {
+			XaeroMapImportExperiment.run(context, serverProperties());
+		}
 		//?}
 		//? if >=1.21.11 && fabric {
 		if (tests.contains("realms")) {
