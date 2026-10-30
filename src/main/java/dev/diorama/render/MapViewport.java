@@ -60,6 +60,9 @@ public final class MapViewport {
 		}
 	}
 
+	/** Screen pixels per tile pixel from which the tiles are drawn crisp; see {@link #sampling}. */
+	private static final double CRISP_FROM = 1.5;
+
 	/** Below this zoom (GUI pixels per block) overlay lines and dots would blur into noise. */
 	private static final double OVERLAY_ZOOM = 1.0;
 
@@ -78,14 +81,14 @@ public final class MapViewport {
 	}
 
 	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view) {
-		this.draw(graphics, level, view, 0, false);
+		this.draw(graphics, level, view, 0, false, null);
 	}
 
 	/**
-	 * Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles, and land
-	 * claims if {@code claims}.
+	 * Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles, land claims if
+	 * {@code claims}, and {@code lit} drawn over the tiles but under those and the fog.
 	 */
-	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims) {
+	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit) {
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		boolean cave = view.layer() != TileKey.SURFACE;
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
@@ -101,7 +104,7 @@ public final class MapViewport {
 			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 		}
 
-		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims);
+		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit);
 		this.drawFog(graphics, level, view);
 		graphics.disableScissor();
 	}
@@ -122,6 +125,17 @@ public final class MapViewport {
 			lod++;
 		}
 		return lod;
+	}
+
+	/**
+	 * How this view samples the tiles and anything drawn on their pixel grid. Shown larger than
+	 * their pixels, they stay crisp so blocks keep their edges; magnified by too little for that,
+	 * crisp pixels would come out uneven, one screen pixel wide here and two there, so they blend.
+	 * Measured in screen pixels: a GUI pixel is several on a high-density display.
+	 */
+	public static Sampling sampling(View view) {
+		double screenPixelsPerPixel = view.zoom() * Minecraft.getInstance().getWindow().getGuiScale() / Projection.PIXELS_PER_UNIT;
+		return screenPixelsPerPixel >= CRISP_FROM ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
 	}
 
 	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */
@@ -167,7 +181,7 @@ public final class MapViewport {
 		return Math.sqrt(du * du + dv * dv);
 	}
 
-	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims) {
+	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
@@ -178,13 +192,14 @@ public final class MapViewport {
 		int tv0 = (int) Math.floor(v0 / units);
 		int tu1 = (int) Math.floor(u1 / units);
 		int tv1 = (int) Math.floor(v1 / units);
-		// Minified tiles blend across mips; magnified ones stay crisp so blocks keep their edges.
-		Sampling sampling = view.zoom() >= Projection.PIXELS_PER_UNIT ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+		Sampling sampling = sampling(view);
 		MapCanvas canvas = MapCanvas.of(graphics);
 		float size = (float) (units * view.zoom());
 		Circle circle = view.round() ? Circle.in(view) : null;
 		// White, as see-through as the map is: the tiles are multiplied by it.
 		int tint = Math.round(this.opacity * 255) << 24 | 0xFFFFFF;
+		// Claims and overlays go over anything lit, so a light doesn't hide them.
+		List<Runnable> above = new ArrayList<>();
 		for (int tu = tu0 - 1; tu <= tu1 + 1; tu++) {
 			for (int tv = tv0 - 1; tv <= tv1 + 1; tv++) {
 				TileKey key = new TileKey(view.layer(), tu, tv, lod);
@@ -205,23 +220,27 @@ public final class MapViewport {
 					if (inside != null) {
 						canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
 						if (claimed != null) {
-							canvas.quad(claimed, sampling, inside.corners(), inside.uvs(), tint);
+							above.add(() -> canvas.quad(claimed, sampling, inside.corners(), inside.uvs(), tint));
 						}
 						if (overlay != null) {
-							canvas.quad(overlay, sampling, inside.corners(), inside.uvs(), tint);
+							above.add(() -> canvas.quad(overlay, sampling, inside.corners(), inside.uvs(), tint));
 						}
 					}
 					continue;
 				}
 				canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
 				if (claimed != null) {
-					canvas.rect(claimed, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
+					above.add(() -> canvas.rect(claimed, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint));
 				}
 				if (overlay != null) {
-					canvas.rect(overlay, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
+					above.add(() -> canvas.rect(overlay, sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint));
 				}
 			}
 		}
+		if (lit != null) {
+			lit.run();
+		}
+		above.forEach(Runnable::run);
 	}
 
 	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view) {

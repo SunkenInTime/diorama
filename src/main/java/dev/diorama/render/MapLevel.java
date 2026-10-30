@@ -10,6 +10,8 @@ import dev.diorama.bake.PinnedSource;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
+import dev.diorama.bake.SurfaceArea;
+import dev.diorama.bake.TileSurface;
 import dev.diorama.bake.TileSpots;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.SeenBlocks;
@@ -534,6 +536,53 @@ public final class MapLevel implements ChunkSource {
 	/** The baked tile, if any, without asking for it to be baked. */
 	public @Nullable MapTile peek(TileKey key) {
 		return this.tiles.get(key);
+	}
+
+	/** The surfaces of the {@code layer} tiles under map pixels (pu0, pv0) to (pu1, pv1); see {@link #surface}. Render thread. */
+	public SurfaceArea surfaces(int layer, int pu0, int pv0, int pu1, int pv1) {
+		int size = Projection.TILE_PIXELS;
+		int tu0 = Math.floorDiv(pu0, size);
+		int tv0 = Math.floorDiv(pv0, size);
+		int columns = Math.floorDiv(pu1 - 1, size) - tu0 + 1;
+		int rows = Math.floorDiv(pv1 - 1, size) - tv0 + 1;
+		TileSurface[] tiles = new TileSurface[columns * rows];
+		for (int row = 0; row < rows; row++) {
+			for (int column = 0; column < columns; column++) {
+				tiles[row * columns + column] = this.surface(new TileKey(layer, tu0 + column, tv0 + row, 0));
+			}
+		}
+		return new SurfaceArea(tu0, tv0, columns, rows, tiles);
+	}
+
+	/**
+	 * What the camera sees at each pixel of a baked cave slice tile, made on a baker thread the
+	 * first time it's asked for and again after the tile's pixels change. Until a new one is
+	 * ready the last one stands in; null before the first, and for tiles that have none (the
+	 * surface, overviews, under a roof). Render thread.
+	 */
+	public @Nullable TileSurface surface(TileKey key) {
+		MapTile tile = this.tiles.get(key);
+		if (tile == null || key.lod() != 0 || key.layer() == TileKey.SURFACE || this.roofless()) {
+			return null;
+		}
+		if (tile.surfacePending != null && tile.surfacePending.isDone()) {
+			TileSurface made = tile.surfacePending.getNow(null);
+			tile.surfacePending = null;
+			if (made != null) {
+				tile.surface = made;
+			}
+		}
+		BlockLooks looks = BlockLooks.get();
+		if (tile.surfacePending == null && looks != null && (tile.surface == null || tile.surface.revision() != tile.pixelsRevision)) {
+			int revision = tile.pixelsRevision;
+			boolean fog = this.fogOfWar;
+			tile.surfacePending = CompletableFuture.supplyAsync(() -> TileBaker.surface(key, revision, this, looks, fog), BAKERS)
+				.exceptionally(e -> {
+					Diorama.LOGGER.warn("Couldn't find the ground under tile {}", key, e);
+					return null;
+				});
+		}
+		return tile.surface;
 	}
 
 	/** Whether overview tiles exist for zooming far out: only when the map is saved. */

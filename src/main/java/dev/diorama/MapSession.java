@@ -5,6 +5,7 @@ import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
+import dev.diorama.light.Lights;
 import dev.diorama.render.MapLevel;
 import java.nio.file.Path;
 import java.util.Iterator;
@@ -45,6 +46,7 @@ public final class MapSession {
 
 	private final ClientLevel level;
 	private final MapLevel map;
+	private final Lights lights;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
 	private MapStyle style = MapStyle.get();
@@ -54,6 +56,12 @@ public final class MapSession {
 		// The Nether's roof: its sky view looks down from just under it.
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
+		this.lights = new Lights(level, this.map);
+	}
+
+	private void end() {
+		this.lights.close();
+		this.map.close();
 	}
 
 	/** The folder of the dimension's map in use ({@link Maps}), or null outside a world. */
@@ -102,7 +110,7 @@ public final class MapSession {
 	/** Saves and ends the session. For closing the game; leaving a world is noticed by {@link #tick}. */
 	public static void close() {
 		if (current != null) {
-			current.map.close();
+			current.end();
 			current = null;
 		}
 	}
@@ -140,7 +148,7 @@ public final class MapSession {
 	 */
 	private static @Nullable MapSession forLevel(@Nullable ClientLevel level) {
 		if (current != null && current.level != level) {
-			current.map.close();
+			current.end();
 			current = null;
 		}
 		if (level != null && current == null) {
@@ -466,6 +474,10 @@ public final class MapSession {
 
 	public MapLevel map() {
 		return this.map;
+	}
+
+	public Lights lights() {
+		return this.lights;
 	}
 
 	public boolean isUnderground() {

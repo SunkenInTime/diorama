@@ -5,7 +5,9 @@ import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileImage;
+import dev.diorama.bake.TileSurface;
 import dev.diorama.render.gpu.MapTexture;
+import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
 
 /** A baked tile on the GPU, plus the coverage the fog reads. Render thread only. */
@@ -29,6 +31,9 @@ public final class MapTile {
 	long pixelsChanged;
 	/** The {@link #pixelsRevision} {@link #claims} was painted for. */
 	int claimsRevision;
+	/** The ground under the tile's pixels, for lights; see {@link MapLevel#surface}. */
+	@Nullable TileSurface surface;
+	@Nullable CompletableFuture<@Nullable TileSurface> surfacePending;
 
 	void upload(TileImage image) {
 		if (image.isFull()) {
