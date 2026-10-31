@@ -941,13 +941,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	private static void switchLanguage(ClientGameTestContext context, String language) {
-		context.runOnClient(mc -> {
+		reloadPacks(context, mc -> {
 			mc.getLanguageManager().setSelected(language);
 			mc.options.languageCode = language;
-			mc.reloadResourcePacks();
 		});
-		context.waitTicks(20);
-		context.waitFor(mc -> mc.gui.overlay() == null, 1200);
 	}
 
 	/**
