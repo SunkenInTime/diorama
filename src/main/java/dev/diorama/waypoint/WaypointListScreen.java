@@ -81,7 +81,7 @@ public final class WaypointListScreen extends Screen {
 	 * keyboard focus, and must not act on a row it no longer sits on.
 	 */
 	private final List<Button> actions = new ArrayList<>();
-	/** Edit and Delete, which a waystone's row goes without, and Teleport, which is off for another dimension. */
+	/** Edit and Delete, which a waystone's row goes without, and Teleport, which can be off for another dimension. */
 	private @Nullable Button edit;
 	private @Nullable Button teleport;
 	private @Nullable Button delete;
@@ -128,7 +128,7 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	/** Shows the folder with this key when the screen opens again. */
-	void showFolder(String key) {
+	public void showFolder(String key) {
 		this.folderKey = key;
 		this.selected = null;
 		this.scroll = 0;
@@ -391,10 +391,9 @@ public final class WaypointListScreen extends Screen {
 				x += button.getWidth() + ACTION_GAP;
 			}
 		}
-		// Teleporting runs /tp here, so it only makes sense for a waypoint in this dimension.
 		Button teleport = this.teleport;
-		if (shown && teleport != null && this.minecraft.level != null) {
-			teleport.active = !this.armed && this.selected.dimension.equals(this.minecraft.level.dimension().identifier().toString());
+		if (shown && teleport != null) {
+			teleport.active = !this.armed && Waypoints.canTeleport(this.selected.dimension);
 		}
 		Button confirm = this.confirm;
 		if (confirm != null) {
@@ -912,7 +911,7 @@ public final class WaypointListScreen extends Screen {
 
 	private void teleport(@Nullable Waypoint waypoint) {
 		if (waypoint != null) {
-			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
+			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 		}
 		this.minecraft.gui.setScreen(null);
 	}

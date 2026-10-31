@@ -116,6 +116,8 @@ public final class Settings {
 	public boolean mapSettingsButton = true;
 	/** The Maps button on the map, where each dimension's maps are made and switched. */
 	public boolean mapMapsButton = true;
+	/** The button at the top of the map that shows the next dimension's map. */
+	public boolean mapDimensionButton = true;
 	/** Add waypoint and Add temporary waypoint in the map's right-click menu. */
 	public boolean mapAddWaypoints = true;
 	/**

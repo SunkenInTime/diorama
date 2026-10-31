@@ -147,6 +147,7 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		waypoints.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
 		waypoints.toggle("map_maps_button", () -> s.mapMapsButton, v -> s.mapMapsButton = v);
+		waypoints.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],

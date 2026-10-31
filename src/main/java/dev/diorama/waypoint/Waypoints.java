@@ -25,14 +25,14 @@ public final class Waypoints {
 	/** A new, unsaved waypoint where the player stands. */
 	public static @Nullable Waypoint atPlayer() {
 		LocalPlayer player = Minecraft.getInstance().player;
-		return player == null ? null : at(player.blockPosition());
+		String dimension = dimension();
+		return player == null || dimension == null ? null : at(player.blockPosition(), dimension);
 	}
 
 	/** A new, unsaved waypoint at a block position, named and coloured so the next one differs. */
-	public static @Nullable Waypoint at(BlockPos pos) {
-		String dimension = dimension();
+	public static @Nullable Waypoint at(BlockPos pos, String dimension) {
 		WaypointStore store = WaypointStore.get();
-		if (dimension == null || store == null) {
+		if (store == null) {
 			return null;
 		}
 		int count = store.all().size() + 1;
@@ -56,10 +56,9 @@ public final class Waypoints {
 	}
 
 	/** Adds a temporary waypoint at a block position: no editor, and it's never saved. */
-	public static void addTemporary(BlockPos pos) {
-		String dimension = dimension();
+	public static void addTemporary(BlockPos pos, String dimension) {
 		WaypointStore store = WaypointStore.get();
-		if (dimension == null || store == null) {
+		if (store == null) {
 			return;
 		}
 		String name = net.minecraft.network.chat.Component.translatable("diorama.waypoint.temporary").getString();
@@ -73,16 +72,28 @@ public final class Waypoints {
 	 * the teleport command's first word.
 	 */
 	public static boolean canTeleport() {
-		var connection = Minecraft.getInstance().getConnection();
-		String command = Settings.get().teleportCommand;
-		String name = command.split(" ", 2)[0];
-		return connection != null && connection.getCommands().getRoot().getChild(name) != null;
+		return mayUse(Settings.get().teleportCommand);
 	}
 
-	/** Sends the player's teleport command, {@code /tp} unless they changed it, to a block position. */
-	public static void teleport(int x, int y, int z) {
+	/**
+	 * Whether teleporting into a dimension is on offer. To another one, the teleport is run through
+	 * {@code /execute in}, as Xaero's World Map does. That only suits {@code /tp}: nothing says a
+	 * server's own teleport command would still work through it, or take the player's dimension along.
+	 */
+	public static boolean canTeleport(String dimension) {
+		return dimension.equals(dimension()) ? canTeleport()
+			: Settings.get().teleportCommand.equals(Settings.DEFAULT_TELEPORT_COMMAND) && canTeleport() && mayUse("execute");
+	}
+
+	private static boolean mayUse(String command) {
+		var connection = Minecraft.getInstance().getConnection();
+		return connection != null && connection.getCommands().getRoot().getChild(command.split(" ", 2)[0]) != null;
+	}
+
+	/** Sends the player's teleport command, {@code /tp} unless they changed it, to a block position in a dimension. */
+	public static void teleport(String dimension, int x, int y, int z) {
 		LocalPlayer player = Minecraft.getInstance().player;
-		String command = Settings.get().teleportCommand
+		String command = (dimension.equals(dimension()) ? "" : "execute in " + dimension + " run ") + Settings.get().teleportCommand
 			.replace("{x}", Integer.toString(x))
 			.replace("{y}", Integer.toString(y))
 			.replace("{z}", Integer.toString(z));
