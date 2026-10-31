@@ -29,8 +29,10 @@ SNAPSHOT_PREFIX = 'diorama-gametest-'
 HERE = Path(__file__).resolve().parent
 SANDBOX_SH = '/home/user/src/.claude/skills/boat-game-test/sandbox.sh'
 TTL = 7200
-# How long a VM stays warm after a run, by default: see WARM_PREFIX.
-WARM_MINUTES = 10
+# How long a VM stays warm after a run, by default, and how many a run keeps: see WARM_PREFIX.
+# An idle half hour costs less than the start it saves.
+WARM_MINUTES = 30
+WARM_NODES = 8
 # SKILL.md gives the command 2 hours. sandbox.sh stops the tests at 90 min; every boat call is cut
 # off at 105 min so fetching results fits, and cleanup has the rest.
 WORK_MINUTES = 105
@@ -370,7 +372,9 @@ def wait_for_start_slot():
             # boat limits failing says nothing about the limits; boat new will say.
             return
         starts = limits['starts']
-        if starts['day']['remaining'] < 1 or starts['hour']['remaining'] < 1 or limits.get('canStart') is False:
+        # With paid extra starts on, the day's limit is only where they begin.
+        extra = (limits.get('keepGoing') or {}).get('enabled')
+        if starts['day']['remaining'] < 1 and not extra or starts['hour']['remaining'] < 1 or limits.get('canStart') is False:
             stop_starting.set()
             raise Refused(f'boat.dev has no starts left ({starts["hour"]["remaining"]} this hour, '
                           f'{starts["day"]["remaining"]} today) or cannot start ({limits.get("startBlockedReason")}); '
@@ -633,7 +637,7 @@ def main():
     parser.add_argument('--snapshot', help='saved snapshot to start from (default: the newest diorama-gametest-*)')
     parser.add_argument('--warm-minutes', type=int,
                         help='keep each VM running this long after the run, for the next run from this checkout '
-                             f'(default {WARM_MINUTES} for up to 3 nodes, else 0; 0 deletes it at once)')
+                             f'(default {WARM_MINUTES} for up to {WARM_NODES} nodes, else 0; 0 deletes it at once)')
     parser.add_argument('--no-prefetch', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
@@ -645,7 +649,7 @@ def main():
     if missing:
         sys.exit(f'no node versions/{", ".join(missing)}')
     if args.warm_minutes is None:
-        args.warm_minutes = WARM_MINUTES if len(nodes) <= 3 else 0
+        args.warm_minutes = WARM_MINUTES if len(nodes) <= WARM_NODES else 0
     global CHECKOUT
     # Per machine and worktree: other machines share the boat.dev account, and paths only fold case
     # where the file system does.
