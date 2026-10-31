@@ -7,6 +7,7 @@ import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.PinnedSource;
+import dev.diorama.bake.TallChunks;
 import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
@@ -302,8 +303,13 @@ public final class MapLevel implements ChunkSource {
 		for (ChunkSnapshot snapshot : this.chunks.values()) {
 			int x0 = snapshot.chunkX << 4;
 			int z0 = snapshot.chunkZ << 4;
-			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.newChunkTop(snapshot), this.topY, z0 + 15, true, true);
 		}
+	}
+
+	/** How high sky-view rays could have stopped at a chunk that was unknown, or can meet it now that it isn't. */
+	private int newChunkTop(ChunkSnapshot snapshot) {
+		return Math.max(snapshot.maxY + 1, Math.min(this.topY, TallChunks.ORDINARY_TOP));
 	}
 
 	/** Block colours or the map style changed: every tile has to be baked again. */
@@ -342,7 +348,7 @@ public final class MapLevel implements ChunkSource {
 	/** Newly seen blocks: cave slices around them can show more now. */
 	public void revealed(int x0, int y0, int z0, int x1, int y1, int z1) {
 		if (this.fogOfWar) {
-			this.invalidate(x0, y0, y0, z0, x1, y1, z1, false, true);
+			this.invalidate(x0, y0, y0, z0, x1, y1, y1, z1, false, true);
 		}
 	}
 
@@ -350,7 +356,7 @@ public final class MapLevel implements ChunkSource {
 	public void lightChanged(int chunkX, int chunkZ, int y0, int y1) {
 		int x0 = chunkX << 4;
 		int z0 = chunkZ << 4;
-		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, z0 + 15, false, true);
+		this.invalidate(x0, y0, y0, z0, x0 + 15, y1, y1, z0 + 15, false, true);
 	}
 
 	public int chunkCount() {
@@ -377,12 +383,12 @@ public final class MapLevel implements ChunkSource {
 			int z0 = snapshot.chunkZ << 4;
 			// Rays from any height could have stopped at this chunk while it was unknown. The sky
 			// view only reaches down to the surface; cave slices can be anywhere below it.
-			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.topY, z0 + 15, true, true);
+			this.invalidate(x0, Math.min(snapshot.floorY, this.topY), this.minY, z0, x0 + 15, this.newChunkTop(snapshot), this.topY, z0 + 15, true, true);
 		} else {
 			// Under a roof the sky view is lit by block light, so light is part of what's saved.
 			boolean terrain = (changed[6] & CHANGED_SURFACE) != 0 || this.roofless() && (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
 			boolean surface = terrain || (changed[6] & CHANGED_SURFACE_LIGHT) != 0;
-			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[5], surface, terrain);
+			this.invalidate(changed[0], changed[1], changed[1], changed[2], changed[3], changed[4], changed[4], changed[5], surface, terrain);
 		}
 		this.playerChunkX = playerChunkX;
 		this.playerChunkZ = playerChunkZ;
@@ -400,11 +406,12 @@ public final class MapLevel implements ChunkSource {
 	private static final int LIGHT_REACH = 15;
 
 	/**
-	 * Marks tile blocks that can look different after blocks in this box changed. {@code y0} is the
-	 * bottom of the box for the sky view and {@code caveY0} for cave slices. {@code terrain} is
+	 * Marks tile blocks that can look different after blocks in this box changed. {@code y0} and
+	 * {@code y1} are the box's bottom and top for the sky view, {@code caveY0} and {@code caveY1} for
+	 * cave slices. {@code terrain} is
 	 * false when only light changed: the sky view's pixels stay the same, so nothing to save.
 	 */
-	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int z1, boolean visibleFromSky, boolean terrain) {
+	private void invalidate(int x0, int y0, int caveY0, int z0, int x1, int y1, int caveY1, int z1, boolean visibleFromSky, boolean terrain) {
 		Set<Integer> layers = new HashSet<>();
 		for (TileKey key : this.tiles.keySet()) {
 			layers.add(key.layer());
@@ -427,7 +434,7 @@ public final class MapLevel implements ChunkSource {
 			int reachX = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_X : 0);
 			int reachZ = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Z : 0);
 			int reachY = Math.max(cave ? LIGHT_REACH : 0, shadows ? TileBaker.SHADOW_REACH_Y : 0);
-			double top = y1 + 2 + (cave ? LIGHT_REACH : 0);
+			double top = (cave ? caveY1 : y1) + 2 + (cave ? LIGHT_REACH : 0);
 			double bottom = (cave ? caveY0 : y0) - 1 - reachY;
 			if (layer != TileKey.SURFACE) {
 				top = Math.min(top, layer);

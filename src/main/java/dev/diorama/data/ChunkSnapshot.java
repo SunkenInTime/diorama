@@ -371,6 +371,23 @@ public final class ChunkSnapshot {
 		return this.biomes[(dx + 1) * 3 + dz + 1] != null;
 	}
 
+	/**
+	 * One above the tallest block below {@code ceiling}, as far as the columns' tops tell, or
+	 * {@code Integer.MIN_VALUE} if none is.
+	 */
+	public int topBelow(int ceiling) {
+		if (this.maxY < ceiling) {
+			return this.maxY == Integer.MIN_VALUE ? Integer.MIN_VALUE : this.maxY + 1;
+		}
+		int top = Integer.MIN_VALUE;
+		for (int y : this.surface) {
+			if (y < ceiling) {
+				top = Math.max(top, y + 1);
+			}
+		}
+		return top;
+	}
+
 	/** The column's top block y, where its tints are sampled. */
 	public int surface(int x, int z) {
 		return this.surface[((z & 15) << 4) | (x & 15)];
