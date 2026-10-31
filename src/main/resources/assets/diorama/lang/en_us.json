@@ -123,6 +123,8 @@
 	"diorama.settings.game_time.only_24h": "24h",
 	"diorama.settings.game_time.only_12h": "12h",
 	"diorama.minimap.day": "Day %s, %s",
+	"diorama.minimap.time_am": "%s AM",
+	"diorama.minimap.time_pm": "%s PM",
 	"diorama.settings.auto_caves": "Caves underground",
 	"diorama.settings.radar": "Radar",
 	"diorama.settings.players": "Players",
