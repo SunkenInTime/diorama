@@ -20,9 +20,9 @@ import org.jspecify.annotations.Nullable;
  */
 public final class TileBaker {
 	/** Rotated-grid sample offsets inside a pixel. */
-	private static final double[][] SAMPLES = {{0.375, 0.125}, {0.875, 0.375}, {0.125, 0.625}, {0.625, 0.875}};
+	static final double[][] SAMPLES = {{0.375, 0.125}, {0.875, 0.375}, {0.125, 0.625}, {0.625, 0.875}};
 	/** One sample in the middle of the pixel: a quarter of the work, with jaggier block edges. */
-	private static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
+	static final double[][] FAST_SAMPLES = {{0.5, 0.5}};
 	private static volatile boolean fast;
 	/** Under a roof: light filling shadows, direct light from above, and the block light glow. */
 	public static final float LID_AMBIENT = 0.26F;
@@ -132,7 +132,7 @@ public final class TileBaker {
 	private final ChunkSource source;
 	private final MapStyle style;
 	private final Lighting lighting;
-	private final float[] light = new float[3];
+	private final float[] light = new float[4];
 	private final float[] unlit = new float[3];
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
 	private final double sin;
@@ -188,6 +188,9 @@ public final class TileBaker {
 	private boolean surfaceTop;
 	/** What lit the last surface a cave trace landed on; see {@link TileSurface#caveLight}. */
 	private int surfaceLight;
+	private int surfaceShaded;
+	/** In a surface pass, only where the ray lands is wanted, not how it's lit. */
+	private boolean surfaceDepthOnly;
 
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
@@ -320,18 +323,51 @@ public final class TileBaker {
 	}
 
 	/**
-	 * What each pixel of tile pixels (x0, y0) to (x0 + width, y0 + height) of a cave slice shows, for lights drawn over it: where its camera ray
-	 * lands, which way the face there points, the pixel as baked with its light taken out, and
-	 * what lit it. Water counts as ground at its surface. With {@code fogOfWar}, ground not seen
-	 * yet has none, as the tile shows none. Any thread.
+	 * What each pixel of tile pixels (x0, y0) to (x0 + width, y0 + height) shows: where its camera
+	 * ray lands and which way the face there points. On a surface tile, how much of the light there
+	 * is the sun's: one ray per pixel, no lighting, for crafts. On a cave slice, the pixel as baked
+	 * with its light taken out and what lit it, for lights. Water counts as ground at its surface.
+	 * With {@code fogOfWar}, ground not seen yet has none, as the tile shows none. Any thread.
 	 */
 	public static TileSurface surface(TileKey key, int revision, ChunkSource source, BlockLooks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
 		int count = width * height;
-		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new boolean[count], new int[count], new int[count], new boolean[count]);
+		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new float[baker.cave ? 0 : count], new boolean[count], new byte[count], new int[count], new int[count], new boolean[count]);
 		java.util.Arrays.fill(surface.y(), Float.NaN);
-		// Only cave slices, and not under a roof, where the light is lifted off the rock above.
-		if (!baker.cave || baker.startY <= baker.limitY || baker.lifted) {
+		java.util.Arrays.fill(surface.near(), Float.NaN);
+		// Not under a roof, where the light is lifted off the rock above.
+		if (baker.startY <= baker.limitY || baker.lifted) {
+			return surface;
+		}
+		if (!baker.cave) {
+			baker.surfaceOnly = true;
+			double unit = 1.0 / Projection.PIXELS_PER_UNIT;
+			for (int py = 0; py < height; py++) {
+				for (int px = 0; px < width; px++) {
+					baker.surfaceY = Float.NaN;
+					if (baker.trace(key.minU() + (x0 + px + 0.5) * unit, key.minV() + (y0 + py + 0.5) * unit, 0) && !Float.isNaN(baker.surfaceY)) {
+						int i = py * width + px;
+						surface.y()[i] = baker.surfaceY;
+						surface.top()[i] = baker.surfaceTop;
+						surface.sun()[i] = (byte) Math.round(Math.max(0, Math.min(1, baker.light[3])) * 255);
+						surface.albedo()[i] = baker.surfaceShaded;
+					}
+					int i = py * width + px;
+					float near = Float.NaN;
+					baker.surfaceDepthOnly = true;
+					for (int s = 0; s < SAMPLES.length; s++) {
+						baker.surfaceY = Float.NaN;
+						double v = key.minV() + (y0 + py + SAMPLES[s][1]) * unit;
+						if (baker.trace(key.minU() + (x0 + px + SAMPLES[s][0]) * unit, v, s) && !Float.isNaN(baker.surfaceY)) {
+							double z = (v + baker.surfaceY * baker.cos) / baker.sin;
+							float depth = (float) -(baker.sin * baker.surfaceY + baker.cos * z);
+							near = Float.isNaN(near) ? depth : Math.min(near, depth);
+						}
+					}
+					baker.surfaceDepthOnly = false;
+					surface.near()[i] = near;
+				}
+			}
 			return surface;
 		}
 		int[] pixels = new int[count];
@@ -373,15 +409,47 @@ public final class TileBaker {
 
 	/** Records a surface-only trace landing on a block, lit as a traced one would be. */
 	private void landed(int id, int x, int by, int bz, double fx, double hitY, double hitZ, boolean top, boolean partial) {
-		this.shade(id, x, by, bz, fx, hitY, hitZ, top, partial, 0);
 		this.surfaceY = (float) hitY;
+		if (this.surfaceDepthOnly) {
+			return;
+		}
+		this.shade(id, x, by, bz, fx, hitY, hitZ, top, partial, 0);
+		this.surfaceShaded = this.cave ? 0 : this.withoutSun();
 		this.surfaceTop = top;
 	}
 
+	/** A baker only for {@link #sunBlocked}. */
+	public static TileBaker forSunChecks(ChunkSource source, BlockLooks looks) {
+		return new TileBaker(new TileKey(TileKey.SURFACE, 0, 0, 0), source, looks, false, null);
+	}
+
+	/** Whether the world's blocks stand between world point (x, y, z) and the sun, as on the tiles. */
+	public boolean sunBlocked(double x, double y, double z) {
+		return this.inShadow(x + this.sunX * 0.06, y + this.sunY * 0.06, z + this.sunZ * 0.06, this.sunX, this.sunY, this.sunZ);
+	}
+
+	/** The last surface hit as an ABGR pixel without the sun's light: what a shadow falling on it leaves. */
+	private int withoutSun() {
+		float[] tint = this.style.sunTint();
+		float direct = this.light[3] * luminance(this.light[0], this.light[1], this.light[2]) / Math.max(1e-6F, luminance(tint[0], tint[1], tint[2]));
+		return abgr(this.albedoR * Math.max(0, this.light[0] - direct * tint[0]), this.albedoG * Math.max(0, this.light[1] - direct * tint[1]),
+			this.albedoB * Math.max(0, this.light[2] - direct * tint[2]), 255);
+	}
+
 	/** Records a surface-only trace landing on water at height {@code y}. */
-	private void landedOnWater(int waterId, int x, int by, int bz, double y) {
+	private void landedOnWater(int waterId, int x, int by, int bz, double fx, double y, double z) {
+		if (this.surfaceDepthOnly) {
+			this.surfaceY = (float) y;
+			return;
+		}
 		this.albedo(waterId, x, bz, true);
-		this.surfaceLight = this.waterLight(x, by, bz, y);
+		this.surfaceShaded = 0;
+		if (this.cave) {
+			this.surfaceLight = this.waterLight(x, by, bz, y);
+		} else {
+			boolean shadowed = this.inShadow(x + fx, y + 1e-4, z, this.sunX, this.sunY, this.sunZ);
+			this.lighting.surface(1, shadowed, 1, 1, 0, 1, y, this.light);
+		}
 		this.surfaceY = (float) y;
 		this.surfaceTop = true;
 	}
@@ -668,7 +736,7 @@ public final class TileBaker {
 	}
 
 	/** True if the neighbour is a much nearer surface, so this pixel sits just behind an edge. */
-	private static boolean nearer(float neighbour, float here) {
+	static boolean nearer(float neighbour, float here) {
 		return here - neighbour > OUTLINE_DEPTH;
 	}
 
@@ -780,7 +848,7 @@ public final class TileBaker {
 					if (this.surfaceOnly) {
 						// Water over the block is the ground there.
 						if (waterId >= 0) {
-							this.landedOnWater(waterId, x, waterBy, waterBz, y0 - waterT * sin);
+							this.landedOnWater(waterId, x, waterBy, waterBz, fx, y0 - waterT * sin, z0 - waterT * cos);
 						} else {
 							this.landed(id, x, by, bz, fx, y0 - t * sin, z0 - t * cos, enteredTop, partial);
 						}
@@ -855,7 +923,7 @@ public final class TileBaker {
 		}
 		if (this.surfaceOnly) {
 			if (waterId >= 0) {
-				this.landedOnWater(waterId, x, waterBy, waterBz, y0 - waterT * sin);
+				this.landedOnWater(waterId, x, waterBy, waterBz, fx, y0 - waterT * sin, z0 - waterT * cos);
 			}
 			return true;
 		}

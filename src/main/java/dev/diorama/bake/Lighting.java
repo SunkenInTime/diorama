@@ -14,9 +14,17 @@ final class Lighting {
 	private static final float CAVE_CEILING = 0.8F;
 
 	private final MapStyle style;
+	/** Toward the sun, as a unit vector. */
+	final double sunX;
+	final double sunY;
+	final double sunZ;
 
 	Lighting(MapStyle style) {
 		this.style = style;
+		double[] sun = CraftShadow.sun(style);
+		this.sunX = sun[0];
+		this.sunY = sun[1];
+		this.sunZ = sun[2];
 	}
 
 	/**
@@ -25,6 +33,8 @@ final class Lighting {
 	 * whether something stands between it and the sun, {@code ao} the corner occlusion,
 	 * {@code sky} how much open sky it sees (0..1), {@code emission} its own glow (0..1),
 	 * {@code facing} how much its side is darkened (1 for a top) and {@code y} its height.
+	 * {@code out[3]} gets the share of the light that comes straight from the sun: what a shadow
+	 * falling on it takes away.
 	 */
 	void surface(double lambert, boolean shadowed, float ao, float sky, float emission, float facing, double y, float[] out) {
 		MapStyle style = this.style;
@@ -57,12 +67,17 @@ final class Lighting {
 			g *= f;
 			b *= f;
 		}
+		float lit = luminance(r, g, b);
+		float sun = luminance(direct * sunTint[0], direct * sunTint[1], direct * sunTint[2]) / Math.max(1e-6F, luminance(ambient * skyTint[0] + direct * sunTint[0], ambient * skyTint[1] + direct * sunTint[1], ambient * skyTint[2] + direct * sunTint[2]));
 		if (emission > 0) {
 			float glow = 0.35F + emission * 0.85F;
 			r = Math.max(r, glow);
 			g = Math.max(g, glow);
 			b = Math.max(b, glow);
+			// Where the block's own glow outshines the daylight, a shadow takes less away.
+			sun *= Math.min(1, lit / Math.max(1e-6F, luminance(r, g, b)));
 		}
+		out[3] = sun;
 		out[0] = r * facing;
 		out[1] = g * facing;
 		out[2] = b * facing;
@@ -107,5 +122,9 @@ final class Lighting {
 		out[0] = r * facing;
 		out[1] = g * facing;
 		out[2] = b * facing;
+	}
+
+	static float luminance(float r, float g, float b) {
+		return 0.2126F * r + 0.7152F * g + 0.0722F * b;
 	}
 }

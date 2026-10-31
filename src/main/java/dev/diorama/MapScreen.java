@@ -253,6 +253,7 @@ public final class MapScreen extends Screen {
 		MapViewport.View view = new MapViewport.View(0, 0, this.width, this.height, this.centerU, this.centerV, this.zoom, this.layer);
 		this.viewport.draw(graphics, session.map(), view, overlayBits(session), Settings.get().claims != Settings.ClaimsShown.OFF,
 			() -> session.lights().draw(graphics, view, a, 1, ServerRules.radarAllowed() && Settings.get().radarOnMap));
+		session.crafts().draw(graphics, view, a, 1);
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && (this.draw.active() || Settings.get().drawings != Settings.DrawingsShown.OFF)) {
 			this.draw.drawMap(graphics, this.font, view, drawings.in(this.dimension()), mouseX, mouseY, !this.overControls(mouseX, mouseY));
