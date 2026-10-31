@@ -28,6 +28,8 @@ public final class MapPick {
 	private final boolean roofless;
 	private final int startY;
 	private final int limitY;
+	/** Builds above an ordinary world's top, as the baker has them; null when no ray starts up there. */
+	private final @Nullable TallChunks tall;
 	/** Where the last {@link #FOUND} pick stands; its x is the picked column. */
 	public int y;
 	public int z;
@@ -59,6 +61,7 @@ public final class MapPick {
 		this.startY = this.cave ? Math.min(tile.layer(), source.maxY())
 			: this.roofless ? Math.min(source.roof(), source.maxY()) : fromWorldTop ? source.maxY() : TileBaker.localTop(tile, source, 0);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - TileBaker.CAVE_DEPTH) : source.minY();
+		this.tall = this.cave || this.roofless || fromWorldTop ? null : TallChunks.around(tile, source, this.startY);
 	}
 
 	/**
@@ -80,8 +83,9 @@ public final class MapPick {
 		double sin = Projection.sin();
 		double cos = Projection.cos();
 		int x = (int) Math.floor(u);
-		double z0 = (v + this.startY * cos) / sin;
-		int by = this.startY - 1;
+		int top = this.tall == null ? this.startY : this.tall.rayStart(x, v, sin, cos);
+		double z0 = (v + top * cos) / sin;
+		int by = top - 1;
 		int bz = (int) Math.floor(z0);
 		double tMaxY = 1 / sin;
 		double tMaxZ = (z0 - bz) / cos;
@@ -89,7 +93,10 @@ public final class MapPick {
 		while (by >= this.limitY) {
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				return UNKNOWN;
+				if (this.tall == null || by < this.tall.missingTop) {
+					return UNKNOWN;
+				}
+				id = VoxelReader.AIR_ID;
 			}
 			byte kind = this.looks.kind[id];
 			if (skippingRock && kind != BlockLooks.SOLID && !(this.underRoof && by + 1 < this.startY && this.reader.pocket(x, by, bz))) {

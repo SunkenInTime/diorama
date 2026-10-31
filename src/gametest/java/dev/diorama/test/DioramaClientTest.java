@@ -236,6 +236,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
 		}
+		if (tests.contains("tall-world")) {
+			TallWorldTest.run(context);
+		}
 		if (tests.contains("sub-maps")) {
 			subMaps(context);
 		}
@@ -5516,10 +5519,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "sub-maps", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "sub-maps");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps");
 			*///?}
 		}
 		return Set.of(env.split(","));

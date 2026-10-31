@@ -319,13 +319,16 @@ public final class GpuMesher {
 					}
 					int id = reader.state(x, y, z);
 					if (id == VoxelReader.UNKNOWN) {
-						if (fromAbove) {
-							mesh.opaque.add(x, y, z, TOP, 0, 0, 0, UNKNOWN);
+						if (!helper.passesMissing(y)) {
+							if (fromAbove) {
+								mesh.opaque.add(x, y, z, TOP, 0, 0, 0, UNKNOWN);
+							}
+							if (fromSouth) {
+								mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
+							}
+							continue;
 						}
-						if (fromSouth) {
-							mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
-						}
-						continue;
+						id = VoxelReader.AIR_ID;
 					}
 					byte kind = looks.kind[id];
 					// Smaller than a cube (only solid and see-through blocks have shapes): a ray

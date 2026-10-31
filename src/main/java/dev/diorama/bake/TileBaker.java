@@ -120,6 +120,8 @@ public final class TileBaker {
 	final int topY;
 	/** The same for shadow and sky rays, which reach further north. */
 	final int rayTop;
+	/** Builds above an ordinary world's top, for rays that start up there; null when no ray does. */
+	private final @Nullable TallChunks tall;
 	/** Cave slice that may only show blocks the player has seen. */
 	final boolean fogOfWar;
 	/** What to record for the overlays, or null to record nothing. */
@@ -196,6 +198,7 @@ public final class TileBaker {
 		this.topY = localTop(key, source, 0);
 		this.rayTop = localTop(key, source, SKY_REACH);
 		this.startY = this.cave ? Math.min(key.layer(), source.maxY()) : this.roofless ? Math.min(source.roof(), source.maxY()) : this.topY;
+		this.tall = this.lit ? null : TallChunks.around(key, source, this.startY);
 		double originZ = (key.minV() + this.startY * this.cos) / this.sin;
 		this.depthOrigin = -(this.sin * this.startY + this.cos * originZ);
 		this.limitY = this.cave ? Math.max(source.minY(), this.startY - CAVE_DEPTH) : source.minY();
@@ -216,6 +219,11 @@ public final class TileBaker {
 			this.lidAt.put(key, lid);
 		}
 		return lid;
+	}
+
+	/** Whether a ray at this height goes on through a chunk the map has no data for; see {@link TallChunks}. */
+	boolean passesMissing(int y) {
+		return this.tall != null && y >= this.tall.missingTop;
 	}
 
 	float hazeR;
@@ -302,23 +310,27 @@ public final class TileBaker {
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
 	 */
 	static int localTop(TileKey key, ChunkSource source, int moreNorth) {
-		int globalTop = Math.min(source.maxY(), source.topY());
+		return localTop(key, source, moreNorth, Math.min(source.maxY(), source.topY()));
+	}
+
+	/** The same, for only what stands below {@code ceiling}, which it never goes above. */
+	static int localTop(TileKey key, ChunkSource source, int moreNorth, int ceiling) {
 		double minU = key.minU();
 		double minV = key.minV();
 		int x0 = Math.floorDiv((int) Math.floor(minU) - 1, 16);
 		int x1 = Math.floorDiv((int) Math.ceil(minU + Projection.TILE_UNITS) + SHADOW_REACH_X + 1, 16);
 		int z0 = Math.floorDiv((int) Math.floor(Projection.zAt(minV, source.minY())) - 1 - moreNorth, 16);
-		int z1 = Math.floorDiv((int) Math.ceil(Projection.zAt(minV + Projection.TILE_UNITS, globalTop)) + SHADOW_REACH_Z + 1, 16);
+		int z1 = Math.floorDiv((int) Math.ceil(Projection.zAt(minV + Projection.TILE_UNITS, ceiling)) + SHADOW_REACH_Z + 1, 16);
 		int top = Integer.MIN_VALUE;
 		for (int cx = x0 - 2; cx <= x1; cx++) {
 			for (int cz = z0; cz <= z1 + 1; cz++) {
 				ChunkSnapshot chunk = source.chunk(cx, cz);
-				if (chunk != null && chunk.maxY != Integer.MIN_VALUE) {
-					top = Math.max(top, chunk.maxY + 1);
+				if (chunk != null) {
+					top = Math.max(top, chunk.topBelow(ceiling));
 				}
 			}
 		}
-		return top == Integer.MIN_VALUE ? globalTop : Math.min(globalTop, top);
+		return top == Integer.MIN_VALUE ? ceiling : Math.min(ceiling, top);
 	}
 
 	/**
@@ -544,10 +556,11 @@ public final class TileBaker {
 		final double cos = this.cos;
 		final int x = (int) Math.floor(u);
 		final double fx = u - x;
-		final double y0 = this.startY;
+		final int top = this.tall == null ? this.startY : this.tall.rayStart(x, v, sin, cos);
+		final double y0 = top;
 		final double z0 = (v + y0 * cos) / sin;
 
-		int by = this.startY - 1;
+		int by = top - 1;
 		int bz = (int) Math.floor(z0);
 		double tMaxY = (y0 - by) / sin;
 		double tMaxZ = (z0 - bz) / cos;
@@ -594,7 +607,10 @@ public final class TileBaker {
 			}
 			int id = this.reader.state(x, by, bz);
 			if (id == VoxelReader.UNKNOWN) {
-				return false;
+				if (!this.passesMissing(by)) {
+					return false;
+				}
+				id = VoxelReader.AIR_ID;
 			}
 			byte kind = this.looks.kind[id];
 			// Only solid blocks (and the see-through ones among them) have shapes.
@@ -652,7 +668,7 @@ public final class TileBaker {
 						this.outB = this.outB * through + overB * light;
 					}
 					if (waterId >= 0) {
-						this.mixWater(waterId, x, waterBy, waterBz, u, z0, waterT, t, sample);
+						this.mixWater(waterId, x, waterBy, waterBz, u, y0, z0, waterT, t, sample);
 					}
 					return true;
 				}
@@ -702,7 +718,7 @@ public final class TileBaker {
 			this.outR = 0;
 			this.outG = 0;
 			this.outB = 0;
-			this.mixWater(waterId, x, waterBy, waterBz, u, z0, waterT, waterT + 64, sample);
+			this.mixWater(waterId, x, waterBy, waterBz, u, y0, z0, waterT, waterT + 64, sample);
 		} else {
 			this.outR = 0.01F;
 			this.outG = 0.01F;
@@ -893,7 +909,7 @@ public final class TileBaker {
 		}
 	}
 
-	private void mixWater(int waterId, int x, int by, int bz, double u, double z0, double tEntry, double tHit, int sample) {
+	private void mixWater(int waterId, int x, int by, int bz, double u, double y0, double z0, double tEntry, double tHit, int sample) {
 		this.albedo(waterId, x, bz, true);
 		float wr = this.albedoR;
 		float wg = this.albedoG;
@@ -906,7 +922,7 @@ public final class TileBaker {
 		} else {
 			double sy = this.sunY + SUN_JITTER[sample][1];
 			double ox = u;
-			double oy = this.startY - tEntry * this.sin + 1e-4;
+			double oy = y0 - tEntry * this.sin + 1e-4;
 			double oz = z0 - tEntry * this.cos;
 			boolean shadow = this.inShadow(ox, oy, oz, this.sunX, sy, this.sunZ);
 			// Lit like the ground around it: the style's light, sky occlusion and height shade.
