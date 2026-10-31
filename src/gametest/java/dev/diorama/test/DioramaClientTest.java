@@ -211,6 +211,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
 			}
+			if (tests.contains("pixelmon")) {
+				PixelmonTest.run(context, world);
+			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
 				brokenFog(context);
