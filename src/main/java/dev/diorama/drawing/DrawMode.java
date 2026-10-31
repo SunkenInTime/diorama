@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -78,6 +79,8 @@ public final class DrawMode {
 	private final Measure measure = new Measure();
 	/** Finds the block under a screen point, for the measuring tool. */
 	private Measure.Picker picker = (x, y) -> java.util.concurrent.CompletableFuture.completedFuture(null);
+	/** The dimension whose map is being drawn on. */
+	private Supplier<String> dimension = () -> "";
 	/** Gives a widget the screen's keyboard focus. */
 	private Consumer<AbstractWidget> focus = w -> {
 	};
@@ -109,9 +112,10 @@ public final class DrawMode {
 	 * being drawn carries over: a note typed so far is kept, a pen stroke ends where it got to, an
 	 * erase stays undoable, and the points of a line or area stay (they're in map space).
 	 */
-	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker) {
+	public void init(Font font, Consumer<AbstractWidget> add, Consumer<AbstractWidget> focus, Measure.Picker picker, Supplier<String> dimension) {
 		this.commitNote();
 		this.endGesture();
+		this.dimension = dimension;
 		this.focus = focus;
 		this.picker = picker;
 		this.toolButtons.clear();
@@ -202,6 +206,18 @@ public final class DrawMode {
 	}
 
 	/**
+	 * The map is about to show another dimension: a note being typed and a stroke being drawn are
+	 * kept, what's half made is dropped, and undo stops here, since what it would take back won't
+	 * be on screen.
+	 */
+	public void leaveDimension() {
+		this.commitNote();
+		this.endGesture();
+		this.cancel();
+		this.undo.clear();
+	}
+
+	/**
 	 * Ends a pen stroke or an erase the mouse is still down for, as if it were let go: the screen
 	 * that would have had the release is being rebuilt.
 	 */
@@ -209,9 +225,8 @@ public final class DrawMode {
 		this.measure.end();
 		if (this.penDown) {
 			this.penDown = false;
-			String dimension = currentDimension();
-			if (dimension != null && this.points.size() >= 2) {
-				this.finish(new Drawing(Drawing.Kind.STROKE, dimension, color, flatten(this.points), ""));
+			if (this.points.size() >= 2) {
+				this.finish(new Drawing(Drawing.Kind.STROKE, this.dimension.get(), color, flatten(this.points), ""));
 			}
 			this.points.clear();
 		}
@@ -483,7 +498,7 @@ public final class DrawMode {
 		*///?}
 	}
 
-	private static boolean shiftDown() {
+	public static boolean shiftDown() {
 		//? if >=1.21.9 {
 		return Minecraft.getInstance().hasShiftDown();
 		//?} else {
@@ -503,17 +518,10 @@ public final class DrawMode {
 			return;
 		}
 		String text = this.noteBox.getValue().strip();
-		String dimension = currentDimension();
+		String dimension = this.dimension.get();
 		double[] at = this.notePoint;
 		this.cancel();
-		if (dimension != null) {
-			this.finish(new Drawing(Drawing.Kind.NOTE, dimension, color, at, text));
-		}
-	}
-
-	private static @Nullable String currentDimension() {
-		Minecraft mc = Minecraft.getInstance();
-		return mc.level == null ? null : mc.level.dimension().identifier().toString();
+		this.finish(new Drawing(Drawing.Kind.NOTE, dimension, color, at, text));
 	}
 
 	private void finish(Drawing drawing) {

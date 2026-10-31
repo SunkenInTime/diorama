@@ -130,6 +130,8 @@ public final class SettingsScreen extends Screen {
 		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
 		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
 		overlays.toggle("slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
+		// Here rather than with the other map buttons: another row there runs into Done on a short window.
+		overlays.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));

@@ -17,6 +17,8 @@ import dev.diorama.data.SeenBlocks;
 import dev.diorama.data.TileStore;
 import dev.diorama.data.WorldSavePick;
 import dev.diorama.render.gpu.MapTexture;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -33,6 +35,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import net.minecraft.core.BlockPos;
 import org.jspecify.annotations.Nullable;
 
@@ -79,6 +82,11 @@ public final class MapLevel implements ChunkSource {
 	/** Where this dimension's map is saved, or null when there's no world to save it for. */
 	private final @Nullable Path folder;
 	/**
+	 * Only shows what's saved in {@link #folder}, for a dimension the player isn't in: tiles load off
+	 * the disk as overview tiles do, nothing is baked, and nothing here writes to the folder.
+	 */
+	private final boolean savedOnly;
+	/**
 	 * Saved tiles for the current camera angle, or null when nothing is saved. Changed on the
 	 * render thread; {@link SavedChunkImport} reads it from its own.
 	 */
@@ -123,8 +131,8 @@ public final class MapLevel implements ChunkSource {
 	private volatile long focusMs;
 	/** Overview tiles the writer rebuilt; reloaded when next wanted. */
 	private final ConcurrentLinkedQueue<TileKey> overviewChanged = new ConcurrentLinkedQueue<>();
-	/** Overview tiles with nothing saved under them; not asked for again until that changes. */
-	private final Set<TileKey> emptyOverviews = new HashSet<>();
+	/** Tiles loaded off the disk with nothing saved there; not asked for again until that changes. */
+	private final Set<TileKey> emptyTiles = new HashSet<>();
 	/**
 	 * Surface tiles whose chunks changed since the tile was last baked, and when. They're baked in
 	 * the background and saved, so the saved map covers everywhere the player has been, not only
@@ -165,12 +173,34 @@ public final class MapLevel implements ChunkSource {
 	private final int roof;
 
 	public MapLevel(int minY, int maxY, int roof, @Nullable Path folder) {
+		this(minY, maxY, roof, folder, false);
+	}
+
+	private MapLevel(int minY, int maxY, int roof, @Nullable Path folder, boolean savedOnly) {
 		this.minY = minY;
 		this.maxY = maxY;
 		this.roof = roof;
 		this.folder = folder;
+		this.savedOnly = savedOnly;
 		this.store = this.openStore();
-		this.seen = folder == null ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
+		this.seen = folder == null || savedOnly ? new SeenBlocks() : SeenBlocks.load(folder.resolve("seen.bin"));
+	}
+
+	/**
+	 * The map saved in a folder, to look at from another dimension. Only the sky view is saved, and
+	 * what kind of view that was is told by the folder: a dimension the player isn't in has no level
+	 * to ask whether it has a roof, and a modded one could. The roof's height doesn't matter here.
+	 */
+	public static MapLevel saved(Path folder) {
+		boolean roofed = false;
+		if (Files.isDirectory(folder)) {
+			try (Stream<Path> views = Files.list(folder)) {
+				roofed = views.anyMatch(view -> view.getFileName().toString().startsWith("under-roof-"));
+			} catch (IOException | java.io.UncheckedIOException e) {
+				Diorama.LOGGER.warn("Couldn't look through the map in {}", folder, e);
+			}
+		}
+		return new MapLevel(0, 0, roofed ? 0 : NO_ROOF, folder, true);
 	}
 
 	@Override
@@ -294,7 +324,7 @@ public final class MapLevel implements ChunkSource {
 		this.store.close();
 		this.store = this.openStore();
 		this.unsaved.clear();
-		this.emptyOverviews.clear();
+		this.emptyTiles.clear();
 		// Chunks count as seen live per kind of view: what's saved for the old one isn't for this one.
 		this.liveChunksSaved.clear();
 		if (this.watchingLiveChunks) {
@@ -587,7 +617,7 @@ public final class MapLevel implements ChunkSource {
 		this.frame++;
 		TileKey changedOverview;
 		while ((changedOverview = this.overviewChanged.poll()) != null) {
-			this.emptyOverviews.remove(changedOverview);
+			this.emptyTiles.remove(changedOverview);
 			// A load still in flight may have read the old pixels: load it again after.
 			if (this.tiles.containsKey(changedOverview) || this.inFlight.contains(changedOverview)) {
 				this.dirty.computeIfAbsent(changedOverview, k -> new Dirty(0)).blocks.set(0);
@@ -622,7 +652,7 @@ public final class MapLevel implements ChunkSource {
 		}
 
 		BlockLooks looks = BlockLooks.get();
-		if (looks != null && this.topY != Integer.MIN_VALUE) {
+		if (this.savedOnly || looks != null && this.topY != Integer.MIN_VALUE) {
 			long now = System.currentTimeMillis();
 			int limit = 6;
 			List<Map.Entry<TileKey, Double>> order = new ArrayList<>(this.wanted.entrySet());
@@ -645,11 +675,11 @@ public final class MapLevel implements ChunkSource {
 					continue;
 				}
 				boolean missing = !this.tiles.containsKey(key);
-				if (key.lod() > 0) {
+				if (key.lod() > 0 || this.savedOnly) {
 					// Overview tiles come from disk, shrunk from saved tiles; nothing to bake.
-					if ((missing || this.dirty.containsKey(key)) && this.store != null && !this.emptyOverviews.contains(key)) {
+					if ((missing || this.dirty.containsKey(key)) && this.store != null && !this.emptyTiles.contains(key)) {
 						this.dirty.remove(key);
-						this.loadOverview(key, this.store);
+						this.loadSaved(key, this.store);
 					}
 					continue;
 				}
@@ -699,9 +729,9 @@ public final class MapLevel implements ChunkSource {
 			return;
 		}
 		if (tile == null) {
-			if (image.key().lod() > 0 && !image.isFull()) {
+			if ((image.key().lod() > 0 || this.savedOnly) && !image.isFull()) {
 				if (!this.dirty.containsKey(image.key())) {
-					this.emptyOverviews.add(image.key());
+					this.emptyTiles.add(image.key());
 				}
 			}
 			if (!image.isFull()) {
@@ -714,7 +744,7 @@ public final class MapLevel implements ChunkSource {
 		tile.upload(image);
 		this.pixelsMoved(image.key());
 		this.coverageVersion++;
-		if (this.store != null && !image.key().isCave() && image.key().lod() == 0) {
+		if (this.store != null && !this.savedOnly && !image.key().isCave() && image.key().lod() == 0) {
 			this.store.baked(image);
 		}
 	}
@@ -1090,7 +1120,7 @@ public final class MapLevel implements ChunkSource {
 		return ClaimPaint.paint(key, chunks, store.chunks(north), store.chunks(south), claims);
 	}
 
-	private void loadOverview(TileKey key, TileStore store) {
+	private void loadSaved(TileKey key, TileStore store) {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
 		BAKERS.execute(() -> {
@@ -1098,7 +1128,7 @@ public final class MapLevel implements ChunkSource {
 			try {
 				pixels = store.read(key);
 			} catch (Throwable t) {
-				Diorama.LOGGER.error("Failed to load overview tile {}", key, t);
+				Diorama.LOGGER.error("Failed to load saved tile {}", key, t);
 			}
 			this.finished.add((pixels == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, pixels)).withGeneration(generation));
 		});
@@ -1185,7 +1215,7 @@ public final class MapLevel implements ChunkSource {
 
 	/** Saves fog-of-war progress if it changed. Call now and then; tiles save themselves. */
 	public void saveSeen() {
-		if (this.folder != null) {
+		if (this.folder != null && !this.savedOnly) {
 			this.seen.save(this.folder.resolve("seen.bin"));
 		}
 	}
@@ -1194,7 +1224,7 @@ public final class MapLevel implements ChunkSource {
 		if (this.closed) {
 			return;
 		}
-		if (this.store != null) {
+		if (this.store != null && !this.savedOnly) {
 			this.saveLastBakes(this.store);
 		}
 		this.closed = true;
