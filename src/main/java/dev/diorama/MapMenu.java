@@ -17,6 +17,7 @@ public final class MapMenu {
 	private static final int INFO = 0xFF9BA3AE;
 	private static final int OFF = 0xFF5C636D;
 	private static final int CONFIRM = 0xFFFF7A70;
+	private static final int DONE = 0xFF7FD17F;
 
 	/** One line. Without an action it's information and can't be clicked. */
 	public static final class Item {
@@ -25,32 +26,40 @@ public final class MapMenu {
 		private final boolean active;
 		/** Shown in place of the label after a first click; the second click runs the action. */
 		private final @Nullable Component confirm;
+		/** The action runs on the first click and the menu stays open; {@link #confirm} then says it's done. */
+		private final boolean stays;
 		private boolean armed;
 
-		private Item(Component label, @Nullable Runnable action, boolean active, @Nullable Component confirm) {
+		private Item(Component label, @Nullable Runnable action, boolean active, @Nullable Component confirm, boolean stays) {
 			this.label = label;
 			this.action = action;
 			this.active = active;
 			this.confirm = confirm;
+			this.stays = stays;
 		}
 
 		/** A grey line of information. */
 		public static Item info(Component label) {
-			return new Item(label, null, false, null);
+			return new Item(label, null, false, null, false);
 		}
 
 		/** A white line of information, for the name of what was clicked. */
 		public static Item title(Component label) {
-			return new Item(label, null, true, null);
+			return new Item(label, null, true, null, false);
 		}
 
 		public static Item action(Component label, boolean active, Runnable action) {
-			return new Item(label, action, active, null);
+			return new Item(label, action, active, null, false);
 		}
 
 		/** An action that asks for a second click first. */
 		public static Item confirmed(Component label, Component confirm, Runnable action) {
-			return new Item(label, action, true, confirm);
+			return new Item(label, action, true, confirm, false);
+		}
+
+		/** An action with nothing to see afterwards: it keeps the menu open and shows {@code done} in its place. */
+		public static Item stays(Component label, Component done, Runnable action) {
+			return new Item(label, action, true, done, true);
 		}
 
 		private Component shown() {
@@ -111,6 +120,11 @@ public final class MapMenu {
 		if (item == null || !item.clickable()) {
 			return false;
 		}
+		if (item.stays) {
+			item.action.run();
+			item.armed = true;
+			return false;
+		}
 		if (item.confirm != null && !item.armed) {
 			item.armed = true;
 			return false;
@@ -130,7 +144,7 @@ public final class MapMenu {
 			if (item == hovered && item.clickable()) {
 				graphics.fill(this.x + 1, top, this.x + this.width - 1, top + ROW, 0xFF2D3A4E);
 			}
-			int colour = item.action == null ? (item.active ? TEXT : INFO) : !item.active ? OFF : item.armed ? CONFIRM : TEXT;
+			int colour = item.action == null ? (item.active ? TEXT : INFO) : !item.active ? OFF : !item.armed ? TEXT : item.stays ? DONE : CONFIRM;
 			graphics.text(this.font, item.shown(), this.x + PAD + 2, top + 2, colour, false);
 		}
 	}

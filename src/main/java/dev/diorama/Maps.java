@@ -15,9 +15,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -113,6 +115,20 @@ public final class Maps {
 	/** The dimensions that have a map other than their main one, or had one. */
 	public List<String> dimensions() {
 		return List.copyOf(this.saved.dimensions.keySet());
+	}
+
+	/**
+	 * The dimensions the map can be switched to, from the one the player is in: the Overworld, the
+	 * Nether and the End, then the rest the server has by name, those with a map saved, even if the
+	 * one in use there is still empty. A dimension has only a hashed folder, so its ID can't be read
+	 * back from the disk.
+	 */
+	public List<String> saved(String here, Collection<String> serverLevels) {
+		LinkedHashSet<String> known = new LinkedHashSet<>(List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
+		serverLevels.stream().sorted().forEach(known::add);
+		known.addAll(this.dimensions());
+		known.add(here);
+		return known.stream().filter(dimension -> dimension.equals(here) || this.list(dimension).stream().anyMatch(map -> Files.isDirectory(map.folder()))).toList();
 	}
 
 	/** The ID of the map in use in a dimension. */
