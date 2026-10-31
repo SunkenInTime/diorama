@@ -225,7 +225,7 @@
 	"diorama.settings.map_maps_button": "Maps button",
 	"diorama.settings.map_maps_button.tooltip": "The Maps button at the top of the map, where each dimension's maps are made and switched.",
 	"diorama.settings.map_dimension_button": "Dimension button",
-	"diorama.settings.map_dimension_button.tooltip": "The button at the top of the map that shows another dimension's map without going there. It shows up once a second dimension has been mapped. Off, its key still works if you bind one.",
+	"diorama.settings.map_dimension_button.tooltip": "The square at the bottom left of the map that shows another dimension's map without going there. It shows up once a second dimension has been mapped. Off, its key still works if you bind one.",
 	"diorama.settings.outlines.tooltip": "Darkens the edge where a block stands in front of lower ground, so cliffs and roofs stand out.",
 	"diorama.settings.rounded_fog.tooltip": "Rounds off the edge of the explored map, instead of following the square edges of chunks.",
 	"diorama.settings.fog_of_war.tooltip": "Cave maps show only the blocks you've seen, even where the server allows the full map.",

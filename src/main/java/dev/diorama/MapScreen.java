@@ -62,7 +62,8 @@ import com.mojang.blaze3d.platform.InputConstants;
  * Each key also has a control on screen: Surface and Caves tabs, a Waypoints button, zoom and
  * recenter buttons, and on the cave map a depth gauge whose band moves the slice.
  *
- * <p>The dimension button shows the saved map of another dimension, without going there. Only sky
+ * <p>The dimension button, a square at the bottom left, shows the saved map of another dimension,
+ * without going there, and each click is the next dimension, as on Xaero's World Map. Only sky
  * views are saved, so that's what shows, without the live things the player's own level gives the
  * map: caves, the radar, claims, overlays and distances. Waypoints, drawings, the right-click menu
  * and teleporting are that dimension's.
@@ -75,6 +76,8 @@ public final class MapScreen extends Screen {
 
 	private static final double MAX_ZOOM = 16;
 
+	/** The dimension button's left edge, under the draw tools. */
+	private static final int DIMENSION_BUTTON_X = 4;
 	/** Height of the top bar, which holds the tabs and buttons. */
 	private static final int BAR = 16;
 	private static final int BOTTOM_BAR = 14;
@@ -121,6 +124,8 @@ public final class MapScreen extends Screen {
 	private Button sliceUp;
 	private Button sliceDown;
 	private Button dimensionButton;
+	/** Whether there's a dimension to switch to, worked out when the screen is built. */
+	private boolean severalDimensions;
 	private Button mapsButton;
 	private Button waypointsButton;
 	private Button settingsButton;
@@ -170,11 +175,10 @@ public final class MapScreen extends Screen {
 		this.pressOnMenu = false;
 		this.pressOnControl = false;
 		Settings settings = Settings.get();
-		// Any of them can be hidden; the ones shown sit together in the corner, Settings last.
 		this.dimensionButton = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.nextDimension())
-			.size(64, BAR).createNarration(n -> this.dimensionName().copy()).build());
-		// Nothing to switch to until a second dimension has a map.
-		this.dimensionButton.visible = settings.mapDimensionButton && this.dimensions().size() > 1;
+			.size(20, 20).createNarration(n -> this.dimensionName().copy()).build());
+		this.severalDimensions = this.dimensions().size() > 1;
+		// Any of them can be hidden; the ones shown sit together in the corner, Settings last.
 		this.mapsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.maps"), b -> {
 			MapsScreen maps = new MapsScreen(this);
 			if (this.otherDimension != null) {
@@ -190,7 +194,7 @@ public final class MapScreen extends Screen {
 			this.minecraft.gui.setScreen(new SettingsScreen(this))).size(64, BAR).build());
 		this.settingsButton.visible = settings.mapSettingsButton;
 		int right = this.width;
-		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton, this.dimensionButton)) {
+		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton)) {
 			if (button.visible) {
 				right -= button.getWidth();
 				button.setPosition(right, 0);
@@ -342,6 +346,10 @@ public final class MapScreen extends Screen {
 		this.zoomIn.setPosition(x, y);
 		this.zoomOut.setPosition(x, y + 22);
 		this.recenter.setPosition(x, y + 48);
+		// Nothing to switch to until a second dimension has a map. Not while drawing, where the draw
+		// tools can reach down this far on a short window.
+		this.dimensionButton.visible = this.severalDimensions && Settings.get().mapDimensionButton && !this.draw.active();
+		this.dimensionButton.setPosition(DIMENSION_BUTTON_X, y + 48);
 		this.zoomIn.active = this.zoom < MAX_ZOOM;
 		this.zoomOut.active = this.zoom > this.minZoom();
 		this.sliceUp.visible = caves;
@@ -377,8 +385,6 @@ public final class MapScreen extends Screen {
 		}
 		MapLevel shown = this.shownMap(session);
 		boolean elsewhere = this.otherDimension != null;
-		String label = this.dimensionName().getString();
-		this.dimensionButton.setMessage(Component.literal(this.fitted(label, this.dimensionButton.getWidth() - 8)));
 		Vec3 pos = player.getPosition(a);
 		double scale = this.scaleToShown();
 		double playerU = pos.x * scale;
@@ -485,6 +491,9 @@ public final class MapScreen extends Screen {
 		if (this.export.visible) {
 			DrawMode.icon(graphics, PICTURE, this.export.getX(), this.export.getY(), 0xFFFFFFFF);
 		}
+		if (this.dimensionButton.visible) {
+			this.drawDimensionIcon(graphics);
+		}
 		if (caves) {
 			this.caret(graphics, this.sliceUp, false);
 			this.caret(graphics, this.sliceDown, true);
@@ -552,26 +561,20 @@ public final class MapScreen extends Screen {
 		}
 		String name = Component.translatable("diorama.map.current_map", maps.name(dimension, maps.active(dimension))).getString();
 		int room = this.width - 6 - left;
-		if (this.font.width(name) > room && room < this.font.width(CommonComponents.ELLIPSIS.getString()) * 4) {
-			return;
+		if (this.font.width(name) > room) {
+			String ellipsis = CommonComponents.ELLIPSIS.getString();
+			if (room < this.font.width(ellipsis) * 4) {
+				return;
+			}
+			name = this.font.plainSubstrByWidth(name, room - this.font.width(ellipsis)) + ellipsis;
 		}
-		name = this.fitted(name, room);
 		graphics.text(this.font, name, this.width - 6 - this.font.width(name), this.height - 11, 0xFFFFFFFF, false);
-	}
-
-	/** A text as it is, or shortened with an ellipsis to fit. */
-	private String fitted(String text, int room) {
-		if (this.font.width(text) <= room) {
-			return text;
-		}
-		String ellipsis = CommonComponents.ELLIPSIS.getString();
-		return this.font.plainSubstrByWidth(text, room - this.font.width(ellipsis)) + ellipsis;
 	}
 
 	/** Where the buttons at the top right start: the status line has to end before them. */
 	private int buttonsStart() {
 		int start = this.width;
-		for (Button button : List.of(this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton)) {
+		for (Button button : List.of(this.mapsButton, this.waypointsButton, this.settingsButton)) {
 			if (button.visible) {
 				start = Math.min(start, button.getX());
 			}
@@ -1125,6 +1128,8 @@ public final class MapScreen extends Screen {
 		int by0 = (this.export.visible ? this.export.getY() : this.drawButton.getY()) - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
 		int by1 = this.recenter.getY() + this.recenter.getHeight() + 2;
+		int dx1 = this.dimensionButton.getX() + this.dimensionButton.getWidth() + 2;
+		int dy0 = this.dimensionButton.getY() - 2;
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
 		for (WaypointOverlay.Pin pin : pins) {
 			float r = Pins.reach(pin.waypoint(), (int) pin.size()) * pin.scale();
@@ -1137,6 +1142,14 @@ public final class MapScreen extends Screen {
 				pin = up <= left
 					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), pin.scale(), true)
 					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), pin.scale(), true);
+			}
+			if (this.dimensionButton.visible && pin.clamped() && pin.x() - rx < dx1 && pin.y() + r > dy0) {
+				// And behind the dimension button, above it or right.
+				float up = pin.y() + r - dy0;
+				float across = dx1 - (pin.x() - rx);
+				pin = up <= across
+					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), dy0 - r, pin.size(), pin.scale(), true)
+					: new WaypointOverlay.Pin(pin.waypoint(), dx1 + rx, pin.y(), pin.size(), pin.scale(), true);
 			}
 			out.add(pin);
 		}
@@ -1206,6 +1219,62 @@ public final class MapScreen extends Screen {
 		graphics.blitNineSliced(TAB_BUTTON, x, y, w, h, 2, 2, 2, 0, 130, h, 0, row * 24);
 		*///?}
 	}
+
+	/** The dimension button's face: its icon, or for a modded dimension the first letter of its name. */
+	private void drawDimensionIcon(GuiGraphicsExtractor graphics) {
+		int x = this.dimensionButton.getX();
+		int y = this.dimensionButton.getY();
+		String[] icon = switch (this.dimension()) {
+			case "minecraft:overworld" -> OVERWORLD_ICON;
+			case "minecraft:the_nether" -> NETHER_ICON;
+			case "minecraft:the_end" -> END_ICON;
+			default -> null;
+		};
+		if (icon != null) {
+			DrawMode.icon(graphics, icon, x, y, 0xFFFFFFFF);
+			return;
+		}
+		String name = this.dimensionName().getString();
+		String letter = name.isEmpty() ? "?" : name.substring(0, name.offsetByCodePoints(0, 1));
+		graphics.text(this.font, letter, x + 10 - this.font.width(letter) / 2, y + 6, 0xFFFFFFFF, true);
+	}
+
+	/** The Overworld on the dimension button: a tree, 11 by 9. */
+	private static final String[] OVERWORLD_ICON = {
+		"....###....",
+		"..#######..",
+		".#########.",
+		".#########.",
+		"..#######..",
+		"....###....",
+		".....#.....",
+		".....#.....",
+		"....###...."
+	};
+
+	/** The Nether on the dimension button: a flame, 11 by 9. */
+	private static final String[] NETHER_ICON = {
+		".....#.....",
+		"....##.....",
+		"....###.#..",
+		"...#####...",
+		"..#######..",
+		".####.####.",
+		".###...###.",
+		"..##...##..",
+		"...#####..."
+	};
+
+	/** The End on the dimension button: an eye, 11 by 7. */
+	private static final String[] END_ICON = {
+		"...#####...",
+		".##.....##.",
+		"#...###...#",
+		"#..#####..#",
+		"#...###...#",
+		".##.....##.",
+		"...#####..."
+	};
 
 	/** The Export button's icon: a framed picture of a hill under the sun, 11 by 9. */
 	private static final String[] PICTURE = {

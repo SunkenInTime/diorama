@@ -906,9 +906,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 20);
 			context.takeScreenshot("map-dimensions-08-modded");
 			context.runOnClient(mc -> {
-				String label = ((MapScreen) mc.gui.screen()).dimensionButton().getMessage().getString();
-				if (!label.equals("Moon")) {
-					throw new AssertionError("The modded dimension's button says " + label);
+				String name = dev.diorama.waypoint.Waypoints.dimensionName(moon).getString();
+				if (!name.equals("Moon")) {
+					throw new AssertionError("The modded dimension is called " + name);
 				}
 			});
 			// It has no waypoints, and still has its folder from here.
