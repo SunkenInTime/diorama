@@ -206,6 +206,18 @@ public final class DrawMode {
 	}
 
 	/**
+	 * The map is about to show another dimension: a note being typed and a stroke being drawn are
+	 * kept, what's half made is dropped, and undo stops here, since what it would take back won't
+	 * be on screen.
+	 */
+	public void leaveDimension() {
+		this.commitNote();
+		this.endGesture();
+		this.cancel();
+		this.undo.clear();
+	}
+
+	/**
 	 * Ends a pen stroke or an erase the mouse is still down for, as if it were let go: the screen
 	 * that would have had the release is being rebuilt.
 	 */
@@ -238,7 +250,7 @@ public final class DrawMode {
 	}
 
 	/** Drops anything half drawn. An erase cut short keeps what it erased undoable. */
-	public void cancel() {
+	private void cancel() {
 		this.points.clear();
 		this.measure.clear();
 		this.penDown = false;

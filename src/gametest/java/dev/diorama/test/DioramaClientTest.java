@@ -816,6 +816,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (!dev.diorama.waypoint.Waypoints.canTeleport(nether)) {
 					throw new AssertionError("Teleporting to the Nether wasn't offered");
 				}
+				if (dev.diorama.waypoint.Waypoints.canTeleport("diorama_test:gone")) {
+					throw new AssertionError("Teleporting to a dimension the server doesn't have was offered");
+				}
 			});
 			rightClickAt(context, spotAt[0], spotAt[1]);
 			holdFrames(context, 8);
@@ -908,6 +911,17 @@ public class DioramaClientTest implements FabricClientGameTest {
 					throw new AssertionError("The modded dimension's button says " + label);
 				}
 			});
+			// It has no waypoints, and still has its folder from here.
+			clickButton(context, "diorama.map.waypoints");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.waypoint.WaypointListScreen, 40);
+			context.runOnClient(mc -> {
+				String listed = ((dev.diorama.waypoint.WaypointListScreen) mc.gui.screen()).folderName();
+				if (!listed.equals("Moon")) {
+					throw new AssertionError("The waypoint list opened on " + listed + " from the Moon's map");
+				}
+			});
+			clickButton(context, "gui.done");
+			waitForMapOf(context, moon);
 			double[] middle = context.computeOnClient(mc -> {
 				double scale = mc.getWindow().getGuiScale();
 				MapScreen map = (MapScreen) mc.gui.screen();

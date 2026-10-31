@@ -63,6 +63,8 @@ public final class WaypointListScreen extends Screen {
 	/** The folders, dimensions' first, and which one is shown, by key (see {@link WaypointStore#folderKey}). */
 	private final List<Folder> folders = new ArrayList<>();
 	private @Nullable String folderKey;
+	/** The dimension the map was showing, which has a folder even with no waypoints. */
+	private @Nullable String shownDimension;
 	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
 	private boolean empty;
 	/**
@@ -128,10 +130,16 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	/** Shows the folder with this key when the screen opens again. */
-	public void showFolder(String key) {
+	void showFolder(String key) {
 		this.folderKey = key;
 		this.selected = null;
 		this.scroll = 0;
+	}
+
+	/** Shows a dimension's folder when the screen opens, even a modded dimension's with no waypoints yet. */
+	public void showDimension(String dimension) {
+		this.shownDimension = dimension;
+		this.showFolder(WaypointStore.dimensionKey(dimension));
 	}
 
 	/**
@@ -144,6 +152,9 @@ public final class WaypointListScreen extends Screen {
 		java.util.LinkedHashSet<String> dimensions = new java.util.LinkedHashSet<>(List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
 		if (here != null) {
 			dimensions.add(here);
+		}
+		if (this.shownDimension != null) {
+			dimensions.add(this.shownDimension);
 		}
 		if (store != null) {
 			for (Waypoint waypoint : store.all()) {

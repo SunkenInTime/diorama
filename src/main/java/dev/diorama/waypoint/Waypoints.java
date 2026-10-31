@@ -79,10 +79,19 @@ public final class Waypoints {
 	 * Whether teleporting into a dimension is on offer. To another one, the teleport is run through
 	 * {@code /execute in}, as Xaero's World Map does. That only suits {@code /tp}: nothing says a
 	 * server's own teleport command would still work through it, or take the player's dimension along.
+	 * The server has to have the dimension, too: a waypoint can outlive one.
 	 */
 	public static boolean canTeleport(String dimension) {
-		return dimension.equals(dimension()) ? canTeleport()
-			: Settings.get().teleportCommand.equals(Settings.DEFAULT_TELEPORT_COMMAND) && canTeleport() && mayUse("execute");
+		if (dimension.equals(dimension())) {
+			return canTeleport();
+		}
+		var connection = Minecraft.getInstance().getConnection();
+		if (connection == null || !Settings.get().teleportCommand.equals(Settings.DEFAULT_TELEPORT_COMMAND) || !canTeleport()) {
+			return false;
+		}
+		var execute = connection.getCommands().getRoot().getChild("execute");
+		return execute != null && execute.getChild("in") != null
+			&& connection.levels().stream().anyMatch(level -> level.identifier().toString().equals(dimension));
 	}
 
 	private static boolean mayUse(String command) {

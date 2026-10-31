@@ -232,8 +232,15 @@ public final class MapScreen extends Screen {
 		if (maps == null || connection == null || this.minecraft.level == null) {
 			return List.of();
 		}
-		return maps.saved(this.minecraft.level.dimension().identifier().toString(),
+		List<String> saved = maps.saved(this.minecraft.level.dimension().identifier().toString(),
 			connection.levels().stream().map(level -> level.identifier().toString()).toList());
+		// The one shown stays a stop even if nothing is left in it, or there'd be no way off it.
+		if (this.otherDimension == null || saved.contains(this.otherDimension)) {
+			return saved;
+		}
+		List<String> withShown = new ArrayList<>(saved);
+		withShown.add(this.otherDimension);
+		return withShown;
 	}
 
 	/** The dimension button: the next dimension's map, or the last one's with Shift. */
@@ -244,6 +251,7 @@ public final class MapScreen extends Screen {
 		}
 		int step = DrawMode.shiftDown() ? -1 : 1;
 		String next = dimensions.get(Math.floorMod(dimensions.indexOf(this.dimension()) + step, dimensions.size()));
+		this.draw.leaveDimension();
 		this.closeOtherMap();
 		this.otherDimension = next.equals(this.minecraft.level.dimension().identifier().toString()) ? null : next;
 		this.viewChanged();
@@ -252,7 +260,6 @@ public final class MapScreen extends Screen {
 	/** The map now shows another dimension, or the player's own again. */
 	private void viewChanged() {
 		this.menu = null;
-		this.draw.cancel();
 		this.gauge.cancel();
 		this.following = true;
 		this.layer = this.otherDimension == null ? this.layerOnOpening() : TileKey.SURFACE;
@@ -272,6 +279,7 @@ public final class MapScreen extends Screen {
 			return session.map();
 		}
 		if (maps == null || this.minecraft.level == null || other.equals(this.minecraft.level.dimension().identifier().toString())) {
+			this.draw.leaveDimension();
 			this.closeOtherMap();
 			this.otherDimension = null;
 			this.viewChanged();
@@ -826,7 +834,10 @@ public final class MapScreen extends Screen {
 			// Drawn by Diorama 0.3.0 or older, with no save to read the ground from: it comes back when the player does.
 			unknown.add(MapMenu.Item.info(Component.translatable(found.unsaved() ? "diorama.menu.not_saved" : "diorama.menu.not_mapped")));
 			if (rough != null) {
-				unknown.add(MapMenu.Item.info(this.roughly(rough.getX(), rough.getZ())));
+				// The distance would be across two dimensions.
+				if (this.otherDimension == null) {
+					unknown.add(MapMenu.Item.info(this.roughly(rough.getX(), rough.getZ())));
+				}
 				unknown.add(this.copyItem(rough.getX() + " " + rough.getZ()));
 			}
 			return unknown;
@@ -1066,7 +1077,7 @@ public final class MapScreen extends Screen {
 	private void openWaypoints() {
 		WaypointListScreen list = new WaypointListScreen(this);
 		if (this.otherDimension != null) {
-			list.showFolder(WaypointStore.dimensionKey(this.otherDimension));
+			list.showDimension(this.otherDimension);
 		}
 		this.minecraft.gui.setScreen(list);
 	}
