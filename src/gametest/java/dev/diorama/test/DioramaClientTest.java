@@ -1344,7 +1344,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickAt(context, probe[5], probe[6]);
 		context.takeScreenshot("saved-map-01b-menu-after-restart");
 		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (labels.equals(List.of("Nothing mapped here"))) {
+		if (labels.contains("Nothing mapped here")) {
 			throw new AssertionError("After the restart, the menu says nothing is mapped at spawn, which the map shows");
 		}
 		int[] savedSpot = menuSpot(context);
@@ -1366,7 +1366,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickAt(context, oldProbe[5], oldProbe[6]);
 		context.takeScreenshot("saved-map-01c-menu-on-old-tile");
 		List<String> oldLabels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (oldLabels.equals(List.of("Nothing mapped here"))) {
+		if (oldLabels.contains("Nothing mapped here")) {
 			throw new AssertionError("On a tile saved without spots, the menu says nothing is mapped at spawn, which the map shows");
 		}
 		int[] worldSpot = menuSpot(context);
@@ -3656,7 +3656,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		});
 
-		// Where the map has nothing, the menu says so and offers nothing.
+		// Where the map has nothing, the menu says so and can only copy where it is, without a height.
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + 100_000, Projection.v(mc.player.getY(), mc.player.getZ()), 4.0, TileKey.SURFACE));
 		context.waitTicks(3);
 		double[] middle = context.computeOnClient(mc -> {
@@ -3665,8 +3665,23 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		rightClickAt(context, middle[0], middle[1]);
 		List<String> nothing = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (!nothing.equals(List.of("Nothing mapped here"))) {
+		if (nothing.size() != 3 || !nothing.get(0).equals("Nothing mapped here") || !nothing.get(1).startsWith("About ") || !nothing.get(2).equals("Copy coordinates")) {
 			throw new AssertionError("Off the map, the menu shows " + nothing);
+		}
+		context.takeScreenshot("map-menu-02b-nothing-mapped");
+		clickMenu(context, "Copy coordinates");
+		context.takeScreenshot("map-menu-02c-copied");
+		context.runOnClient(mc -> {
+			String[] copied = mc.keyboardHandler.getClipboard().split(" ");
+			// A height of 64, seen through the tilted camera from where the player's height puts the row.
+			double z = mc.player.getZ() + (64 - mc.player.getY()) * Projection.cos() / Projection.sin();
+			if (copied.length != 2 || Math.abs(Integer.parseInt(copied[0]) - (mc.player.getX() + 100_000)) > 1 || Math.abs(Integer.parseInt(copied[1]) - z) > 1) {
+				throw new AssertionError("Off the map, Copy coordinates copied '" + mc.keyboardHandler.getClipboard() + "', looking near x "
+					+ (mc.player.getX() + 100_000) + ", z " + z);
+			}
+		});
+		if (!context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels().contains("Copied"))) {
+			throw new AssertionError("Copy coordinates doesn't say it's done");
 		}
 		openMapOnPlayer(context);
 
@@ -3693,6 +3708,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!labels.get(0).equals("Temporary") || !labels.contains("Keep waypoint") || !labels.contains("Teleport")) {
 			throw new AssertionError("A temporary waypoint's menu shows " + labels);
 		}
+		clickMenu(context, "Copy coordinates");
+		assertClipboard(context, first[0] + " " + first[1] + " " + first[2]);
 		clickMenu(context, "Delete");
 		boolean deletedEarly = context.computeOnClient(mc -> temporaryAt(first) == null);
 		if (deletedEarly) {
@@ -3728,6 +3745,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickMap(context, 8, -8);
 		int[] shared = menuSpot(context);
 		String line = "xaero-waypoint:Shared location:SL:" + shared[0] + ":" + shared[1] + ":" + shared[2] + ":";
+		clickMenu(context, "Copy coordinates");
+		assertClipboard(context, shared[0] + " " + shared[1] + " " + shared[2]);
 		clickMenu(context, "Share location in chat");
 		context.waitTicks(20);
 		long early = context.computeOnClient(mc -> chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).count());
@@ -4475,6 +4494,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return null;
+	}
+
+	private static void assertClipboard(ClientGameTestContext context, String expected) {
+		String copied = context.computeOnClient(mc -> mc.keyboardHandler.getClipboard());
+		if (!copied.equals(expected)) {
+			throw new AssertionError("Copy coordinates copied '" + copied + "', not '" + expected + "'");
+		}
 	}
 
 	/** The block position the open spot menu's first line names: "x, y, z · N m". */

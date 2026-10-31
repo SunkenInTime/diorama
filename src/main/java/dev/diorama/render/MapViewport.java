@@ -60,6 +60,9 @@ public final class MapViewport {
 		}
 	}
 
+	/** Screen pixels per tile pixel from which the tiles are drawn crisp; see {@link #sampling}. */
+	private static final double CRISP_FROM = 1.5;
+
 	/** Below this zoom (GUI pixels per block) overlay lines and dots would blur into noise. */
 	private static final double OVERLAY_ZOOM = 1.0;
 
@@ -124,6 +127,18 @@ public final class MapViewport {
 		return lod;
 	}
 
+	/**
+	 * How this view samples the tiles and anything drawn on their pixel grid. Shown larger than
+	 * their pixels, they stay crisp so blocks keep their edges; magnified by too little for that,
+	 * crisp pixels would come out uneven, one screen pixel wide here and two there, so they blend.
+	 * Measured in screen pixels, as a GUI pixel is several on a high-density display; a whole GUI
+	 * pixel per tile pixel or more is always crisp.
+	 */
+	private static Sampling sampling(View view) {
+		double screenPixelsPerPixel = view.zoom() * Minecraft.getInstance().getWindow().getGuiScale() / Projection.PIXELS_PER_UNIT;
+		return view.zoom() >= Projection.PIXELS_PER_UNIT || screenPixelsPerPixel >= CRISP_FROM ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+	}
+
 	/** Whether every tile this view shows has baked at least once. Asks for the ones that haven't. */
 	public static boolean ready(MapLevel level, View view) {
 		boolean ready = true;
@@ -178,8 +193,7 @@ public final class MapViewport {
 		int tv0 = (int) Math.floor(v0 / units);
 		int tu1 = (int) Math.floor(u1 / units);
 		int tv1 = (int) Math.floor(v1 / units);
-		// Minified tiles blend across mips; magnified ones stay crisp so blocks keep their edges.
-		Sampling sampling = view.zoom() >= Projection.PIXELS_PER_UNIT ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+		Sampling sampling = sampling(view);
 		MapCanvas canvas = MapCanvas.of(graphics);
 		float size = (float) (units * view.zoom());
 		Circle circle = view.round() ? Circle.in(view) : null;

@@ -607,10 +607,11 @@ public final class MapScreen extends Screen {
 			return;
 		}
 		CompletableFuture<MapLevel.Spot> spot = this.spotAt(screenX, screenY, true);
+		BlockPos rough = this.roughSpot(screenX, screenY);
 		try {
 			// Where the chunks are gone, the spot comes off the disk, usually in a few milliseconds.
 			MapLevel.Spot found = spot.get(SPOT_WAIT_MS, TimeUnit.MILLISECONDS);
-			this.menu = new MapMenu(this.spotItems(found), this.font, screenX, screenY, this.width, this.height);
+			this.menu = new MapMenu(this.spotItems(found, rough), this.font, screenX, screenY, this.width, this.height);
 		} catch (TimeoutException e) {
 			// A slow disk: say so until it answers, unless the menu has been closed or replaced by then.
 			MapMenu waiting = new MapMenu(List.of(MapMenu.Item.info(Component.translatable("diorama.menu.finding"))),
@@ -618,13 +619,13 @@ public final class MapScreen extends Screen {
 			this.menu = waiting;
 			spot.thenAcceptAsync(found -> {
 				if (this.menu == waiting) {
-					this.menu = new MapMenu(this.spotItems(found), this.font, screenX, screenY, this.width, this.height);
+					this.menu = new MapMenu(this.spotItems(found, rough), this.font, screenX, screenY, this.width, this.height);
 				}
 			}, this.minecraft);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} catch (ExecutionException e) {
-			this.menu = new MapMenu(this.spotItems(MapLevel.Spot.NOTHING), this.font, screenX, screenY, this.width, this.height);
+			this.menu = new MapMenu(this.spotItems(MapLevel.Spot.NOTHING, rough), this.font, screenX, screenY, this.width, this.height);
 		}
 	}
 
@@ -654,11 +655,35 @@ public final class MapScreen extends Screen {
 		};
 	}
 
-	private List<MapMenu.Item> spotItems(MapLevel.Spot found) {
+	/** The height most ground is near, for a point the map knows nothing about. */
+	private static final int USUAL_GROUND_Y = 64;
+
+	/**
+	 * Roughly where a screen point is when the map can't say. The camera is tilted, so a point alone
+	 * gives x but not z: z is off by about 0.8 of a block for each block the real ground is from this guess.
+	 */
+	private @Nullable BlockPos roughSpot(double screenX, double screenY) {
+		MapViewport.View view = this.lastView;
+		if (view == null) {
+			return null;
+		}
+		int y = this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
+		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
+		double v = TileSpots.rowMiddle(view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom());
+		return new BlockPos((int) Math.floor(u), y, (int) Math.floor(Projection.zAt(v, y)));
+	}
+
+	private List<MapMenu.Item> spotItems(MapLevel.Spot found, @Nullable BlockPos rough) {
 		BlockPos spot = found.pos();
 		if (spot == null) {
+			List<MapMenu.Item> unknown = new ArrayList<>();
 			// Drawn by Diorama 0.3.0 or older, with no save to read the ground from: it comes back when the player does.
-			return List.of(MapMenu.Item.info(Component.translatable(found.unsaved() ? "diorama.menu.not_saved" : "diorama.menu.not_mapped")));
+			unknown.add(MapMenu.Item.info(Component.translatable(found.unsaved() ? "diorama.menu.not_saved" : "diorama.menu.not_mapped")));
+			if (rough != null) {
+				unknown.add(MapMenu.Item.info(this.roughly(rough.getX(), rough.getZ())));
+				unknown.add(this.copyItem(rough.getX() + " " + rough.getZ()));
+			}
+			return unknown;
 		}
 		int x = spot.getX();
 		int y = spot.getY();
@@ -678,6 +703,7 @@ public final class MapScreen extends Screen {
 			}));
 			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.add_temporary"), true, () -> Waypoints.addTemporary(spot)));
 		}
+		items.add(this.copyItem(x + " " + y + " " + z));
 		// Chat can't take it back, so sharing asks twice.
 		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.menu.share_location"), Component.translatable("diorama.menu.share_confirm"), () -> {
 			String dimension = Waypoints.dimension();
@@ -702,6 +728,7 @@ public final class MapScreen extends Screen {
 			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
 		}));
+		items.add(this.copyItem(waypoint.x + " " + waypoint.y + " " + waypoint.z));
 		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
@@ -730,6 +757,12 @@ public final class MapScreen extends Screen {
 		return items;
 	}
 
+	/** A line putting {@code coordinates} on the clipboard, spaced the way commands take them. */
+	private MapMenu.Item copyItem(String coordinates) {
+		return MapMenu.Item.stays(Component.translatable("diorama.menu.copy_coordinates"), Component.translatable("diorama.menu.copied"),
+			() -> this.minecraft.keyboardHandler.setClipboard(coordinates));
+	}
+
 	private void changed() {
 		WaypointStore store = WaypointStore.get();
 		if (store != null) {
@@ -742,6 +775,13 @@ public final class MapScreen extends Screen {
 		LocalPlayer player = this.minecraft.player;
 		long distance = player == null ? 0 : Math.round(Math.sqrt(player.distanceToSqr(x + 0.5, y, z + 0.5)));
 		return Component.translatable("diorama.menu.where", x, y, z, distance);
+	}
+
+	/** "About 120, -340 · 212 m": a point whose height isn't known, and how far the player is from it across the ground. */
+	private Component roughly(int x, int z) {
+		LocalPlayer player = this.minecraft.player;
+		long distance = player == null ? 0 : Math.round(Math.hypot(player.getX() - (x + 0.5), player.getZ() - (z + 0.5)));
+		return Component.translatable("diorama.menu.where_rough", x, z, distance);
 	}
 
 	/** A drag; false leaves it to the screen's widgets. */
