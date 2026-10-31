@@ -49,6 +49,9 @@ public final class WaypointHud implements HudElement {
 		float height = graphics.guiHeight();
 		Font font = mc.font;
 		List<Waypoint> waypoints = store.in(mc.level.dimension().identifier().toString());
+		float scale = Pins.scale(Settings.get().waypointWorldSize);
+		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
+		float margin = 28 * Math.max(1, scale);
 		for (Waypoint waypoint : waypoints) {
 			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, player)) {
 				continue;
@@ -62,7 +65,7 @@ public final class WaypointHud implements HudElement {
 			}
 			float sx = screen[0];
 			float sy = screen[1];
-			if (sx < -20 || sy < -20 || sx > width + 20 || sy > height + 20) {
+			if (sx < -margin || sy < -margin || sx > width + margin || sy > height + margin) {
 				continue;
 			}
 			double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -71,7 +74,7 @@ public final class WaypointHud implements HudElement {
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(sx, sy);
 			try {
-				Pins.standing(graphics, waypoint, 0, 0, Pins.LARGE);
+				Pins.standing(graphics, waypoint, 0, 0, Pins.LARGE, scale);
 				Settings.WaypointLabels labels = Settings.get().waypointLabels;
 				if (labels == Settings.WaypointLabels.NONE) {
 					continue;
@@ -82,7 +85,7 @@ public final class WaypointHud implements HudElement {
 					text = waypoint.name + " · " + text;
 				}
 				int w = font.width(text);
-				graphics.pose().translate(-w / 2.0F, 4);
+				graphics.pose().translate(-w / 2.0F, 1 + Pins.SHADOW * scale);
 				graphics.fill(-2, -1, w + 2, 9, 0x80000000);
 				graphics.text(font, text, 0, 0, 0xFFFFFFFF, false);
 			} finally {

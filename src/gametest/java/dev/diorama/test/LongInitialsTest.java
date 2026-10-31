@@ -80,7 +80,7 @@ final class LongInitialsTest {
 		String pointed = context.computeOnClient(mc -> {
 			for (WaypointOverlay.Pin pin : ((MapScreen) mc.gui.screen()).pins()) {
 				if (pin.waypoint().initials.equals("WOOD") && !pin.clamped()) {
-					float end = pin.x() + (Pins.badgeWidth(pin.waypoint(), (int) pin.size()) / 2.0F - 2);
+					float end = pin.x() + (Pins.badgeWidth(pin.waypoint(), (int) pin.size()) / 2.0F - 2) * pin.scale();
 					WaypointOverlay.Pin under = WaypointOverlay.under(((MapScreen) mc.gui.screen()).pins(), end, pin.headY());
 					return under == null ? "nothing" : under.waypoint().initials;
 				}
