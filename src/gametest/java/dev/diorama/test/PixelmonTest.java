@@ -49,12 +49,14 @@ final class PixelmonTest {
 			int pz = z + (i / 3 == 0 ? -6 : 9);
 			world.getServer().runCommand("execute positioned " + px + " " + (y - 1) + " " + pz + " run pokespawn " + POKEMON[i][0]);
 		}
-		context.waitFor(mc -> sprites(mc).size() >= POKEMON.length, 400);
-		List<String> sprites = context.computeOnClient(PixelmonTest::sprites);
-		for (String[] pokemon : POKEMON) {
-			if (sprites.stream().noneMatch(sprite -> sprite.startsWith("outlined_sprite pixelmon:textures/pokemon/") && sprite.contains(pokemon[1]))) {
-				throw new AssertionError("No " + pokemon[1] + " sprite on the radar: " + sprites);
-			}
+		// Wild Pokémon are loaded too, so this waits for these ones.
+		List<String> sprites = List.of();
+		for (int i = 0; i < 20 && !allShown(sprites); i++) {
+			context.waitTicks(20);
+			sprites = context.computeOnClient(PixelmonTest::sprites);
+		}
+		if (!allShown(sprites)) {
+			throw new AssertionError("Not every Pokémon has its sprite on the radar: " + sprites);
 		}
 		settle(context);
 		context.takeScreenshot("pixelmon-01-minimap");
@@ -70,6 +72,15 @@ final class PixelmonTest {
 		context.waitTicks(5);
 		context.takeScreenshot("pixelmon-04-minimap-framed");
 		context.runOnClient(mc -> Settings.get().radarStyle = saved);
+	}
+
+	private static boolean allShown(List<String> sprites) {
+		for (String[] pokemon : POKEMON) {
+			if (sprites.stream().noneMatch(sprite -> sprite.startsWith("outlined_sprite pixelmon:textures/pokemon/") && sprite.contains(pokemon[1]))) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static void lookAtPlayer(net.minecraft.client.Minecraft mc, double zoom) {
