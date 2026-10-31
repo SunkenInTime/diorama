@@ -124,6 +124,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
 			}
+			if (tests.contains("waypoint-size")) {
+				WaypointSizeTest.photos(context, world);
+			}
 			if (tests.contains("long-initials")) {
 				LongInitialsTest.photos(context, world);
 			}
@@ -244,6 +247,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("sub-maps")) {
 			subMaps(context);
+		}
+		if (tests.contains("map-dimensions")) {
+			mapDimensions(context);
+			moddedDimension(context);
 		}
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
@@ -623,6 +630,349 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.takeScreenshot("sub-maps-07-reopened");
 			context.setScreen(() -> null);
 		}
+	}
+
+	/**
+	 * The dimension button, in a world of its own (opt-in: {@code map-dimensions}), used with the
+	 * mouse (gliding, with GIF frames, under DIORAMA_GIF=1). It stays away until a second dimension
+	 * has a map. From the Overworld it shows the Nether's saved map around the player's Nether
+	 * coordinates, with that dimension's waypoints; what's added there is the Nether's, and nothing
+	 * in its folder changes. It skips dimensions never visited, follows the map chosen in Maps,
+	 * and teleports across dimensions.
+	 */
+	private static void mapDimensions(ClientGameTestContext context) {
+		String overworld = "minecraft:overworld";
+		String nether = "minecraft:the_nether";
+		String end = "minecraft:the_end";
+		try (TestSingleplayerContext world = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> {
+				s.setName("Diorama Dimensions");
+				s.setSeed("diorama");
+				s.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			})
+			.create()) {
+			world.getServer().runCommand("time set noon");
+			world.getServer().runCommand("weather clear");
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+			context.setScreen(MapScreen::new);
+			context.waitTicks(4);
+			context.runOnClient(mc -> {
+				if (((MapScreen) mc.gui.screen()).dimensionButton().visible) {
+					throw new AssertionError("The dimension button shows with only one dimension mapped");
+				}
+			});
+			context.setScreen(() -> null);
+
+			// The Nether gets a map, a waypoint, and then the player leaves.
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 200, 2400);
+			settle(context, 100);
+			java.nio.file.Path netherFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(nether, dev.diorama.Maps.MAIN));
+			context.waitFor(mc -> tileFiles(netherFolder) > 5, 1200);
+			context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Nether Hub", 40, 70, 10, nether, Waypoint.PALETTE[5])));
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a 480 120 0");
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
+			settle(context, 100);
+			context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Overworld Home", 480, 70, 10, overworld, Waypoint.PALETTE[2])));
+			java.util.Map<String, String> before = folderState(netherFolder);
+
+			context.setScreen(MapScreen::new);
+			settle(context, 40);
+			holdFrames(context, 20);
+			context.takeScreenshot("map-dimensions-01-overworld");
+
+			clickDimensionButton(context);
+			waitForMapOf(context, nether);
+			settle(context, 40);
+			holdFrames(context, 30);
+			context.takeScreenshot("map-dimensions-02-nether");
+			context.runOnClient(mc -> {
+				MapScreen map = (MapScreen) mc.gui.screen();
+				// 480 in the Overworld is 60 in the Nether.
+				if (Math.abs(map.view().centerU() - mc.player.getX() / 8) > 1) {
+					throw new AssertionError("The Nether's map isn't around the player's Nether coordinates: " + map.view().centerU());
+				}
+				if (map.pins().stream().noneMatch(p -> p.waypoint().name.equals("Nether Hub")) || map.pins().stream().anyMatch(p -> p.waypoint().name.equals("Overworld Home"))) {
+					throw new AssertionError("The map of the Nether should have the Nether's waypoints and no others");
+				}
+				if (map.exportButton().visible || !map.blips().isEmpty()) {
+					throw new AssertionError("Export and the radar belong to the player's own dimension");
+				}
+			});
+
+			// The right-click menu is about the Nether's blocks, with no distance from a player who isn't there.
+			double[] spotAt = context.computeOnClient(mc -> {
+				double scale = mc.getWindow().getGuiScale();
+				MapScreen map = (MapScreen) mc.gui.screen();
+				return new double[] {(map.width / 2.0 - 30) * scale, (map.height / 2.0 + 20) * scale};
+			});
+			rightClickAt(context, spotAt[0], spotAt[1]);
+			holdFrames(context, 12);
+			context.takeScreenshot("map-dimensions-03-menu");
+			int[] spot = context.computeOnClient(mc -> {
+				String line = ((MapScreen) mc.gui.screen()).menu().labels().get(0);
+				java.util.regex.Matcher m = java.util.regex.Pattern.compile("(-?\\d+), (-?\\d+), (-?\\d+)").matcher(line);
+				if (!m.matches()) {
+					throw new AssertionError("The spot menu of another dimension starts with " + line);
+				}
+				return new int[] {Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3))};
+			});
+			clickMenu(context, "Add temporary waypoint");
+			context.waitFor(mc -> WaypointStore.get().in(nether).stream().anyMatch(w -> w.kind == Waypoint.Kind.TEMPORARY && w.x == spot[0] && w.z == spot[2]), 40);
+
+			// So is a pen stroke.
+			clickWidget(context, context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawButton()));
+			int strokes = context.computeOnClient(mc -> dev.diorama.drawing.DrawingStore.get().in(nether).size());
+			moveCursor(context, spotAt[0] + 80, spotAt[1] + 40);
+			context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitTicks(2);
+			moveCursor(context, spotAt[0] + 200, spotAt[1] + 90);
+			context.waitTicks(2);
+			moveCursor(context, spotAt[0] + 300, spotAt[1] + 20);
+			context.waitTicks(2);
+			context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+			context.waitFor(mc -> dev.diorama.drawing.DrawingStore.get().in(nether).size() == strokes + 1, 40);
+			clickWidget(context, context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).drawButton()));
+			context.waitTicks(4);
+			context.runOnClient(mc -> {
+				if (((MapScreen) mc.gui.screen()).drawMode().active()) {
+					throw new AssertionError("Draw mode stayed on");
+				}
+			});
+			context.takeScreenshot("map-dimensions-04-drawn");
+
+			// Never visited, the End is skipped: the next press is back home, with the live map, here
+			// through the key, which is unbound until the player binds it.
+			context.runOnClient(mc -> {
+				DioramaClient.TOGGLE_DIMENSION.setKey(InputConstants.Type.MOUSE.getOrCreate(InputConstants.MOUSE_BUTTON_LEFT + 3));
+				net.minecraft.client.KeyMapping.resetMapping();
+			});
+			context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT + 3);
+			waitForMapOf(context, overworld);
+			context.runOnClient(mc -> {
+				DioramaClient.TOGGLE_DIMENSION.setKey(InputConstants.UNKNOWN);
+				net.minecraft.client.KeyMapping.resetMapping();
+			});
+
+			// The Maps screen shows the dimension being looked at, and the view follows what's picked there.
+			clickDimensionButton(context);
+			waitForMapOf(context, nether);
+			String second = context.computeOnClient(mc -> dev.diorama.Maps.get().create(nether, "Second"));
+			context.waitFor(mc -> mc.gui.screen() instanceof MapScreen map && map.otherMap() != null && map.pins().stream().noneMatch(p -> p.waypoint().name.equals("Nether Hub")), 100);
+			// Long enough for the view's tiles to have come up empty. Still empty, the map keeps its
+			// place on the button: coming back from Maps rebuilds the screen.
+			settle(context, 40);
+			clickButton(context, "diorama.map.maps");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			clickButton(context, "gui.done");
+			context.waitFor(mc -> mc.gui.screen() instanceof MapScreen, 40);
+			settle(context, 20);
+			context.runOnClient(mc -> {
+				MapScreen map = (MapScreen) mc.gui.screen();
+				if (MapViewport.showsAnything(map.otherMap(), map.view())) {
+					throw new AssertionError("A new map of the Nether shows the old one's tiles");
+				}
+				if (!map.dimensionButton().visible) {
+					throw new AssertionError("A dimension's empty new map took the dimension button away");
+				}
+				dev.diorama.Maps.get().use(nether, dev.diorama.Maps.MAIN);
+				if (!dev.diorama.Maps.get().delete(nether, second)) {
+					throw new AssertionError("Couldn't delete the Nether's new map");
+				}
+			});
+			waitForMapOf(context, nether);
+			clickButton(context, "diorama.map.maps");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.MapsScreen, 40);
+			context.takeScreenshot("map-dimensions-05-maps-screen");
+			clickButton(context, "gui.done");
+			context.waitFor(mc -> mc.gui.screen() instanceof MapScreen, 40);
+			waitForMapOf(context, nether);
+			clickButton(context, "diorama.map.waypoints");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.waypoint.WaypointListScreen, 40);
+			context.runOnClient(mc -> {
+				String folder = ((dev.diorama.waypoint.WaypointListScreen) mc.gui.screen()).folderName();
+				if (!folder.equals("Nether")) {
+					throw new AssertionError("The waypoint list opened on " + folder + " from the Nether's map");
+				}
+			});
+			context.setScreen(MapScreen::new);
+			clickDimensionButton(context);
+			waitForMapOf(context, nether);
+
+			java.util.Map<String, String> after = folderState(netherFolder);
+			if (!after.equals(before)) {
+				throw new AssertionError("Looking at the Nether's map changed its folder: " + before + " became " + after);
+			}
+
+			// Teleporting works from here, and a custom command can't be run into a dimension.
+			context.runOnClient(mc -> {
+				Settings.get().teleportCommand = "warp {x} {y} {z}";
+				if (dev.diorama.waypoint.Waypoints.canTeleport(nether)) {
+					throw new AssertionError("A custom teleport command was offered across dimensions");
+				}
+				Settings.get().teleportCommand = Settings.DEFAULT_TELEPORT_COMMAND;
+				if (!dev.diorama.waypoint.Waypoints.canTeleport(nether)) {
+					throw new AssertionError("Teleporting to the Nether wasn't offered");
+				}
+				if (dev.diorama.waypoint.Waypoints.canTeleport("diorama_test:gone")) {
+					throw new AssertionError("Teleporting to a dimension the server doesn't have was offered");
+				}
+			});
+			rightClickAt(context, spotAt[0], spotAt[1]);
+			holdFrames(context, 8);
+			clickMenu(context, "Teleport here");
+			// Along the ground only: the spot can be the lava sea, which the player sinks into.
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.NETHER && Math.hypot(mc.player.getX() - spot[0] - 0.5, mc.player.getZ() - spot[2] - 0.5) < 2 && mc.gui.screen() == null, 400);
+			settle(context, 40);
+			for (int i = 0; i < (MENU_GIF ? 12 : 0); i++) {
+				context.waitTicks(3);
+				menuFrame(context);
+			}
+			context.takeScreenshot("map-dimensions-06-arrived");
+
+			// With the End visited there are three stops. Going to the dimension being looked at
+			// takes the map down with the loading screen, and it opens on the live map after.
+			world.getServer().runCommand("execute in minecraft:the_end run tp @a 0 70 0");
+			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.END && mc.gui.screen() == null && MapSession.get().map().chunkCount() > 100, 2400);
+			settle(context, 100);
+			context.setScreen(MapScreen::new);
+			settle(context, 10);
+			clickDimensionButton(context);
+			// Nothing follows the End but the Overworld, whose tiles it then shows.
+			waitForMapOf(context, overworld);
+			clickDimensionButton(context);
+			waitForMapOf(context, nether);
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.NETHER && mc.gui.screen() == null
+				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+			context.setScreen(MapScreen::new);
+			waitForMapOf(context, nether);
+			settle(context, 40);
+			context.takeScreenshot("map-dimensions-07-walked-in");
+			context.setScreen(() -> null);
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 120 0");
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null, 2400);
+		}
+	}
+
+	/**
+	 * A dimension Diorama has never heard of, from a datapack: the server names it, so once visited
+	 * it joins the dimension button under its own name, and teleporting there works.
+	 */
+	private static void moddedDimension(ClientGameTestContext context) {
+		//? if >=26.3 {
+		String moon = "diorama_test:moon";
+		TestWorldSave save;
+		try (TestSingleplayerContext world = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> {
+				s.setName("Diorama Moon");
+				s.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			})
+			.create()) {
+			save = world.getWorldSave();
+		}
+		var format = context.computeOnClient(mc -> net.minecraft.SharedConstants.getCurrentVersion().packVersion(net.minecraft.server.packs.PackType.SERVER_DATA));
+		java.nio.file.Path pack = save.getSaveDirectory().resolve("datapacks").resolve("moon");
+		try {
+			java.nio.file.Files.createDirectories(pack.resolve("data/diorama_test/dimension"));
+			java.nio.file.Files.writeString(pack.resolve("pack.mcmeta"), "{\"pack\":{\"description\":\"moon\",\"min_format\":[" + format.major() + "," + format.minor() + "],\"max_format\":[" + format.major() + "," + format.minor() + "]}}");
+			java.nio.file.Files.writeString(pack.resolve("data/diorama_test/dimension/moon.json"), """
+				{"type": "minecraft:overworld", "generator": {"type": "minecraft:flat", "settings": {
+					"biome": "minecraft:plains", "lakes": false, "features": false, "structure_overrides": [],
+					"layers": [{"block": "minecraft:bedrock", "height": 1}, {"block": "minecraft:white_concrete", "height": 3}]}}}
+				""");
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+		try (TestSingleplayerContext world = save.open()) {
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 1200);
+			world.getServer().runCommand("execute in " + moon + " run tp @a 0 40 0");
+			context.waitFor(mc -> mc.level.dimension().identifier().toString().equals(moon) && mc.gui.screen() == null
+				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+			settle(context, 100);
+			java.nio.file.Path folder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder(moon, dev.diorama.Maps.MAIN));
+			context.waitFor(mc -> tileFiles(folder) > 5, 1200);
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 120 0");
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+			settle(context, 60);
+			context.setScreen(MapScreen::new);
+			settle(context, 20);
+			clickDimensionButton(context);
+			waitForMapOf(context, moon);
+			settle(context, 20);
+			context.takeScreenshot("map-dimensions-08-modded");
+			context.runOnClient(mc -> {
+				String name = dev.diorama.waypoint.Waypoints.dimensionName(moon).getString();
+				if (!name.equals("Moon")) {
+					throw new AssertionError("The modded dimension is called " + name);
+				}
+			});
+			// It has no waypoints, and still has its folder from here.
+			clickButton(context, "diorama.map.waypoints");
+			context.waitFor(mc -> mc.gui.screen() instanceof dev.diorama.waypoint.WaypointListScreen, 40);
+			context.runOnClient(mc -> {
+				String listed = ((dev.diorama.waypoint.WaypointListScreen) mc.gui.screen()).folderName();
+				if (!listed.equals("Moon")) {
+					throw new AssertionError("The waypoint list opened on " + listed + " from the Moon's map");
+				}
+			});
+			clickButton(context, "gui.done");
+			waitForMapOf(context, moon);
+			double[] middle = context.computeOnClient(mc -> {
+				double scale = mc.getWindow().getGuiScale();
+				MapScreen map = (MapScreen) mc.gui.screen();
+				return new double[] {map.width / 2.0 * scale, map.height / 2.0 * scale};
+			});
+			rightClickAt(context, middle[0], middle[1]);
+			clickMenu(context, "Teleport here");
+			context.waitFor(mc -> mc.level.dimension().identifier().toString().equals(moon) && mc.gui.screen() == null, 400);
+		}
+		//?}
+	}
+
+	/** Waits for the map on screen to show a dimension and something of it. */
+	private static void waitForMapOf(ClientGameTestContext context, String dimension) {
+		context.waitFor(mc -> {
+			if (!(mc.gui.screen() instanceof MapScreen map) || !map.dimension().equals(dimension) || map.view() == null) {
+				return false;
+			}
+			boolean own = dimension.equals(mc.level.dimension().identifier().toString());
+			if (own != (map.otherMap() == null)) {
+				return false;
+			}
+			return MapViewport.showsAnything(own ? MapSession.get().map() : map.otherMap(), map.view());
+		}, 300);
+	}
+
+	private static void clickDimensionButton(ClientGameTestContext context) {
+		clickWidget(context, context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).dimensionButton()));
+		holdFrames(context, 2);
+	}
+
+	/** Moves to a widget and clicks it with the mouse. */
+	private static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		moveCursor(context, (widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale);
+		holdFrames(context, 6);
+		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+	}
+
+	/** Each file under a folder and its size and time, to see that nothing touched them. */
+	private static java.util.Map<String, String> folderState(java.nio.file.Path folder) {
+		java.util.Map<String, String> state = new java.util.TreeMap<>();
+		try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(folder)) {
+			for (java.nio.file.Path file : files.filter(java.nio.file.Files::isRegularFile).toList()) {
+				state.put(folder.relativize(file).toString(), java.nio.file.Files.size(file) + "@" + java.nio.file.Files.getLastModifiedTime(file));
+			}
+		} catch (java.io.IOException e) {
+			throw new AssertionError(e);
+		}
+		return state;
 	}
 
 	/** Whether a map folder has a full-detail surface tile in the column of map units that x is in. */
@@ -1341,7 +1691,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickAt(context, probe[5], probe[6]);
 		context.takeScreenshot("saved-map-01b-menu-after-restart");
 		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (labels.equals(List.of("Nothing mapped here"))) {
+		if (labels.contains("Nothing mapped here")) {
 			throw new AssertionError("After the restart, the menu says nothing is mapped at spawn, which the map shows");
 		}
 		int[] savedSpot = menuSpot(context);
@@ -1363,7 +1713,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickAt(context, oldProbe[5], oldProbe[6]);
 		context.takeScreenshot("saved-map-01c-menu-on-old-tile");
 		List<String> oldLabels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (oldLabels.equals(List.of("Nothing mapped here"))) {
+		if (oldLabels.contains("Nothing mapped here")) {
 			throw new AssertionError("On a tile saved without spots, the menu says nothing is mapped at spawn, which the map shows");
 		}
 		int[] worldSpot = menuSpot(context);
@@ -3653,7 +4003,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		});
 
-		// Where the map has nothing, the menu says so and offers nothing.
+		// Where the map has nothing, the menu says so and can only copy where it is, without a height.
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX() + 100_000, Projection.v(mc.player.getY(), mc.player.getZ()), 4.0, TileKey.SURFACE));
 		context.waitTicks(3);
 		double[] middle = context.computeOnClient(mc -> {
@@ -3662,8 +4012,23 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		rightClickAt(context, middle[0], middle[1]);
 		List<String> nothing = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels());
-		if (!nothing.equals(List.of("Nothing mapped here"))) {
+		if (nothing.size() != 3 || !nothing.get(0).equals("Nothing mapped here") || !nothing.get(1).startsWith("About ") || !nothing.get(2).equals("Copy coordinates")) {
 			throw new AssertionError("Off the map, the menu shows " + nothing);
+		}
+		context.takeScreenshot("map-menu-02b-nothing-mapped");
+		clickMenu(context, "Copy coordinates");
+		context.takeScreenshot("map-menu-02c-copied");
+		context.runOnClient(mc -> {
+			String[] copied = mc.keyboardHandler.getClipboard().split(" ");
+			// A height of 64, seen through the tilted camera from where the player's height puts the row.
+			double z = mc.player.getZ() + (64 - mc.player.getY()) * Projection.cos() / Projection.sin();
+			if (copied.length != 2 || Math.abs(Integer.parseInt(copied[0]) - (mc.player.getX() + 100_000)) > 1 || Math.abs(Integer.parseInt(copied[1]) - z) > 1) {
+				throw new AssertionError("Off the map, Copy coordinates copied '" + mc.keyboardHandler.getClipboard() + "', looking near x "
+					+ (mc.player.getX() + 100_000) + ", z " + z);
+			}
+		});
+		if (!context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels().contains("Copied"))) {
+			throw new AssertionError("Copy coordinates doesn't say it's done");
 		}
 		openMapOnPlayer(context);
 
@@ -3690,6 +4055,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!labels.get(0).equals("Temporary") || !labels.contains("Keep waypoint") || !labels.contains("Teleport")) {
 			throw new AssertionError("A temporary waypoint's menu shows " + labels);
 		}
+		clickMenu(context, "Copy coordinates");
+		assertClipboard(context, first[0] + " " + first[1] + " " + first[2]);
 		clickMenu(context, "Delete");
 		boolean deletedEarly = context.computeOnClient(mc -> temporaryAt(first) == null);
 		if (deletedEarly) {
@@ -3725,6 +4092,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 		rightClickMap(context, 8, -8);
 		int[] shared = menuSpot(context);
 		String line = "xaero-waypoint:Shared location:SL:" + shared[0] + ":" + shared[1] + ":" + shared[2] + ":";
+		clickMenu(context, "Copy coordinates");
+		assertClipboard(context, shared[0] + " " + shared[1] + " " + shared[2]);
 		clickMenu(context, "Share location in chat");
 		context.waitTicks(20);
 		long early = context.computeOnClient(mc -> chatMessages(mc).stream().filter(m -> m.content().getString().contains(line)).count());
@@ -4472,6 +4841,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 		}
 		return null;
+	}
+
+	private static void assertClipboard(ClientGameTestContext context, String expected) {
+		String copied = context.computeOnClient(mc -> mc.keyboardHandler.getClipboard());
+		if (!copied.equals(expected)) {
+			throw new AssertionError("Copy coordinates copied '" + copied + "', not '" + expected + "'");
+		}
 	}
 
 	/** The block position the open spot menu's first line names: "x, y, z · N m". */
@@ -5554,10 +5930,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

@@ -63,6 +63,8 @@ public final class WaypointListScreen extends Screen {
 	/** The folders, dimensions' first, and which one is shown, by key (see {@link WaypointStore#folderKey}). */
 	private final List<Folder> folders = new ArrayList<>();
 	private @Nullable String folderKey;
+	/** The dimension the map was showing, which has a folder even with no waypoints. */
+	private @Nullable String shownDimension;
 	/** No waypoints and no folders at all: the empty list's piece of map instead of the list. */
 	private boolean empty;
 	/**
@@ -81,7 +83,7 @@ public final class WaypointListScreen extends Screen {
 	 * keyboard focus, and must not act on a row it no longer sits on.
 	 */
 	private final List<Button> actions = new ArrayList<>();
-	/** Edit and Delete, which a waystone's row goes without, and Teleport, which is off for another dimension. */
+	/** Edit and Delete, which a waystone's row goes without, and Teleport, which can be off for another dimension. */
 	private @Nullable Button edit;
 	private @Nullable Button teleport;
 	private @Nullable Button delete;
@@ -134,6 +136,12 @@ public final class WaypointListScreen extends Screen {
 		this.scroll = 0;
 	}
 
+	/** Shows a dimension's folder when the screen opens, even a modded dimension's with no waypoints yet. */
+	public void showDimension(String dimension) {
+		this.shownDimension = dimension;
+		this.showFolder(WaypointStore.dimensionKey(dimension));
+	}
+
 	/**
 	 * The folders: the Overworld, the Nether and the End always, any other dimension with waypoints
 	 * or the player in it, then the player's own in the order they were made, then Waystones when
@@ -144,6 +152,9 @@ public final class WaypointListScreen extends Screen {
 		java.util.LinkedHashSet<String> dimensions = new java.util.LinkedHashSet<>(List.of("minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"));
 		if (here != null) {
 			dimensions.add(here);
+		}
+		if (this.shownDimension != null) {
+			dimensions.add(this.shownDimension);
 		}
 		if (store != null) {
 			for (Waypoint waypoint : store.all()) {
@@ -391,10 +402,9 @@ public final class WaypointListScreen extends Screen {
 				x += button.getWidth() + ACTION_GAP;
 			}
 		}
-		// Teleporting runs /tp here, so it only makes sense for a waypoint in this dimension.
 		Button teleport = this.teleport;
-		if (shown && teleport != null && this.minecraft.level != null) {
-			teleport.active = !this.armed && this.selected.dimension.equals(this.minecraft.level.dimension().identifier().toString());
+		if (shown && teleport != null) {
+			teleport.active = !this.armed && Waypoints.canTeleport(this.selected.dimension);
 		}
 		Button confirm = this.confirm;
 		if (confirm != null) {
@@ -912,7 +922,7 @@ public final class WaypointListScreen extends Screen {
 
 	private void teleport(@Nullable Waypoint waypoint) {
 		if (waypoint != null) {
-			Waypoints.teleport(waypoint.x, waypoint.y, waypoint.z);
+			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 		}
 		this.minecraft.gui.setScreen(null);
 	}
