@@ -120,9 +120,9 @@ final class WaypointSizeTest {
 		context.waitTicks(10);
 		context.runOnClient(mc -> {
 			Settings settings = Settings.get();
-			settings.waypointMinimapSize = 67;
-			settings.waypointMapSize = 67;
-			settings.waypointWorldSize = 67;
+			settings.waypointMinimapSize = 60;
+			settings.waypointMapSize = 60;
+			settings.waypointWorldSize = 60;
 			settings.save();
 			WaypointStore store = WaypointStore.get();
 			store.all().stream().toList().forEach(store::remove);

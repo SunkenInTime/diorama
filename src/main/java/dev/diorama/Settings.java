@@ -106,11 +106,11 @@ public final class Settings {
 	/**
 	 * How big pins are drawn in each view, in percent of the size they're drawn at one pixel per GUI
 	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
-	 * screen pixels.
+	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4.
 	 */
-	public int waypointMinimapSize = 67;
-	public int waypointMapSize = 67;
-	public int waypointWorldSize = 67;
+	public int waypointMinimapSize = 60;
+	public int waypointMapSize = 60;
+	public int waypointWorldSize = 60;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
