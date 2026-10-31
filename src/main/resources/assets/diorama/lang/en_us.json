@@ -150,7 +150,7 @@
 	"diorama.settings.gpu_baking.no_match": "No match",
 	"diorama.settings.gpu_baking.too_slow": "Too slow",
 	"diorama.settings.gpu_baking.crashed": "Crashed",
-	"diorama.settings.gpu_baking.tooltip": "Experimental. Draws map tiles on the graphics card instead of the processor, so they appear sooner and the game uses less CPU. The first tiles are also drawn the old way and compared; if your graphics card draws them differently, it switches itself off.",
+	"diorama.settings.gpu_baking.tooltip": "Draws map tiles on the graphics card instead of the processor, so they appear sooner and the game uses less CPU. The first tiles are also drawn the old way and compared; if they differ, your graphics card is too slow or anything goes wrong, Diorama goes back to the processor by itself.",
 	"diorama.gpu_baking.failed": "GPU baking didn't match on this graphics card, so Diorama is drawing the map on the processor again. The game log has the details.",
 	"diorama.settings.overlays": "Overlays",
 	"diorama.settings.chunk_grid": "Chunk grid",

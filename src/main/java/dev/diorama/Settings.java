@@ -141,10 +141,12 @@ public final class Settings {
 	 */
 	public Quality quality = Quality.FANCY;
 	/**
-	 * Experimental: bake map tiles on the graphics card. Off until the player turns it on; the
-	 * first tiles are checked against the tracer, which takes over again if they don't match.
+	 * Bakes map tiles on the graphics card. The first tiles are checked against the tracer, which
+	 * takes over by itself if they don't match, the card is too slow or the GPU code fails.
 	 */
-	public boolean gpuBaking = false;
+	public boolean gpuBaking = true;
+	/** How many of the old defaults {@link #load} has moved this file past. */
+	public int defaultsMoved = 0;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
@@ -320,6 +322,12 @@ public final class Settings {
 		}
 		if (settings == null) {
 			settings = new Settings();
+		}
+		// GPU baking used to be off unless turned on, and every file saved since says so, whether
+		// the player chose that or not. It turns on once; off from here on is the player's choice.
+		if (settings.defaultsMoved < 1) {
+			settings.gpuBaking = true;
+			settings.defaultsMoved = 1;
 		}
 		if (settings.spawnSpots == null) {
 			settings.spawnSpots = SpawnSpots.OFF;

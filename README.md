@@ -54,7 +54,7 @@ The fullscreen map can also show the chunk grid, slime chunks (singleplayer only
 Open them with the **Settings** button on the fullscreen map, or from the mod list (Mod Menu on Fabric). They cover the minimap's size, opacity, shape, corner and frame, which mobs the radar shows and how, how waypoints look in the world, and more.
 
 - **Slower computer?** Set **Quality** to Fast. The map fills in about four times sooner and the fog is cheaper to draw.
-- **GPU baking** draws the map on your graphics card instead of the processor, so it fills in faster and the game uses less CPU. It's experimental and off until you turn it on. If your graphics card draws the map differently from the processor, Diorama turns it back off and tells you.
+- **GPU baking** draws the map on your graphics card instead of the processor, so it fills in faster and the game uses less CPU. It's on by default. If your graphics card draws the map differently from the processor, is too slow or crashes, Diorama goes back to the processor by itself and remembers that for this card. You can turn it off in the settings.
 - **Fill in from world save.** In singleplayer the map fills in from the world's own save, a little at a time in the background, nearest to you first. Every finished chunk shows up, including areas made by tools like Chunky, without walking there. Caves stay hidden until you've been there, and only the main map fills in, so a new map you make starts blank. Turn it off if you'd rather uncover the map yourself; what's already drawn stays.
 - **Sharing your settings.** They're saved in `.minecraft/diorama/config.json`. Copy that file into a friend's `.minecraft/diorama/` folder to give them the same setup.
 

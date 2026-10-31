@@ -5654,7 +5654,41 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/**
+	 * A settings file from before GPU baking was on for everyone says off, chosen or not, so it
+	 * turns on once. Off after that is the player's choice and stays.
+	 */
+	private static void gpuBakingMovesOnce(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama/config.json");
+			Settings settings = Settings.get();
+			try {
+				settings.save();
+				String kept = java.nio.file.Files.readString(file);
+				String old = kept.replaceAll("\\s*\"defaultsMoved\": \\d+,", "").replaceAll("\"gpuBaking\": \\w+", "\"gpuBaking\": false");
+				if (old.contains("defaultsMoved")) {
+					throw new AssertionError("The test's old settings file still says defaultsMoved");
+				}
+				java.nio.file.Files.writeString(file, old);
+				Settings moved = Settings.reload();
+				if (!moved.gpuBaking) {
+					throw new AssertionError("A settings file from before the default changed kept GPU baking off");
+				}
+				moved.gpuBaking = false;
+				moved.save();
+				if (Settings.reload().gpuBaking) {
+					throw new AssertionError("GPU baking turned off by the player came back on");
+				}
+				java.nio.file.Files.writeString(file, kept);
+				Settings.reload();
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		});
+	}
+
 	private static void settings(ClientGameTestContext context, TestSingleplayerContext world) {
+		gpuBakingMovesOnce(context);
 		world.getServer().runCommand("time set noon");
 		context.waitTicks(20);
 		context.takeScreenshot("settings-01-default-minimap");
