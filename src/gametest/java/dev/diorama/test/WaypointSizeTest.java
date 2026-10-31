@@ -6,7 +6,6 @@ import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.SettingsScreen;
 import dev.diorama.bake.TileKey;
-import dev.diorama.render.Pins;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointStore;
@@ -138,9 +137,9 @@ final class WaypointSizeTest {
 				if (pin.clamped() || !pin.waypoint().initials.equals("P")) {
 					continue;
 				}
-				float reach = Pins.reach(pin.waypoint(), (int) pin.size()) * pin.scale();
-				WaypointOverlay.Pin inside = WaypointOverlay.under(pins, pin.x(), pin.headY() - reach + 1);
-				WaypointOverlay.Pin outside = WaypointOverlay.under(pins, pin.x(), pin.headY() - reach - 1);
+				// A large pin's top row is 21 pixels above its point, and the cursor reaches 2 past it.
+				WaypointOverlay.Pin inside = WaypointOverlay.under(pins, pin.x(), pin.y() - 22 * pin.scale());
+				WaypointOverlay.Pin outside = WaypointOverlay.under(pins, pin.x(), pin.y() - 24 * pin.scale());
 				if (inside != pin) {
 					return "The top of the pin's head does not answer the cursor";
 				}

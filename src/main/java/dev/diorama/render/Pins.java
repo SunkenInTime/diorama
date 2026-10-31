@@ -46,7 +46,7 @@ public final class Pins {
 	/** The sizes in percent the settings offer at this GUI scale: every step {@link #scale} can show, so each one looks different. */
 	public static int[] sizes() {
 		int gui = Radar.pixelsPerGuiPixel();
-		int first = Math.max(1, (int) Math.ceil(Settings.MIN_WAYPOINT_SIZE * gui / 100.0));
+		int first = Math.max(1, Math.round(Settings.MIN_WAYPOINT_SIZE * gui / 100.0F));
 		int last = Settings.MAX_SCALE * gui / 100;
 		int[] sizes = new int[last - first + 1];
 		for (int i = 0; i < sizes.length; i++) {

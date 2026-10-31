@@ -410,11 +410,11 @@ public final class SettingsScreen extends Screen {
 		return Component.empty().append(name).append(": ").append(value);
 	}
 
-	/** Where in {@code values} the one nearest {@code value} is. */
+	/** Where in {@code values}, ascending, the one nearest {@code value} is; halfway rounds up, as {@code Pins.scale} does. */
 	private static int nearestIndex(int[] values, int value) {
 		int nearest = 0;
 		for (int i = 1; i < values.length; i++) {
-			if (Math.abs(values[i] - value) < Math.abs(values[nearest] - value)) {
+			if (Math.abs(values[i] - value) <= Math.abs(values[nearest] - value)) {
 				nearest = i;
 			}
 		}
