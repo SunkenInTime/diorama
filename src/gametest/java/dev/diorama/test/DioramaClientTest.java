@@ -124,6 +124,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-clutter")) {
 				WaypointClutterTest.photos(context, world);
 			}
+			if (tests.contains("waypoint-size")) {
+				WaypointSizeTest.photos(context, world);
+			}
 			if (tests.contains("long-initials")) {
 				LongInitialsTest.photos(context, world);
 			}

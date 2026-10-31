@@ -103,6 +103,14 @@ public final class Settings {
 	 * shows them all. 0 shows them at any distance. One of {@link #WAYPOINT_DISTANCES}.
 	 */
 	public int waypointDistance = 0;
+	/**
+	 * How big pins are drawn in each view, in percent of the size they're drawn at one pixel per GUI
+	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
+	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4.
+	 */
+	public int waypointMinimapSize = 60;
+	public int waypointMapSize = 60;
+	public int waypointWorldSize = 60;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
@@ -194,6 +202,12 @@ public final class Settings {
 	public static final int MIN_SCALE = 50;
 	public static final int MAX_SCALE = 200;
 	public static final int SCALE_STEP = 25;
+
+	public static final int MIN_WAYPOINT_SIZE = 25;
+
+	private static int clampWaypointSize(int size) {
+		return Math.max(MIN_WAYPOINT_SIZE, Math.min(MAX_SCALE, size));
+	}
 
 	/** The nearest icon scale the settings screen can show. */
 	public static int snapScale(int scale) {
@@ -348,6 +362,9 @@ public final class Settings {
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
+		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
+		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
+		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
 		settings.apply();
 		return settings;
 	}

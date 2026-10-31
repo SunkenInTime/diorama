@@ -1,5 +1,6 @@
 package dev.diorama.render;
 
+import dev.diorama.Settings;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
@@ -22,6 +23,8 @@ public final class Pins {
 	public static final int SMALL = 13;
 	/** Directions a caret at the edge of a view can point, around the full turn. */
 	private static final int CARET_STEPS = 32;
+	/** How far a standing pin's shadow reaches below the spot it marks, before any scale. */
+	public static final int SHADOW = 3;
 	private static final Map<String, Sprite> SPRITES = new HashMap<>();
 	/** Sprites showing an icon start with this, so a resource reload can drop them. */
 	private static final String ICON = "icon ";
@@ -32,20 +35,45 @@ public final class Pins {
 	private Pins() {
 	}
 
+	/**
+	 * What a pin is drawn at for a size setting in percent. Each of its pixels stays a whole number of
+	 * screen pixels, so the art, icons included, and the initials stay crisp and on one grid.
+	 */
+	public static float scale(int percent) {
+		return Radar.texel(percent / 100.0F, 1);
+	}
+
+	/** The sizes in percent the settings offer at this GUI scale: every step {@link #scale} can show, so each one looks different. */
+	public static int[] sizes() {
+		int gui = Radar.pixelsPerGuiPixel();
+		int first = Math.max(1, Math.round(Settings.MIN_WAYPOINT_SIZE * gui / 100.0F));
+		int last = Settings.MAX_SCALE * gui / 100;
+		int[] sizes = new int[last - first + 1];
+		for (int i = 0; i < sizes.length; i++) {
+			sizes[i] = Math.round((first + i) * 100.0F / gui);
+		}
+		return sizes;
+	}
+
 	/** A pin standing with its point on (x, y), the spot it marks. */
 	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int size) {
+		standing(graphics, waypoint, x, y, size, 1);
+	}
+
+	/** A pin at {@link #scale}, grown or shrunk about its point, which stays on (x, y). */
+	public static void standing(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int size, float scale) {
 		PinArt.Image icon = icon(waypoint);
 		if (icon != null) {
-			// Icon pins are one size everywhere: an icon can't shrink and stay pixel art.
+			// Icon pins are one head size whatever the view: the head is what holds the icon.
 			Sprite sprite = sprite(ICON + "pin " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.iconPin(icon, rgb(waypoint)));
-			draw(graphics, sprite, waypoint, x, y);
+			draw(graphics, sprite, waypoint, x, y, scale);
 			return;
 		}
 		int head = PinArt.standingHead(size);
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
 		int stretch = stretch(waypoint, head);
 		Sprite sprite = sprite("pin " + head + " " + stretch + " " + rgb(waypoint) + " " + death, () -> PinArt.standing(rgb(waypoint), death, head, stretch));
-		draw(graphics, sprite, waypoint, x, y);
+		draw(graphics, sprite, waypoint, x, y, scale);
 	}
 
 	/** A round badge centred on (x, y): the waypoint list's rows. */
@@ -56,14 +84,14 @@ public final class Pins {
 			? sprite(ICON + "badge " + waypoint.icon + " " + rgb(waypoint), () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), 0, Double.NaN, 0, icon))
 			: sprite("badge " + head + " " + stretch(waypoint, head) + " " + rgb(waypoint) + " " + death,
 				() -> PinArt.badge(rgb(waypoint), death, head, stretch(waypoint, head), Double.NaN, 0, null));
-		draw(graphics, sprite, waypoint, x, y);
+		draw(graphics, sprite, waypoint, x, y, 1);
 	}
 
 	/**
 	 * A badge centred on (x, y) with a caret beside it pointing along {@code angle} (radians, screen
 	 * space, 0 is right): a waypoint pulled in to the edge of a view, showing which way it lies.
 	 */
-	public static void edge(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int head, double angle) {
+	public static void edge(GuiGraphicsExtractor graphics, Waypoint waypoint, float x, float y, int head, double angle, float scale) {
 		boolean death = waypoint.kind == Waypoint.Kind.DEATH;
 		int step = Math.floorMod(Math.round((float) (angle / (Math.PI * 2) * CARET_STEPS)), CARET_STEPS);
 		double snapped = step * Math.PI * 2 / CARET_STEPS;
@@ -73,7 +101,7 @@ public final class Pins {
 			? sprite(ICON + "edge " + waypoint.icon + " " + rgb(waypoint) + " " + step, () -> PinArt.badge(rgb(waypoint), false, PinArt.iconHead(icon), 0, snapped, 6, icon))
 			: sprite("edge " + head + " " + stretch(waypoint, head) + " " + rgb(waypoint) + " " + death + " " + step,
 				() -> PinArt.badge(rgb(waypoint), death, head, stretch(waypoint, head), snapped, caret, null));
-		draw(graphics, sprite, waypoint, x, y);
+		draw(graphics, sprite, waypoint, x, y, scale);
 	}
 
 	/** How wide this waypoint's badge is drawn with a head of {@code head}, without a caret. */
@@ -104,24 +132,24 @@ public final class Pins {
 	}
 
 	/** Whether this waypoint's standing pin marking (x, y) shows whole inside the box x0..x1, y0..y1: its head above, its shadow below. */
-	public static boolean fitsStanding(Waypoint waypoint, int size, float x, float y, float x0, float y0, float x1, float y1) {
-		float[] box = standingBox(waypoint, size, x, y);
+	public static boolean fitsStanding(Waypoint waypoint, int size, float scale, float x, float y, float x0, float y0, float x1, float y1) {
+		float[] box = standingBox(waypoint, size, scale, x, y);
 		return box[0] >= x0 && box[2] <= x1 && box[1] >= y0 && box[3] <= y1;
 	}
 
 	/** Whether this waypoint's standing pin with its point at (x, y) is wholly inside a circle. */
-	public static boolean fitsStanding(Waypoint waypoint, int size, float x, float y, Circle circle) {
-		float[] box = standingBox(waypoint, size, x, y);
+	public static boolean fitsStanding(Waypoint waypoint, int size, float scale, float x, float y, Circle circle) {
+		float[] box = standingBox(waypoint, size, scale, x, y);
 		return circle.contains(box[0], box[1]) && circle.contains(box[2], box[1]) && circle.contains(box[0], box[3]) && circle.contains(box[2], box[3]);
 	}
 
 	/** What a standing pin with its point at (x, y) covers: x0, y0, x1, y1. */
-	private static float[] standingBox(Waypoint waypoint, int size, float x, float y) {
+	private static float[] standingBox(Waypoint waypoint, int size, float scale, float x, float y) {
 		PinArt.Image icon = icon(waypoint);
 		int head = icon != null ? PinArt.iconHead(icon) : PinArt.standingHead(size);
 		float above = head + (head == SMALL ? 5 : 6);
 		float side = (head + 4 + (icon != null ? 0 : stretch(waypoint, head))) / 2.0F;
-		return new float[] {x - side, y - above, x + side, y + 3};
+		return new float[] {x - side * scale, y - above * scale, x + side * scale, y + SHADOW * scale};
 	}
 
 	/** How far this waypoint's badge with a caret reaches from its centre, so a view can keep it inside. */
@@ -180,11 +208,13 @@ public final class Pins {
 		return sprite;
 	}
 
-	private static void draw(GuiGraphicsExtractor graphics, Sprite sprite, Waypoint waypoint, float x, float y) {
+	private static void draw(GuiGraphicsExtractor graphics, Sprite sprite, Waypoint waypoint, float x, float y, float scale) {
 		PinArt.Art art = sprite.art();
 		// Keep the body and initials on one local pixel grid, moving continuously with the map.
 		graphics.pose().pushMatrix();
-		graphics.pose().translate(x - art.anchorX(), y - art.anchorY());
+		graphics.pose().translate(x, y);
+		graphics.pose().scale(scale);
+		graphics.pose().translate(-art.anchorX(), -art.anchorY());
 		int w = art.image().width;
 		int h = art.image().height;
 		float edge = sprite.edge();

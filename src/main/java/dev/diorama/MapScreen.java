@@ -949,16 +949,16 @@ public final class MapScreen extends Screen {
 		int by1 = this.recenter.getY() + this.recenter.getHeight() + 2;
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
 		for (WaypointOverlay.Pin pin : pins) {
-			float r = pin.size() / 2 + 2;
+			float r = Pins.reach(pin.waypoint(), (int) pin.size()) * pin.scale();
 			// Initials of three or four letters make the badge wider than it's tall.
-			float rx = r + Pins.stretch(pin.waypoint(), (int) pin.size()) / 2.0F;
+			float rx = r + Pins.stretch(pin.waypoint(), (int) pin.size()) * pin.scale() / 2.0F;
 			if (pin.clamped() && pin.x() + rx > bx0 && pin.x() - rx < bx1 && pin.y() + r > by0 && pin.y() - r < by1) {
 				// An edge pin behind the zoom buttons moves the shorter way out: above them or left.
 				float up = pin.y() + r - by0;
 				float left = pin.x() + rx - bx0;
 				pin = up <= left
-					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), true)
-					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), true);
+					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), pin.scale(), true)
+					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), pin.scale(), true);
 			}
 			out.add(pin);
 		}
