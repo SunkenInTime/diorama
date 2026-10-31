@@ -114,7 +114,9 @@ public final class DioramaNeoForge {
 			Waystones.clear();
 			Claims.clear();
 		});
-		modBus.addListener(RegisterPayloadHandlersEvent.class, XaeroChannels::register);
+		// Lowest: mod bus events run priority by priority across mods, so a mod that has Xaero's
+		// channels has them by then.
+		modBus.addListener(EventPriority.LOWEST, false, RegisterPayloadHandlersEvent.class, XaeroChannels::register);
 		// Radar icons from Xaero's Minimap's icon files, read again on every resource reload.
 		//? if >=1.21.4 {
 		modBus.addListener(net.neoforged.neoforge.client.event.AddClientReloadListenersEvent.class, event -> event.addListener(XaeroRadarIcons.ID, XaeroRadarIcons.LISTENER));

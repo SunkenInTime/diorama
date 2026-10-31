@@ -6,10 +6,14 @@ import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.llamalad7.mixinextras.sugar.Local;
 import dev.diorama.XaeroChannels;
 import io.netty.buffer.ByteBuf;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 //?} else {
 /*import dev.diorama.XaeroChannels;
 import net.minecraft.network.FriendlyByteBuf;
@@ -24,8 +28,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 *///?}
 
 /**
- * Shows XaeroChannels each mod message from the server as it arrives, before whichever mod has
- * its channel reads it, so Diorama gets the level ID on channels a Xaero mod has.
+ * Shows XaeroChannels each mod message as it arrives, before whichever mod has its channel reads
+ * it, so Diorama gets its messages on channels another mod has.
  */
 //? if >=1.21 {
 // The codec every mod message goes through, on every loader: it reads the channel, then hands the
@@ -34,12 +38,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CustomPayloadMixin {
 	@WrapOperation(method = "decode", at = @At(value = "INVOKE", target = "Lnet/minecraft/network/codec/StreamCodec;decode(Ljava/lang/Object;)Ljava/lang/Object;"))
 	private Object diorama$peek(StreamCodec<Object, Object> codec, Object input, Operation<Object> original, @Local Identifier channel) {
-		Integer id = XaeroChannels.peek(channel, (ByteBuf) input);
+		XaeroChannels.Message message = XaeroChannels.peek(channel, (ByteBuf) input);
 		Object payload = original.call(codec, input);
-		if (id != null) {
-			XaeroChannels.peeked(payload, id);
+		if (message != null) {
+			XaeroChannels.peeked(payload, message);
 		}
 		return payload;
+	}
+
+	// Diorama's answer on a channel another mod has would go through that mod's codec, or none, so
+	// its messages are written here.
+	@Inject(method = "encode(Lnet/minecraft/network/FriendlyByteBuf;Lnet/minecraft/network/protocol/common/custom/CustomPacketPayload;)V", at = @At("HEAD"), cancellable = true)
+	private void diorama$write(FriendlyByteBuf output, CustomPacketPayload value, CallbackInfo ci) {
+		if (value instanceof XaeroChannels.Message message) {
+			output.writeIdentifier(message.type().id());
+			XaeroChannels.write(output, message);
+			ci.cancel();
+		}
 	}
 }
 //?} else {
@@ -55,9 +70,9 @@ public abstract class CustomPayloadMixin {
 
 	@Inject(method = "<init>(Lnet/minecraft/network/FriendlyByteBuf;)V", at = @At("TAIL"))
 	private void diorama$peek(FriendlyByteBuf input, CallbackInfo ci) {
-		Integer id = XaeroChannels.peek(this.identifier, this.data);
-		if (id != null) {
-			XaeroChannels.peeked(this, id);
+		XaeroChannels.Message message = XaeroChannels.peek(this.identifier, this.data);
+		if (message != null) {
+			XaeroChannels.peeked(this, message);
 		}
 	}
 }

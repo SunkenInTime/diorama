@@ -93,7 +93,8 @@ public final class DioramaFabric implements ClientModInitializer {
 			Waystones.clear();
 			Claims.clear();
 		});
-		XaeroChannels.register();
+		// Once every mod has started, so a mod that has Xaero's channels has them by then.
+		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> XaeroChannels.register());
 		// Radar icons from Xaero's Minimap's icon files, read again on every resource reload.
 		//? if >=26.1 {
 		net.fabricmc.fabric.api.resource.v1.ResourceLoader.get(PackType.CLIENT_RESOURCES).registerReloadListener(XaeroRadarIcons.ID, XaeroRadarIcons.LISTENER);

@@ -36,6 +36,7 @@ import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
 /**
@@ -63,7 +64,8 @@ final class DioramaForgeClient {
 			event.registerAboveAll("minimap", (gui, graphics, partialTick, width, height) -> minimap.render(graphics, partialTick));
 		});
 		modBus.addListener(EventPriority.NORMAL, false, RegisterClientReloadListenersEvent.class, event -> event.registerReloadListener(XaeroRadarIcons.LISTENER));
-		XaeroChannels.register();
+		// Once every mod has loaded, so a mod that has Xaero's channels has them by then.
+		modBus.addListener(EventPriority.NORMAL, false, FMLLoadCompleteEvent.class, event -> event.enqueueWork(XaeroChannels::register));
 
 		// Fired for the integrated server's chunks too, on its own thread.
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ChunkEvent.Load.class, event -> {

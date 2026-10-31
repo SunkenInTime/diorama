@@ -4,12 +4,13 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-//? if >=1.21.9 {
-import java.util.Collections;
+//? if >=1.21 {
+import java.util.ArrayDeque;
 //?}
 import java.util.List;
-//? if >=1.21.9 {
+//? if >=1.21 {
 import java.util.Map;
+import java.util.Queue;
 import java.util.WeakHashMap;
 //?}
 import net.minecraft.client.Minecraft;
@@ -32,6 +33,7 @@ import net.minecraftforge.network.MCRegisterPacketHandler;
 import net.minecraftforge.network.NetworkEvent;
 import net.minecraftforge.network.NetworkHooks;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.event.EventNetworkChannel;
 *///?}
 //? if fabric && >=1.21 {
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -42,13 +44,13 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 //? if >=1.21 {
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 //?}
 //? if >=1.21.9 {
 import net.minecraft.network.PacketProcessor;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketType;
-import net.minecraft.network.protocol.common.ClientCommonPacketListener;
 import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.CommonPacketTypes;
 //?}
@@ -74,10 +76,12 @@ import org.jspecify.annotations.Nullable;
  * to the other can't remove them. It doesn't answer at all while Xaero's World Map is installed:
  * an answer moves the server's tracking from the World Map's channel to Diorama.
  *
- * <p>Fabric and NeoForge allow one handler per channel, and registering a channel twice throws at
- * startup. So a channel is only Diorama's when the Xaero mod that owns it isn't installed. On a
- * channel a Xaero mod has, Diorama still reads level IDs as they arrive, before that mod reads
- * them (see {@link #peek}), and leaves the rest to it.
+ * <p>Fabric, NeoForge and Forge allow one mod per channel, and registering a channel twice throws
+ * at startup, in whichever mod comes second. So a channel is only Diorama's when no other mod has
+ * it, and Diorama registers after every other mod. On a channel a Xaero mod has, Diorama still
+ * reads level IDs as they arrive, before that mod reads them (see {@link #peek}), and leaves the
+ * rest to it. On a channel another mod has, like BuildPrint, which listens there for level IDs,
+ * Diorama reads every message that way and answers the handshake itself.
  */
 public final class XaeroChannels {
 	/** Message kinds, the first byte of every message. */
@@ -96,6 +100,8 @@ public final class XaeroChannels {
 
 	/** The channels a Xaero mod has, whose level IDs Diorama reads in {@link #peek}. */
 	private static final List<Identifier> CLAIMED = new ArrayList<>(2);
+	/** The channels another mod got to first, whose messages Diorama reads in {@link #peek}. */
+	private static final List<Identifier> TAKEN = new ArrayList<>(2);
 	/** The channel tracked players come on: the first Diorama answered on, the minimap's over the World Map's. */
 	private static CustomPacketPayload.@Nullable Type<Message> trackerChannel;
 
@@ -124,8 +130,13 @@ public final class XaeroChannels {
 	/** Listens on the channels no Xaero mod has. Call once, at startup. */
 	public static void register() {
 		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
-			PayloadTypeRegistry.clientboundPlay().register(type, codec(type));
-			PayloadTypeRegistry.serverboundPlay().register(type, codec(type));
+			try {
+				PayloadTypeRegistry.clientboundPlay().register(type, codec(type));
+				PayloadTypeRegistry.serverboundPlay().register(type, codec(type));
+			} catch (IllegalArgumentException e) {
+				taken(type);
+				continue;
+			}
 			// Registering a handler also tells the server Diorama listens here. Plugins need that:
 			// Paper drops messages on channels the client hasn't registered.
 			ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
@@ -137,12 +148,21 @@ public final class XaeroChannels {
 	 * {@link #peek} reads, or takes them back (false). Call while not on a server.
 	 */
 	public static void handOverForTests(boolean toXaero) {
+		handOver(CLAIMED, toXaero);
+	}
+
+	/** For tests: as {@link #handOverForTests}, as if another mod had taken the channels. */
+	public static void leaveToAnotherModForTests(boolean leave) {
+		handOver(TAKEN, leave);
+	}
+
+	private static void handOver(List<Identifier> holder, boolean leave) {
 		for (CustomPacketPayload.Type<Message> type : List.of(MINIMAP, WORLD_MAP)) {
-			if (toXaero) {
+			if (leave) {
 				ClientPlayNetworking.unregisterGlobalReceiver(type.id());
-				CLAIMED.add(type.id());
+				holder.add(type.id());
 			} else {
-				CLAIMED.remove(type.id());
+				holder.remove(type.id());
 				ClientPlayNetworking.registerGlobalReceiver(type, (message, context) -> receive(message));
 			}
 		}
@@ -154,7 +174,7 @@ public final class XaeroChannels {
 			// Registering a handler also tells the server Diorama listens here. Plugins need that:
 			// Paper drops messages on channels the client hasn't registered. A channel that already
 			// has a handler isn't taken over: here Fabric returns false instead of throwing.
-			ClientPlayNetworking.registerGlobalReceiver(type.id(), (client, handler, buf, sender) -> {
+			boolean registered = ClientPlayNetworking.registerGlobalReceiver(type.id(), (client, handler, buf, sender) -> {
 				// The handler runs on the network thread, and the buffer is only good until it
 				// returns. So the message is read here and handled on the client thread, as later
 				// versions do, unless the player has left by then.
@@ -165,6 +185,9 @@ public final class XaeroChannels {
 					}
 				});
 			});
+			if (!registered) {
+				taken(type);
+			}
 		}
 	}
 	*///?} else if forge {
@@ -176,23 +199,29 @@ public final class XaeroChannels {
 			// share, and a server without the channel has none. Forge tells servers that aren't
 			// Forge about its channels as the player joins, which Paper needs before it passes
 			// messages on.
-			NetworkRegistry.newEventChannel(type.id(), () -> "1.0", version -> true, version -> true)
-				.<NetworkEvent.ServerCustomPayloadEvent>addListener(event -> {
-					if (event instanceof NetworkEvent.ServerCustomPayloadLoginEvent) {
-						return;
+			EventNetworkChannel channel;
+			try {
+				channel = NetworkRegistry.newEventChannel(type.id(), () -> "1.0", version -> true, version -> true);
+			} catch (IllegalArgumentException e) {
+				taken(type);
+				continue;
+			}
+			channel.<NetworkEvent.ServerCustomPayloadEvent>addListener(event -> {
+				if (event instanceof NetworkEvent.ServerCustomPayloadLoginEvent) {
+					return;
+				}
+				// Read here: the buffer is only good until this returns. Handled on the client thread,
+				// as on Fabric, unless the player has left by then.
+				Message message = read(type, event.getPayload());
+				NetworkEvent.Context context = event.getSource().get();
+				Connection connection = context.getNetworkManager();
+				context.enqueueWork(() -> {
+					if (connection.isConnected()) {
+						receive(message);
 					}
-					// Read here: the buffer is only good until this returns. Handled on the client thread,
-					// as on Fabric, unless the player has left by then.
-					Message message = read(type, event.getPayload());
-					NetworkEvent.Context context = event.getSource().get();
-					Connection connection = context.getNetworkManager();
-					context.enqueueWork(() -> {
-						if (connection.isConnected()) {
-							receive(message);
-						}
-					});
-					context.setPacketHandled(true);
 				});
+				context.setPacketHandled(true);
+			});
 		}
 	}
 	*///?} else if >=1.21.6 {
@@ -208,7 +237,11 @@ public final class XaeroChannels {
 			// From NeoForge 21.6 the client's handler is its own argument, and NeoForge won't start
 			// with a clientbound channel that has none. The server side (a LAN guest's messages to
 			// the integrated server) has nothing to do.
-			registrar.playBidirectional(type, codec(type), (message, context) -> {}, (message, context) -> receive(message));
+			try {
+				registrar.playBidirectional(type, codec(type), (message, context) -> {}, (message, context) -> receive(message));
+			} catch (UnsupportedOperationException e) {
+				taken(type);
+			}
 		}
 	}
 	*///?} else {
@@ -221,22 +254,32 @@ public final class XaeroChannels {
 		// messages on.
 		PayloadRegistrar registrar = event.registrar("1.0").optional();
 		for (CustomPacketPayload.Type<Message> type : unclaimed()) {
-			registrar.playBidirectional(type, codec(type), (message, context) -> {
-				// The integrated server shares the registration, so a LAN guest's messages come here too.
-				if (context.flow() == PacketFlow.CLIENTBOUND) {
-					receive(message);
-				}
-			});
+			try {
+				registrar.playBidirectional(type, codec(type), (message, context) -> {
+					// The integrated server shares the registration, so a LAN guest's messages come here too.
+					if (context.flow() == PacketFlow.CLIENTBOUND) {
+						receive(message);
+					}
+				});
+			} catch (UnsupportedOperationException e) {
+				taken(type);
+			}
 		}
 	}
 	*///?}
+
+	/** Another mod registered {@code type} first and handles it. Diorama reads along in {@link #peek}. */
+	private static void taken(CustomPacketPayload.Type<Message> type) {
+		Diorama.LOGGER.info("Another mod has {}, so Diorama reads it without being its handler", type.id());
+		TAKEN.add(type.id());
+	}
 
 	/** The channels whose Xaero mod isn't installed. */
 	private static List<CustomPacketPayload.Type<Message>> unclaimed() {
 		List<CustomPacketPayload.Type<Message>> unclaimed = new ArrayList<>(2);
 		CLAIMED.clear();
 		// Fair-Play Minimap used the minimap's channel name in some versions.
-		if (unclaimed(MINIMAP, "xaerominimap", "xaerominimapfair")) {
+		if (unclaimed(MINIMAP, "xaerominimap", "xaerominimapfair", "xaerobetterpvp")) {
 			unclaimed.add(MINIMAP);
 		} else {
 			CLAIMED.add(MINIMAP.id());
@@ -363,51 +406,70 @@ public final class XaeroChannels {
 	}
 
 	/**
-	 * The level ID in a message from the server on {@code channel}, read before the mod that has
-	 * the channel reads the message: the ID if a Xaero mod has the channel and the message is one,
-	 * else null. The body is left as it was. Called on the network thread, by a mixin.
+	 * The message on {@code channel}, read before the mod that has the channel reads it, if it's
+	 * one for Diorama: anything on a channel another mod took, a level ID on a Xaero mod's, else
+	 * null. The body is left as it was. Called on the network thread, by a mixin.
 	 */
-	public static @Nullable Integer peek(Identifier channel, ByteBuf body) {
-		if (!CLAIMED.contains(channel) || body.readableBytes() < 5 || body.getByte(body.readerIndex()) != LEVEL_ID) {
+	public static @Nullable Message peek(Identifier channel, ByteBuf body) {
+		boolean levelId = CLAIMED.contains(channel) && body.readableBytes() >= 5 && body.getByte(body.readerIndex()) == LEVEL_ID;
+		if (!levelId && !TAKEN.contains(channel)) {
 			return null;
 		}
-		return body.getInt(body.readerIndex() + 1);
+		return read(channel.equals(MINIMAP.id()) ? MINIMAP : WORLD_MAP, new FriendlyByteBuf(body.slice()));
 	}
 
-	//? if >=1.21.9 {
+	//? if >=1.21 {
 	/**
-	 * Level IDs {@link #peek} read, by the message they came in. From 1.21.9 the client handles
-	 * packets in a queue of their own, ahead of its other tasks, so an ID handled as a task could
-	 * come after a world change the server sent after it, and name the wrong world. So it waits
-	 * for its message, and {@link #queuePeeked} puts it in the packet queue where the message is.
+	 * Messages {@link #peek} read, by the payload they came in. The codec reads messages both ways,
+	 * and a LAN guest's aren't for the client, so a message waits here until the client handles it
+	 * as one from the server. From 1.21.9 the client also handles packets in a queue of their own,
+	 * ahead of its other tasks, so an ID handled as a task could come after a world change the
+	 * server sent after it, and name the wrong world. {@link #queuePeeked} puts it where its
+	 * payload is. A queue each, as another mod's codec may return equal payloads for different
+	 * messages, or one payload for all it ignores.
 	 */
-	private static final Map<Object, Integer> PEEKED = Collections.synchronizedMap(new WeakHashMap<>());
+	private static final Map<Object, Queue<Message>> PEEKED = new WeakHashMap<>();
 
-	/** The message {@code payload} carries level ID {@code id}. Network thread, by a mixin. */
-	public static void peeked(Object payload, int id) {
-		PEEKED.put(payload, id);
+	/** {@code payload} carries {@code message}. Network thread, by a mixin. */
+	public static void peeked(Object payload, Message message) {
+		synchronized (PEEKED) {
+			PEEKED.computeIfAbsent(payload, key -> new ArrayDeque<>()).add(message);
+		}
 	}
 
 	/**
-	 * The message {@code payload} is being handled: on the network thread, before the loader hands
-	 * it to the client thread, or on the client thread for a message in a bundle. By a mixin.
+	 * The client is handling {@code payload}: on the network thread, before the loader hands it to
+	 * the client thread, or on the client thread for a payload in a bundle. By a mixin.
 	 */
 	public static void queuePeeked(CustomPacketPayload payload, ClientCommonPacketListener listener) {
-		Integer id = PEEKED.remove(payload);
-		if (id == null) {
-			return;
+		Message message;
+		synchronized (PEEKED) {
+			Queue<Message> messages = PEEKED.get(payload);
+			if (messages == null) {
+				return;
+			}
+			message = messages.remove();
+			if (messages.isEmpty()) {
+				PEEKED.remove(payload);
+			}
 		}
+		queue(message, listener);
+	}
+	//?}
+
+	//? if >=1.21.9 {
+	private static void queue(Message message, ClientCommonPacketListener listener) {
 		PacketProcessor packets = Minecraft.getInstance().packetProcessor();
 		if (packets.isSameThread()) {
-			// The client thread handles a bundle's packets one after another, so this is the ID's place.
-			levelId(id);
+			// The client thread handles a bundle's packets one after another, so this is the message's place.
+			receivePeeked(message);
 		} else {
-			packets.scheduleIfPossible(listener, new PeekedLevelId(id));
+			packets.scheduleIfPossible(listener, new PeekedMessage(message));
 		}
 	}
 
-	/** A level ID in the client's packet queue. */
-	private record PeekedLevelId(int id) implements Packet<ClientCommonPacketListener> {
+	/** A message from the server in the client's packet queue. */
+	private record PeekedMessage(Message message) implements Packet<ClientCommonPacketListener> {
 		@Override
 		public PacketType<ClientboundCustomPayloadPacket> type() {
 			return CommonPacketTypes.CLIENTBOUND_CUSTOM_PAYLOAD;
@@ -415,22 +477,31 @@ public final class XaeroChannels {
 
 		@Override
 		public void handle(ClientCommonPacketListener listener) {
-			levelId(this.id);
+			receivePeeked(this.message);
 		}
 	}
-	//?} else {
-	/*// The message carrying level ID id arrived. Before 1.21.9 packets and tasks share the client's
-	// one queue, so a task keeps the ID's place among the packets around it. Network thread, by a
-	// mixin.
-	public static void peeked(Object message, int id) {
-		Minecraft.getInstance().execute(() -> levelId(id));
+	//?} else if >=1.21 {
+	/*// Packets and tasks share the client's one queue, so a task keeps the message's place.
+	private static void queue(Message message, ClientCommonPacketListener listener) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.isSameThread()) {
+			receivePeeked(message);
+		} else {
+			mc.execute(() -> receivePeeked(message));
+		}
+	}
+	*///?} else {
+	/*// The server's packet carrying message arrived. Packets and tasks share the client's one queue,
+	// so a task keeps the message's place among the packets around it. Network thread, by a mixin.
+	public static void peeked(Object packet, Message message) {
+		Minecraft.getInstance().execute(() -> receivePeeked(message));
 	}
 	*///?}
 
-	/** A level ID read off a channel a Xaero mod has, unless the player left before the client got to it. */
-	private static void levelId(int id) {
+	/** A message read off a channel another mod has, unless the player left before the client got to it. */
+	private static void receivePeeked(Message message) {
 		if (Minecraft.getInstance().getConnection() != null) {
-			WorldKey.serverLevelId(id);
+			receive(message);
 		}
 	}
 

@@ -256,6 +256,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("tracked-players")) {
 			trackedPlayers(context);
+			// BuildPrint takes these channels for itself, so Diorama isn't their handler, and nobody
+			// else answers the server: it reads and answers on the way.
+			answerOnAnotherModsChannel();
+			dev.diorama.XaeroChannels.leaveToAnotherModForTests(true);
+			try {
+				trackedPlayers(context);
+			} finally {
+				dev.diorama.XaeroChannels.leaveToAnotherModForTests(false);
+			}
 		}
 		//?}
 		//? if >=1.21.11 && fabric {
@@ -900,9 +909,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 		} finally {
 			dev.diorama.XaeroChannels.handOverForTests(false);
 		}
+		// Another mod holding the channels reads them on the way too.
+		dev.diorama.XaeroChannels.leaveToAnotherModForTests(true);
+		String survivalWithAnotherMod;
+		try {
+			survivalWithAnotherMod = playOnServer(context, "diorama-shared", "id-survival-other-mod", null, null, List.of("Survival Camp"), List.of("Old Camp", "Lobby Camp"), true, SURVIVAL_ID);
+		} finally {
+			dev.diorama.XaeroChannels.leaveToAnotherModForTests(false);
+		}
 		levelIdOnJoin = null;
 		if (!survivalWithXaero.equals(survival)) {
 			throw new AssertionError("With Xaero's mods holding the channels, survival opened " + survivalWithXaero + ", not " + survival);
+		}
+		if (!survivalWithAnotherMod.equals(survival)) {
+			throw new AssertionError("With another mod holding the channels, survival opened " + survivalWithAnotherMod + ", not " + survival);
 		}
 		if (!lobby.equals(address + "-id-7c56d495") || !survival.equals(address + "-id-04adb1e4")) {
 			throw new AssertionError("The level IDs didn't name the folders: " + lobby + ", " + survival);
@@ -1051,6 +1071,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		} finally {
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.unregisterGlobalReceiver(dev.diorama.XaeroChannels.MINIMAP.id());
 			context.runOnClient(mc -> Settings.get().radarRange = range);
+		}
+	}
+
+	/** Diorama's answer goes out on a channel it has no codec for, as when another mod has the channel. */
+	private static void answerOnAnotherModsChannel() {
+		net.minecraft.resources.Identifier channel = net.minecraft.resources.Identifier.fromNamespaceAndPath("diorama-test", "no-codec");
+		dev.diorama.XaeroChannels.Message answer = new dev.diorama.XaeroChannels.Message(
+			new net.minecraft.network.protocol.common.custom.CustomPacketPayload.Type<>(channel), 1, new byte[] {0, 0, 0, 3});
+		net.minecraft.network.FriendlyByteBuf written = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+		net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket.STREAM_CODEC.encode(written, new net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket(answer));
+		if (!written.readIdentifier().equals(channel) || written.readableBytes() != 5 || written.readByte() != 1 || written.readInt() != 3) {
+			throw new AssertionError("The answer wasn't written as it is: " + answer);
 		}
 	}
 

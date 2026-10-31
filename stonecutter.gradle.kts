@@ -92,6 +92,7 @@ stonecutter parameters {
 	val before1_21_11 = listOf(
 		// Resource ids were ResourceLocations, and a ResourceKey's id was its location.
 		"\\bIdentifier\\b" to "ResourceLocation",
+		"\\b(read|write)Identifier\\b" to "$1ResourceLocation",
 		"\\.identifier\\(\\)" to ".location()",
 		// Cows had no package of their own.
 		"net\\.minecraft\\.world\\.entity\\.animal\\.cow\\." to "net.minecraft.world.entity.animal.",
