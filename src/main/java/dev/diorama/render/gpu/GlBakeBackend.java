@@ -81,7 +81,7 @@ final class GlBakeBackend implements BakeBackend {
 	private int casterVbo;
 	private int ubo;
 	private boolean timestamps;
-	private volatile @Nullable String device;
+	private @Nullable String device;
 	/**
 	 * Up to 1.21.8 the game asks for OpenGL 3.2, so what the bake needs from 3.3 is looked for one
 	 * by one: drivers usually offer it anyway, or the extension it came from.
@@ -248,6 +248,9 @@ final class GlBakeBackend implements BakeBackend {
 
 	@Override
 	public @Nullable String device() {
+		if (this.device == null) {
+			this.device = glGetString(GL_RENDERER) + " (" + glGetString(GL_VENDOR) + ", OpenGL " + glGetString(GL_VERSION) + ")";
+		}
 		return this.device;
 	}
 
@@ -379,8 +382,7 @@ final class GlBakeBackend implements BakeBackend {
 				}
 				samplerObjects = caps.glBindSampler != 0;
 				this.timestamps = caps.glQueryCounter != 0 && caps.glGetQueryObjecti64v != 0;
-				this.device = glGetString(GL_RENDERER) + " (" + glGetString(GL_VENDOR) + ", OpenGL " + glGetString(GL_VERSION) + ")";
-				Diorama.LOGGER.info("GPU baking on {}", this.device);
+				Diorama.LOGGER.info("GPU baking on {}", this.device());
 				// An error stays flagged until someone reads it, and on Windows nothing in the game
 				// does, so one another mod raised minutes ago would be blamed on this setup. Read
 				// them away first; GL keeps one per kind, so a few reads clear them all.

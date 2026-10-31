@@ -14,8 +14,8 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * Draws map tiles on the GPU from {@link GpuMesher} meshes instead of tracing them: an
- * experiment, on with {@code DIORAMA_GPU_BAKE=1}.
+ * Draws map tiles on the GPU from {@link GpuMesher} meshes instead of tracing them;
+ * {@link GpuBakeCheck} says when.
  *
  * <p>A bake is a few passes on the render thread:
  * <ol>
@@ -58,8 +58,19 @@ public final class GpuTileBaker {
 	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays, two vec4s for under a roof. */
 	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13 + 2) * 16;
 
-	/** Set when the first tile is queued: until then frames don't touch the GPU code at all. */
+	/**
+	 * A drawn tile whose pixels haven't come back after this long and this many frames isn't
+	 * coming: the driver has stopped answering. Frames too, as pixels arrive between frames and a
+	 * game busy loading a world doesn't draw any.
+	 */
+	private static final long STUCK_NANOS = 20_000_000_000L;
+	private static final int STUCK_FRAMES = 240;
+
+	/** Set when GPU baking is first wanted: until then frames don't touch the GPU code at all. */
 	private static volatile boolean used;
+	/** The GPU code failed outside any one tile: frames leave it alone from then on. */
+	private static volatile boolean dead;
+	private static volatile @Nullable String device;
 
 	/** Made on the first frame after a tile is queued, so a session without GPU baking never sets one up. */
 	private static final class Backend {
@@ -79,6 +90,7 @@ public final class GpuTileBaker {
 	// The bake budget, in nanoseconds of frame time, and the measured cost of a bake.
 	private static long lastFrame;
 	private static double budget;
+	private static long frames;
 	private static double renderCost = 1e6;
 	private static double gpuCost = 1e6;
 
@@ -87,6 +99,10 @@ public final class GpuTileBaker {
 
 	/** What a bake cost, for the experiment's numbers. Times are nanoseconds, -1 where not known. */
 	public record Timing(long meshNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
+		/** How long the bake held up a frame, at the dearer of the render thread and the GPU. */
+		public long frameNanos() {
+			return Math.max(this.recordNanos, this.gpuNanos);
+		}
 	}
 
 	/**
@@ -102,8 +118,23 @@ public final class GpuTileBaker {
 	 * render thread, or null pixels if the GPU couldn't draw it.
 	 */
 	public static void submit(GpuMesher.Mesh mesh, Consumer<Result> done) {
-		QUEUE.add(new Job(mesh, done));
+		Job job = new Job(mesh, done);
+		if (dead) {
+			job.fail();
+			return;
+		}
+		QUEUE.add(job);
 		used = true;
+	}
+
+	/** Lets frames start on the GPU code, for {@link GpuBakeCheck#open}. */
+	static void use() {
+		used = true;
+	}
+
+	/** After a failure, for {@link GpuBakeCheck#retry}. */
+	static void retry() {
+		dead = false;
 	}
 
 	/**
@@ -123,17 +154,54 @@ public final class GpuTileBaker {
 
 	/** The graphics card and driver the bakes run on, for the log. */
 	public static String device() {
-		String device = used ? Backend.INSTANCE.device() : null;
-		return device == null ? "a GPU not set up yet" : device;
+		String name = device;
+		return name == null ? "a GPU not set up yet" : name;
 	}
 
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
 	public static void frame() {
-		if (!used) {
+		if (!used || dead) {
 			return;
 		}
-		Backend.INSTANCE.poll();
-		long now = System.nanoTime();
+		try {
+			if (!GpuBakeCheck.opened()) {
+				device = Backend.INSTANCE.device();
+				GpuBakeCheck.open(device);
+				if (GpuBakeCheck.failed()) {
+					cancelAll();
+					return;
+				}
+			}
+			Backend.INSTANCE.poll();
+			long now = System.nanoTime();
+			frames++;
+			for (Job job : PENDING) {
+				if (now - job.drawn > STUCK_NANOS && frames - job.drawnFrame > STUCK_FRAMES) {
+					throw new IllegalStateException("the pixels of " + job.mesh.key + " never came back");
+				}
+			}
+			drawQueued(now);
+		} catch (Throwable t) {
+			// Nothing here may reach the frame: it would take the game down with it.
+			Diorama.LOGGER.error("GPU baking stopped", t);
+			dead = true;
+			GpuBakeCheck.broken(String.valueOf(t));
+			failAll();
+		}
+	}
+
+	/** Gives every job back to be traced. */
+	private static void failAll() {
+		Job job;
+		while ((job = QUEUE.poll()) != null) {
+			job.fail();
+		}
+		for (Job pending : PENDING) {
+			pending.fail();
+		}
+	}
+
+	private static void drawQueued(long now) {
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
 			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
@@ -211,6 +279,8 @@ public final class GpuTileBaker {
 		/** The look the uniforms were built with, so a check can tell if it changed under it. */
 		MapStyle look;
 		final long submitted = System.nanoTime();
+		long drawn;
+		long drawnFrame;
 		/** Set by the first of done or fail; the other is then ignored. */
 		final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
 		final long packNanos;
@@ -385,6 +455,8 @@ public final class GpuTileBaker {
 
 		/** Drawn: waiting for the pixels. */
 		void pending() {
+			this.drawn = System.nanoTime();
+			this.drawnFrame = frames;
 			PENDING.add(this);
 		}
 
