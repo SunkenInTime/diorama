@@ -55,6 +55,8 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 
 Some scenarios only run when you name them: `styles`, `bench`, `gpu-bake`, `waystones` (needs the Waystones mod), `ftb-claims` (needs FTB Chunks, FTB Teams and FTB Library, plus Architectury before 26.1), `showcase` and `icon-waypoints` (the showcase castle with icon pins, for pictures; `DIORAMA_GIF=1` adds the frames of picking an icon), `waypoint-clutter` (120 waypoints in the world, on the minimap and on the map, with and without the waypoint distance limit) and `long-initials` (pins with one to four letters in the world, on both minimap shapes, on the map, in the list and in the editor, then initials typed in small letters).
 
+Game tests bake with the CPU tracer unless a run sets `DIORAMA_GPU_BAKE`: `1` forces the GPU, past the speed limit and any saved result, and any other value, such as `auto`, leaves the choice to the game, as for a player. Run a GPU pass on a real graphics card before a release: boat.dev has none, so there `auto` falls back to the tracer within seconds (Mesa's llvmpipe takes about 0.5 s a tile).
+
 `DIORAMA_GIF=1` also saves frames for GIFs, and `DIORAMA_DEBUG=1` adds extra logging. `DIORAMA_TESTS=showcase` isn't part of the default run: it builds a castle beside a village and takes the screenshots for the store pages and this repo's README.
 
 `./gradlew :1.21.1-neoforge:runClientGameTest` runs the same scenarios on NeoForge, and `./gradlew :1.20.1-forge:runClientGameTest` on Forge, all but the dedicated server ones (`multiplayer`, `server-id`, `tracked-players`, `realms`). NeoForge and Forge have no client game test API, so they run on `src/gameshim`, the test-only stand-in for Fabric's that the Fabric jars before 1.21.4 use too.
