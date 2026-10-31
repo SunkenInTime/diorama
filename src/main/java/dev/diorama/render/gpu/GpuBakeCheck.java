@@ -197,10 +197,14 @@ public final class GpuBakeCheck {
 			GpuBakeRecord record = GpuBakeRecord.load();
 			String crashed = record.starting;
 			String mod = modVersion();
-			record.starting = null;
-			if (crashed != null && !forcedOn()) {
-				Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
-				record.off.put(crashed, new GpuBakeRecord.Entry(Off.CRASHED, mod));
+			// Another game in this folder, still on its first bakes, hasn't crashed: it's running.
+			boolean elsewhere = crashed != null && ProcessHandle.of(record.startingProcess).filter(ProcessHandle::isAlive).isPresent();
+			if (crashed != null && !elsewhere) {
+				record.starting = null;
+				if (!forcedOn()) {
+					Diorama.LOGGER.warn("The game went down during the first GPU bakes on {}. Tiles are traced on the CPU on that card from now on.", crashed);
+					record.off.put(crashed, new GpuBakeRecord.Entry(Off.CRASHED, record.startingMod));
+				}
 			}
 			Off saved = forcedOn() ? null : record.result(device, mod);
 			if (saved != null) {
@@ -209,7 +213,12 @@ public final class GpuBakeCheck {
 				record.save();
 				return;
 			}
+			if (elsewhere) {
+				return;
+			}
 			record.starting = device;
+			record.startingProcess = ProcessHandle.current().pid();
+			record.startingMod = mod;
 			record.save();
 			unproven = true;
 			if (!closingHooked) {
@@ -425,8 +434,10 @@ public final class GpuBakeCheck {
 		Diorama.LOGGER.warn("GPU baking turned off on {}: {}. Tiles are traced on the CPU instead.", device, details);
 		GpuBakeRecord record = GpuBakeRecord.load();
 		record.off.put(device, new GpuBakeRecord.Entry(why, modVersion()));
-		record.starting = null;
-		unproven = false;
+		if (unproven) {
+			record.starting = null;
+			unproven = false;
+		}
 		record.save();
 		if (why == Off.TOO_SLOW) {
 			// Nothing's wrong and nothing changes on the map: the setting says so if anyone looks.

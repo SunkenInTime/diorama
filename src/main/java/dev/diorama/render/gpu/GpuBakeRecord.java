@@ -31,6 +31,10 @@ final class GpuBakeRecord {
 	 * went down without closing during those first bakes: a driver crash leaves nothing else behind.
 	 */
 	@Nullable String starting;
+	/** The game that set {@link #starting}, which may still be running if two share this folder. */
+	long startingProcess;
+	/** The Diorama version that went down, which the result is then for. */
+	@Nullable String startingMod;
 
 	static final class Entry {
 		GpuBakeCheck.Off result;
@@ -70,7 +74,8 @@ final class GpuBakeRecord {
 		Path file = file();
 		try {
 			Files.createDirectories(file.getParent());
-			Path temp = file.resolveSibling("gpu-bake.json.tmp");
+			// Two games can share this folder, so each has its own.
+			Path temp = file.resolveSibling("gpu-bake." + ProcessHandle.current().pid() + ".tmp");
 			try (Writer writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
 				GSON.toJson(this, writer);
 			}
