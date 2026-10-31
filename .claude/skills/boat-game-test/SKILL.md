@@ -1,6 +1,6 @@
 ---
 name: boat-game-test
-description: Run Diorama's client game tests on boat.dev VMs instead of this PC. Use when a functional game test run (does it pass, do the screenshots show the right thing) would wait for the local Minecraft lock, or when several versions need testing at once.
+description: Run Diorama's client game tests on boat.dev VMs. The default for every game test that doesn't need this PC's GPU or desktop (does it pass, do the screenshots show the right thing), on one version or several.
 ---
 
 # Game tests on boat.dev
@@ -8,7 +8,7 @@ description: Run Diorama's client game tests on boat.dev VMs instead of this PC.
 A boat.dev VM has no GPU: Minecraft renders with OpenGL on the CPU, through Mesa. Tests pass the same way and screenshots show the same scenes, only slower than on Dara's PC. That makes it the place for functional checks and the wrong place for anything about the GPU:
 
 - **boat.dev**: a feature works, a screenshot shows what it should, a fix holds on other versions.
-- **This PC, under the Minecraft lock**: fps, frame time and bake-speed measurements, GPU bake (`DIORAMA_GPU_BAKE`), pixel-for-pixel comparisons against an RTX image, and anything driven on the desktop.
+- **This PC, under the Minecraft lock**: fps, frame time and bake-speed measurements, GPU bake (`DIORAMA_GPU_BAKE`), pixel-for-pixel comparisons against an RTX image, modded installs, and anything driven on the desktop. A `--shared` run here has to say why with `--needs-pc '<why>'`.
 
 ## Run
 
@@ -40,7 +40,7 @@ Before the first section starts, a run spends time on the VM, the push, Gradle, 
 
 ## Limits
 
-100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. With paid extra starts on (`keepGoing` in `boat limits`), the day's limit stops being a wall: starts past it cost from $0.03 each. Before each start the script reads `boat limits` (free, counts nothing): it waits about 3 min at most for a start this minute, and stops starting when the hour's starts are gone, or the day's with extra starts off. Other agents can still take the last start between that check and this script's start, so a start can be refused anyway; a refusal stops the rest of this run's starts. Rerun the failed nodes later, not in a loop. Reusing a warm VM costs no start. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
+100 VMs at once; starts are limited to 12 a minute, 60 an hour and 200 a day, shared with every other agent on the account, and a refused start counts too. With paid extra starts on (`keepGoing` in `boat limits`), the day's limit stops being a wall: starts past it cost from $0.03 each. Before each start the script reads `boat limits` (free, counts nothing): it waits about 3 min at most for a start this minute, and stops starting when the hour's starts are gone, or the day's with extra starts off. Other agents can still take the last start between that check and this script's start, so a start can be refused anyway; a refusal stops the rest of this run's starts. Rerun the failed nodes later, not in a loop. If that means waiting, tell Dara what boat said and when it frees up (`startWindowFull.freesAt` in `boat limits`). Don't move the run to the PC's queue: use the PC only if the lock is free right now, with `--needs-pc 'boat refused: <error>'`. Reusing a warm VM costs no start. Before a fan-out of more than about 10 VMs, check `planIncluded.vmHoursRemaining` in `boat limits` too.
 
 ## Warm snapshot
 
@@ -65,4 +65,4 @@ It took 64 min on 2026-10-28, most of it booting all 22 nodes one after another;
 - **Warm VMs belong to a worktree**, and only idle ones carry the warm name: a run takes one by renaming it to its own `diorama-test-<random>-<node>`, so while it runs it's cleaned up like any VM of the run, and it gets the warm name back after a run that went well. Two runs from the same worktree at once can't take the same one; the second gets a VM of its own. Each run deletes warm VMs boat.dev has stopped, from any worktree (nothing would ever resume them); it never touches a running one that isn't its own.
 - **`--keep`** stops the VM instead of deleting it, so you can look around with `boat resume <id>`, then `boat ssh <id>`. Delete it when done: its disk stays on the account for 14 days.
 - **Other mods in a run (26.x only, unobfuscated):** put the jars in a folder inside the worktree and pass `--env "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -Dfabric.addMods=/home/user/diorama/<folder>"` (this replaces sandbox.sh's own `JAVA_TOOL_OPTIONS`, so keep the RAM cap). `boat push` skips git-ignored files, so leave the folder untracked rather than ignored.
-- **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara, then run on this PC under the Minecraft lock.
+- **The account is Dara's.** If `boat` says you're signed out or the plan is gone, stop and tell Dara.
