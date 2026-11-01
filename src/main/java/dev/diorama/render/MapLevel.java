@@ -856,16 +856,30 @@ public final class MapLevel implements ChunkSource {
 	/**
 	 * GPU baking: the mesh is built on a baker thread, drawn on the render thread, and the pixels
 	 * come back here a frame or two later. Always the whole tile, which costs the GPU little.
-	 * Falls back to tracing if the GPU didn't draw it.
+	 * Falls back to tracing if the mesher failed or the GPU didn't draw it.
 	 */
 	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
 		BAKERS.execute(() -> {
 			try {
 				int[] saved = store == null ? null : store.read(key);
 				ChunkSource source = this.sourceFor(store);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				dev.diorama.bake.GpuMesher.Mesh mesh;
+				try {
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				} catch (BlockLooks.StatesRenumbered e) {
+					throw e;
+				} catch (Throwable t) {
+					Diorama.LOGGER.error("Failed to mesh tile {}; tracing it", key, t);
+					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
+					TileImage image = TileBaker.bake(key, source, looks, null, fog, saved, overlays);
+					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
+					return;
+				}
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
+						if (!result.declined()) {
+							dev.diorama.render.gpu.GpuBakeCheck.drawn(result.pixels() != null);
+						}
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, source, looks, null, fog, saved, overlays)
 							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
@@ -904,7 +918,7 @@ public final class MapLevel implements ChunkSource {
 					if (result.pixels() == null) {
 						dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, !result.declined());
 					} else if (this.generation(key) == generation && look.equals(result.look())) {
-						dev.diorama.render.gpu.GpuBakeCheck.compare(view, result.pixels(), traced, result.info(), info);
+						dev.diorama.render.gpu.GpuBakeCheck.compare(view, result.pixels(), traced, result.info(), info, result.timing().frameNanos());
 					} else {
 						// The map's look changed while it was out: the two may have baked different looks.
 						dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, false);
