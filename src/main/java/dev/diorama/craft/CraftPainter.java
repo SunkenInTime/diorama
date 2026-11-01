@@ -135,7 +135,7 @@ final class CraftPainter {
 			if (!surface && !(box[1] <= view.layer() && box[4] >= view.layer() - TileBaker.CAVE_DEPTH)) {
 				continue;
 			}
-			Craft.Inputs inputs = new Craft.Inputs(b, style, looks);
+			Craft.Inputs inputs = new Craft.Inputs(b, style, looks, TileBaker.fast());
 			if (surface) {
 				Shade shade = this.shadow(craft, inputs, pose, view);
 				if (shade != null) {
@@ -170,6 +170,7 @@ final class CraftPainter {
 	}
 
 	private void paint(GuiGraphicsExtractor graphics, MapViewport.View view, List<Drawn> drawn, List<Shade> shades, boolean surface, float opacity) {
+		int layer = view.layer();
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
 		MapCanvas canvas = MapCanvas.of(graphics);
 		Circle circle = view.round() ? Circle.in(view) : null;
@@ -192,9 +193,9 @@ final class CraftPainter {
 					under.add(drawn.get(j));
 				}
 			}
-			boolean ground = surface && this.mayBeCovered(d.craft());
+			boolean ground = !surface || this.mayBeCovered(d.craft());
 			SunMask sun = surface ? this.sunMask(d) : null;
-			MapTexture texture = under.isEmpty() && !ground && sun == null ? d.craft().texture : this.cut(d, under, ground, sun);
+			MapTexture texture = under.isEmpty() && !ground && sun == null ? d.craft().texture : this.cut(d, under, ground, sun, layer);
 			quad(canvas, circle, view, texture, sampling, d.place(), d.image().width(), d.image().height(), d.image().edge(), tint);
 		}
 		graphics.disableScissor();
@@ -249,7 +250,7 @@ final class CraftPainter {
 	 * bigger craft drawn before it, or the ground. Made again only when the images, where they
 	 * sit, or the ground under them change. The craft's own texture when nothing covers it.
 	 */
-	private MapTexture cut(Drawn d, List<Drawn> under, boolean ground, @Nullable SunMask sun) {
+	private MapTexture cut(Drawn d, List<Drawn> under, boolean ground, @Nullable SunMask sun, int layer) {
 		List<Object> key = new ArrayList<>();
 		key.add(d.image());
 		key.add(sun);
@@ -261,7 +262,8 @@ final class CraftPainter {
 		}
 		SurfaceArea surfaces = null;
 		if (ground) {
-			surfaces = this.map.surfaces(TileKey.SURFACE, d.pu0(), d.pv0(), d.pu1(), d.pv1());
+			surfaces = this.map.surfaces(layer, d.pu0(), d.pv0(), d.pu1(), d.pv1());
+			key.add(layer);
 			key.add(d.pu0());
 			key.add(d.pv0());
 			key.add(Math.round(d.depth() * 16));
@@ -291,6 +293,9 @@ final class CraftPainter {
 					hidden++;
 				}
 			}
+		}
+		if (layer != TileKey.SURFACE) {
+			hidden += underground(d, pixels, layer);
 		}
 		for (Drawn u : under) {
 			CraftBaker.Image other = u.image();
@@ -328,6 +333,29 @@ final class CraftPainter {
 		return craft.cut;
 	}
 
+	/** On a cave slice: takes the sun out of the craft and cuts away what stands above the slice. Returns how many pixels it changed. */
+	private static int underground(Drawn d, int[] pixels, int layer) {
+		CraftBaker.Image image = d.image();
+		double sin = Projection.sin();
+		double cos = Projection.cos();
+		int changed = 0;
+		for (int y = 0; y < image.height(); y++) {
+			double v = (d.pv0() + y + 0.5) / Projection.PIXELS_PER_UNIT;
+			for (int x = 0; x < image.width(); x++) {
+				int i = y * image.edge() + x;
+				int at = y * image.width() + x;
+				float depth = image.depth()[at];
+				if (pixels[i] == 0 || Float.isNaN(depth)) {
+					continue;
+				}
+				double worldY = -v * cos - (d.depth() + depth) * sin;
+				pixels[i] = worldY > layer ? 0 : pixels[i] & 0xFF000000 | image.sunless()[at] & 0xFFFFFF;
+				changed++;
+			}
+		}
+		return changed;
+	}
+
 	/** Which pixels of an image, width first, the world's blocks shade from the sun. */
 	record SunMask(int width, int height, java.util.BitSet shaded) {
 	}
@@ -361,7 +389,7 @@ final class CraftPainter {
 			double depth0 = d.depth();
 			craft.sunPending = later(() -> {
 				long start = System.nanoTime();
-				TileBaker baker = TileBaker.forSunChecks(this.map, looks);
+				TileBaker baker = TileBaker.forSunChecks(this.map, looks, pu0, pv0, pu0 + image.width(), pv0 + image.height());
 				int ppu = Projection.PIXELS_PER_UNIT;
 				double sin = Projection.sin();
 				double cos = Projection.cos();
@@ -395,7 +423,7 @@ final class CraftPainter {
 	 */
 	private boolean mayBeCovered(Craft craft) {
 		int[] box = craft.box(craft.framePose);
-		double run = Math.min(96, Math.max(0, this.map.topY() - box[1])) * Projection.cos() / Projection.sin();
+		double run = Math.max(0, this.map.topY() - box[1]) * Projection.cos() / Projection.sin();
 		for (int cx = box[0] >> 4; cx <= box[3] >> 4; cx++) {
 			for (int cz = box[2] >> 4; cz <= (int) Math.floor(box[5] + run) >> 4; cz++) {
 				ChunkSnapshot chunk = this.map.chunk(cx, cz);
@@ -457,18 +485,20 @@ final class CraftPainter {
 		double[] linear = Arrays.copyOfRange(pose, 3, 12);
 		double y = pose[1];
 		// Height shading changes too little over a few blocks to see.
-		boolean turned = image != null && (image.pitchSin() != Projection.sin() || Math.abs(craft.imageY - y) > REBAKE_CLIMB || stretched(image.linear(), linear, b));
-		// A craft too big to bake isn't tried again until it changes.
+		boolean turned = image != null
+			? image.pitchSin() != Projection.sin() || Math.abs(craft.imageY - y) > REBAKE_CLIMB || stretched(image.linear(), linear, b)
+			// Too big to bake at the last angle: it may fit at another.
+			: craft.triedLinear != null && stretched(craft.triedLinear, linear, b);
 		if (inputs.equals(craft.imageFrom) && (!turned || System.nanoTime() - craft.imageAt < craft.imageCost * IDLE_PER_WORK)) {
 			return;
 		}
 		craft.imageAt = System.nanoTime();
 		craft.imageFrom = inputs;
 		craft.imageY = y;
-		boolean fast = TileBaker.fast();
+		craft.triedLinear = linear;
 		craft.pending = later(() -> {
 			long start = System.nanoTime();
-			CraftBaker.Image baked = CraftBaker.bake(b, linear, y, inputs.looks(), inputs.style(), fast);
+			CraftBaker.Image baked = CraftBaker.bake(b, linear, y, inputs.looks(), inputs.style(), inputs.fast());
 			craft.imageCost = System.nanoTime() - start;
 			return baked;
 		}, "draw a craft");

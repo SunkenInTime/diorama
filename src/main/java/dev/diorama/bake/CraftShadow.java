@@ -254,7 +254,7 @@ public final class CraftShadow {
 			do {
 				int id = b.look(this.looks, CraftBlocks.index(b.sizeX, b.sizeZ, ray.cell[0], ray.cell[1], ray.cell[2]));
 				// Glass and plants too, so the shadow keeps the craft's outline.
-				if (id != 0 && id < this.looks.kind.length && this.looks.kind[id] != BlockLooks.AIR) {
+				if (id != 0 && id < this.looks.kind.length && this.looks.kind[id] != BlockLooks.AIR && ray.enter < ray.exit()) {
 					reach = (float) ray.exit();
 				}
 			} while (ray.next());

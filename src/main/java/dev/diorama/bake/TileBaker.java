@@ -332,7 +332,7 @@ public final class TileBaker {
 	public static TileSurface surface(TileKey key, int revision, ChunkSource source, BlockLooks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
 		int count = width * height;
-		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new float[baker.cave ? 0 : count], new boolean[count], new byte[count], new int[count], new int[count], new boolean[count]);
+		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new float[count], new boolean[count], new byte[count], new int[count], new int[count], new boolean[count]);
 		java.util.Arrays.fill(surface.y(), Float.NaN);
 		java.util.Arrays.fill(surface.near(), Float.NaN);
 		// Not under a roof, where the light is lifted off the rock above.
@@ -396,6 +396,7 @@ public final class TileBaker {
 					continue;
 				}
 				surface.y()[i] = baker.surfaceY;
+				surface.near()[i] = (float) -(baker.sin * baker.surfaceY + baker.cos * (v + baker.surfaceY * baker.cos) / baker.sin);
 				surface.top()[i] = baker.surfaceTop;
 				surface.light()[i] = baker.surfaceLight;
 				surface.outlined()[i] = linear[i * 4 + 3] > 0;
@@ -419,8 +420,22 @@ public final class TileBaker {
 	}
 
 	/** A baker only for {@link #sunBlocked}. */
-	public static TileBaker forSunChecks(ChunkSource source, BlockLooks looks) {
-		return new TileBaker(new TileKey(TileKey.SURFACE, 0, 0, 0), source, looks, false, null);
+	public static TileBaker forSunChecks(ChunkSource source, BlockLooks looks, int pu0, int pv0, int pu1, int pv1) {
+		// Rays go as high as the tallest blocks around the tile with the most reach over these pixels.
+		int size = Projection.TILE_PIXELS;
+		TileKey tallest = null;
+		int top = Integer.MIN_VALUE;
+		for (int tv = Math.floorDiv(pv0, size); tv <= Math.floorDiv(pv1 - 1, size); tv++) {
+			for (int tu = Math.floorDiv(pu0, size); tu <= Math.floorDiv(pu1 - 1, size); tu++) {
+				TileKey key = new TileKey(TileKey.SURFACE, tu, tv, 0);
+				int reach = localTop(key, source, SKY_REACH);
+				if (reach > top) {
+					top = reach;
+					tallest = key;
+				}
+			}
+		}
+		return new TileBaker(tallest, source, looks, false, null);
 	}
 
 	/** Whether the world's blocks stand between world point (x, y, z) and the sun, as on the tiles. */

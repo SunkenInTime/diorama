@@ -7,6 +7,9 @@ import org.jspecify.annotations.Nullable;
 
 /** One moving structure the client knows about this tick, from a {@link Crafts.Source}. Client thread. */
 public interface Body {
+	/** The most grid cells a craft may have. */
+	int MAX_CELLS = 4 << 20;
+
 	/** The same from session to session, so a parked craft is still known when it comes back. */
 	UUID id();
 

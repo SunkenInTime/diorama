@@ -23,6 +23,8 @@ final class Craft {
 	boolean announced;
 	boolean parked;
 	long movedAt;
+	/** Whether it has stood still long enough to stay on the map since it last moved. */
+	boolean settled;
 	final double[] anchor = new double[3];
 	long nearSince = -1;
 
@@ -30,7 +32,7 @@ final class Craft {
 	final double[] framePose = new double[12];
 
 	/** What an image or a shadow is made from, besides the pose: a change to any makes it again. */
-	record Inputs(CraftBlocks blocks, MapStyle style, BlockLooks looks) {
+	record Inputs(CraftBlocks blocks, MapStyle style, BlockLooks looks, boolean fast) {
 	}
 
 	CraftBaker.@Nullable Image image;
@@ -38,6 +40,8 @@ final class Craft {
 	@Nullable CompletableFuture<CraftBaker.@Nullable Image> pending;
 	/** What the image, or the bake in flight, is made from. */
 	@Nullable Inputs imageFrom;
+	/** The turn the last bake was asked for. */
+	double @Nullable [] triedLinear;
 	/** The height of the grid origin the image, or the bake in flight, is made at. */
 	double imageY;
 

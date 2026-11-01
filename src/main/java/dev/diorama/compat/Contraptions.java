@@ -32,11 +32,10 @@ import org.jspecify.annotations.Nullable;
  * and stays off.
  */
 public final class Contraptions {
-	private static final int MAX_CELLS = 4 << 20;
-
 	private static boolean started;
 	private static boolean failed;
 	private static Class<?> entityType;
+	private static boolean warned;
 	private static Method contraption;
 	private static Method blocks;
 	private static Method toGlobal;
@@ -73,6 +72,14 @@ public final class Contraptions {
 		if (!failed) {
 			failed = true;
 			Diorama.LOGGER.warn("Couldn't read Create's contraptions; they won't show on the map", e);
+		}
+	}
+
+	/** One contraption failing doesn't turn off the rest. */
+	private static void skip(Exception e) {
+		if (!warned) {
+			warned = true;
+			Diorama.LOGGER.warn("Couldn't read a Create contraption; skipping it", e);
 		}
 	}
 
@@ -122,7 +129,7 @@ public final class Contraptions {
 				int sx = x1 - x0 + 1;
 				int sy = y1 - y0 + 1;
 				int sz = z1 - z0 + 1;
-				if ((long) sx * sy * sz > MAX_CELLS) {
+				if ((long) sx * sy * sz > Body.MAX_CELLS) {
 					return null;
 				}
 				int[] states = CraftBlocks.empty(sx, sy, sz);
@@ -144,8 +151,11 @@ public final class Contraptions {
 					}
 				}
 				return new Body.Blocks(new CraftBlocks(sx, sy, sz, states, copycats), new int[] {x0, y0, z0});
-			} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			} catch (LinkageError e) {
 				fail(e);
+				return null;
+			} catch (ReflectiveOperationException | RuntimeException e) {
+				skip(e);
 				return null;
 			}
 		}
@@ -168,8 +178,11 @@ public final class Contraptions {
 					out[i] = points[i] - points[i % 3];
 				}
 				return true;
-			} catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+			} catch (LinkageError e) {
 				fail(e);
+				return false;
+			} catch (ReflectiveOperationException | RuntimeException e) {
+				skip(e);
 				return false;
 			}
 		}

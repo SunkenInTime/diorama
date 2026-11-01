@@ -114,6 +114,9 @@ final class CraftFile {
 				java.util.Arrays.fill(states, at, at + length, ids[p]);
 				at += length;
 			}
+			if (at != volume) {
+				return null;
+			}
 			Int2IntMap copycats = new Int2IntOpenHashMap();
 			for (int c = 0; c + 1 < this.copycats.length; c += 2) {
 				int cell = this.copycats[c];
@@ -143,26 +146,35 @@ final class CraftFile {
 					pose[i] = data.readDouble();
 				}
 				int[] size = {data.readInt(), data.readInt(), data.readInt()};
-				String[] palette = new String[data.readInt()];
+				if (size[0] <= 0 || size[1] <= 0 || size[2] <= 0 || (long) size[0] * size[1] * size[2] > Body.MAX_CELLS) {
+					throw new IOException("bad craft size");
+				}
+				int limit = size[0] * size[1] * size[2];
+				String[] palette = new String[checked(data.readInt(), limit + 1)];
 				for (int i = 0; i < palette.length; i++) {
 					palette[i] = data.readUTF();
 				}
-				int[] runs = new int[data.readInt()];
+				int[] runs = new int[checked(data.readInt(), limit * 2)];
 				for (int i = 0; i < runs.length; i++) {
 					runs[i] = data.readInt();
 				}
-				int[] copycats = new int[data.readInt()];
+				int[] copycats = new int[checked(data.readInt(), limit * 2)];
 				for (int i = 0; i < copycats.length; i++) {
 					copycats[i] = data.readInt();
 				}
-				if (size[0] > 0 && size[1] > 0 && size[2] > 0) {
-					saved.add(new Saved(id, pose, size, palette, runs, copycats));
-				}
+				saved.add(new Saved(id, pose, size, palette, runs, copycats));
 			}
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't read the parked crafts from {}", file, e);
 		}
 		return saved;
+	}
+
+	private static int checked(int length, int most) throws IOException {
+		if (length < 0 || length > most) {
+			throw new IOException("bad craft array length " + length);
+		}
+		return length;
 	}
 
 	/** Writes the crafts, or deletes the file when there are none. */

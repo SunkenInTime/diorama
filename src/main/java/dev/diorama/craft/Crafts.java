@@ -66,7 +66,6 @@ public final class Crafts {
 	private @Nullable CompletableFuture<List<CraftFile.Saved>> loading;
 	private boolean dirty;
 	private long savedAt;
-	/** A block changed in a craft that couldn't be told: read them all again. */
 
 	/**
 	 * {@code worldChanged} hears where a craft came out of the world or went back into it. A
@@ -80,7 +79,10 @@ public final class Crafts {
 		this.file = folder == null ? null : folder.resolve("crafts.bin");
 		if (this.file != null) {
 			Path from = this.file;
-			this.loading = CompletableFuture.supplyAsync(() -> CraftFile.read(from), CraftPainter.BAKER);
+			this.loading = CompletableFuture.supplyAsync(() -> CraftFile.read(from), CraftPainter.BAKER).exceptionally(e -> {
+				Diorama.LOGGER.warn("Couldn't read the parked crafts from {}", from, e);
+				return List.of();
+			});
 		}
 	}
 
@@ -118,8 +120,16 @@ public final class Crafts {
 				if (!craft.posed || distance(craft.pose, craft.anchor) > STILL) {
 					System.arraycopy(craft.pose, 0, craft.anchor, 0, 3);
 					craft.movedAt = tick;
+					if (craft.settled) {
+						craft.settled = false;
+						this.dirty = true;
+					}
 				}
 				craft.posed = true;
+				if (!craft.settled && tick - craft.movedAt >= PARK_AFTER) {
+					craft.settled = true;
+					this.dirty = true;
+				}
 				if (!craft.announced) {
 					craft.announced = true;
 					this.worldChanged.accept(craft.box(craft.pose));
@@ -224,6 +234,11 @@ public final class Crafts {
 
 	/** Saves and frees the textures. Client thread. */
 	public void close(long tick) {
+		// What's still loading has to be in what's saved, or it would be lost.
+		if (this.loading != null) {
+			this.loading.join();
+			this.restore(tick);
+		}
 		this.save(tick, true);
 		for (Craft craft : this.crafts.values()) {
 			craft.close();
