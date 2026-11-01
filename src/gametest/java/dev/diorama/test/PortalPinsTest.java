@@ -114,8 +114,11 @@ final class PortalPinsTest {
 		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(true));
 		netherPortal(world, third, y, z, 2, 3);
 		context.waitTicks(40);
-		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(false));
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "a portal lit under fog of war");
+		// Gone before the fog lifts: the next news from its chunk would pin it, and rightly.
+		frameBroken(world, third, y, z);
+		context.waitTicks(40);
+		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(false));
 
 		// Two portals sharing a pin: when the one it stands on goes, it moves to the other.
 		int pair = at.getX() - 110;
@@ -134,7 +137,6 @@ final class PortalPinsTest {
 		world.getServer().runCommand("fill " + x + " " + y + " " + z + " " + (x + 22) + " " + (y + 22) + " " + z + " air");
 		world.getServer().runCommand("fill " + ex + " " + y + " " + ez + " " + (ex + 20) + " " + y + " " + (ez + 2) + " air");
 		world.getServer().runCommand("setblock " + (second + 1) + " " + (y + 8) + " " + z + " air");
-		frameBroken(world, third, y, z);
 		context.waitTicks(40);
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
 	}
