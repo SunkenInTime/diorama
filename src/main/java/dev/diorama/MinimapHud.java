@@ -300,9 +300,10 @@ public final class MinimapHud implements HudElement {
 		int hour = inDay / 1000;
 		int minute = inDay % 1000 * 60 / 1000;
 		boolean twelveHour = format == Settings.GameTime.DAY_12H || format == Settings.GameTime.ONLY_12H;
-		String time = twelveHour
-			? String.format(Locale.ROOT, "%02d:%02d %s", hour % 12 == 0 ? 12 : hour % 12, minute, hour < 12 ? "AM" : "PM")
-			: String.format(Locale.ROOT, "%02d:%02d", hour, minute);
+		String time = String.format(Locale.ROOT, "%02d:%02d", twelveHour && hour % 12 == 0 ? 12 : twelveHour ? hour % 12 : hour, minute);
+		if (twelveHour) {
+			time = Component.translatable(hour < 12 ? "diorama.minimap.time_am" : "diorama.minimap.time_pm", time).getString();
+		}
 		boolean withDay = format == Settings.GameTime.DAY_24H || format == Settings.GameTime.DAY_12H;
 		return withDay ? Component.translatable("diorama.minimap.day", day, time).getString() : time;
 	}

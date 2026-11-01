@@ -49,7 +49,7 @@ import static dev.diorama.render.gpu.GpuTileBaker.VOXEL_WIDTH;
 /**
  * Bakes through Minecraft's own GPU layer, which from 26.2 can express everything a bake needs
  * and runs on OpenGL and Vulkan alike. Pipelines aren't registered: they compile the first time
- * they're used, so a broken shader only stops the experiment.
+ * they're used, so a broken shader only sends tiles back to the tracer.
  */
 final class BlazeBakeBackend implements BakeBackend {
 	private @Nullable Targets targets;
@@ -179,7 +179,7 @@ final class BlazeBakeBackend implements BakeBackend {
 		return new ColorTargetState(Optional.empty(), format, ColorTargetState.WRITE_ALL);
 	}
 
-	// Not registered: compiled the first time they're used, so a broken shader only stops the experiment.
+	// Not registered: compiled the first time they're used, so a broken shader only sends tiles back to the tracer.
 	private static final RenderPipeline SKY_PASS = faces("bake_sky", "SKY_PASS", FACE)
 		.withBindGroupLayout(VOXELS)
 		.withColorTargetState(target(GpuFormat.R8_UNORM))
@@ -250,21 +250,20 @@ final class BlazeBakeBackend implements BakeBackend {
 		return builder;
 	}
 
-	/** Read on the render thread at the first bake; the check reads it from a baker thread. */
-	private volatile @Nullable String device;
+	private @Nullable String device;
 
 	@Override
 	public @Nullable String device() {
-		return this.device;
-	}
-
-	@Override
-	public boolean draw(GpuTileBaker.Job job) {
 		if (this.device == null) {
 			var info = RenderSystem.getDevice().getDeviceInfo();
 			this.device = info.name() + " (" + info.vendorName() + ", " + info.backendName() + " " + info.driverInfo() + ")";
 			Diorama.LOGGER.info("GPU baking on {}", this.device);
 		}
+		return this.device;
+	}
+
+	@Override
+	public boolean draw(GpuTileBaker.Job job) {
 		long start = System.nanoTime();
 		int skyFaces = job.opaqueCount + job.waterCount;
 		if (!ready(SKY_PASS) || !ready(SHADOW) || !ready(OPAQUE) || !ready(TINTED) || !ready(WATER) || !ready(COMPOSITE)) {

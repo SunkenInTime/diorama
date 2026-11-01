@@ -143,6 +143,11 @@ public final class TileStore {
 		this.overviewChanged = listener;
 	}
 
+	/** Tiles held in memory until they reach the disk, for a long fill to keep behind the writer. */
+	public synchronized int unwrittenTiles() {
+		return this.unwritten.size() + this.mergeQueued.size();
+	}
+
 	/** One level up from four children, each shrunk to a quarter; null if none exist. */
 	private int @Nullable [] shrinkChildren(TileKey key) {
 		int size = Projection.TILE_PIXELS;

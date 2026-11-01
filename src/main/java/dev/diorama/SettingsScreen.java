@@ -169,8 +169,14 @@ public final class SettingsScreen extends Screen {
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
 			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));
-		// On, but turned off this session because the graphics card's tiles didn't match: say so.
-		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
+		// On, but turned itself off on this graphics card: say why. Turning it back on tries again.
+		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> {
+			s.gpuBaking = i == 1;
+			if (s.gpuBaking) {
+				dev.diorama.render.gpu.GpuBakeCheck.retry();
+				this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
+			}
+		}, SettingsScreen::gpuBakingValue);
 		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 		look.cycle("arrow_color", () -> s.arrowColor, Settings.ARROW_COLORS.length, i -> s.arrowColor = i,
 			//? if >=1.21 {
@@ -201,7 +207,12 @@ public final class SettingsScreen extends Screen {
 	}
 
 	private static Component gpuBakingValue(int on) {
-		return Component.translatable(on == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on");
+		dev.diorama.render.gpu.GpuBakeCheck.Off off = dev.diorama.render.gpu.GpuBakeCheck.off();
+		return Component.translatable(on == 0 ? "options.off" : off == null ? "options.on" : switch (off) {
+			case NO_MATCH -> "diorama.settings.gpu_baking.no_match";
+			case TOO_SLOW -> "diorama.settings.gpu_baking.too_slow";
+			case CRASHED -> "diorama.settings.gpu_baking.crashed";
+		});
 	}
 
 	@Override

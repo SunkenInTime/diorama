@@ -172,6 +172,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("failing-model")) {
 				FailingModelTest.run(context);
 			}
+			if (tests.contains("failing-shape")) {
+				FailingShapeTest.run(context);
+			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
 			}
@@ -210,6 +213,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
+			}
+			if (tests.contains("pixelmon")) {
+				PixelmonTest.run(context, world);
 			}
 			//? if <1.21.6 {
 			/*if (tests.contains("broken-fog")) {
@@ -251,6 +257,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("map-dimensions")) {
 			mapDimensions(context);
 			moddedDimension(context);
+		}
+		if (tests.contains("languages")) {
+			languages(context);
 		}
 		if (tests.contains("multiplayer")) {
 			multiplayer(context);
@@ -855,6 +864,93 @@ public class DioramaClientTest implements FabricClientGameTest {
 			world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 120 0");
 			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null, 2400);
 		}
+	}
+
+	/**
+	 * Every language on the screens with the newest text, for reading it in the game (opt-in:
+	 * {@code languages}): the game time, the dimension button and its map, the menu of a place not
+	 * yet mapped, and each settings tab with a tooltip showing.
+	 */
+	private static void languages(ClientGameTestContext context) {
+		try (TestSingleplayerContext world = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> {
+				s.setName("Diorama Languages");
+				s.setSeed("diorama");
+				s.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			})
+			.create()) {
+			world.getServer().runCommand("time set noon");
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
+			context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER && MapSession.get().map().chunkCount() > 200, 2400);
+			settle(context, 100);
+			java.nio.file.Path netherFolder = context.computeOnClient(mc -> dev.diorama.Maps.get().tileFolder("minecraft:the_nether", dev.diorama.Maps.MAIN));
+			context.waitFor(mc -> tileFiles(netherFolder) > 5, 2400);
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a 0 120 0");
+			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
+				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
+			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
+			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
+				switchLanguage(context, language);
+				context.waitTicks(10);
+				context.takeScreenshot("languages-" + language + "-1-minimap");
+
+				context.setScreen(MapScreen::new);
+				settle(context, 10);
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(9000, 0, 2, TileKey.SURFACE));
+				context.waitTicks(5);
+				double[] middle = context.computeOnClient(mc -> {
+					double scale = mc.getWindow().getGuiScale();
+					return new double[] {mc.gui.screen().width / 2.0 * scale, mc.gui.screen().height / 2.0 * scale};
+				});
+				rightClickAt(context, middle[0], middle[1]);
+				context.takeScreenshot("languages-" + language + "-2-menu");
+				context.getInput().pressKey(InputConstants.KEY_ESCAPE);
+				context.setScreen(() -> null);
+				context.setScreen(MapScreen::new);
+				context.waitTicks(5);
+				clickDimensionButton(context);
+				waitForMapOf(context, "minecraft:the_nether");
+				context.waitTicks(10);
+				context.takeScreenshot("languages-" + language + "-3-other-map");
+				context.setScreen(() -> null);
+
+				context.setScreen(() -> new SettingsScreen(null));
+				context.waitTicks(5);
+				String[][] tooltips = {{"game_time"}, {"items"}, {"map_dimension_button"}, {"waypoint_size_minimap"}, {"saved_chunks"}};
+				for (int tab = 0; tab < tooltips.length; tab++) {
+					int index = tab;
+					context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(index));
+					context.waitTicks(3);
+					String label = net.minecraft.network.chat.Component.translatable("diorama.settings." + tooltips[tab][0]).getString();
+					double[] at = context.computeOnClient(mc -> {
+						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+						collectWidgets(mc.gui.screen(), widgets);
+						double scale = mc.getWindow().getGuiScale();
+						for (var widget : widgets) {
+							if (widget.getMessage().getString().startsWith(label)) {
+								return new double[] {(widget.getX() + 8) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+							}
+						}
+						throw new AssertionError("No " + label + " in " + language);
+					});
+					context.getInput().setCursorPos(at[0], at[1]);
+					context.waitTicks(14);
+					context.takeScreenshot("languages-" + language + "-4-settings-" + tooltips[tab][0]);
+				}
+				context.setScreen(() -> null);
+			}
+			switchLanguage(context, "en_us");
+			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.OFF);
+		}
+	}
+
+	private static void switchLanguage(ClientGameTestContext context, String language) {
+		reloadPacks(context, mc -> {
+			mc.getLanguageManager().setSelected(language);
+			mc.options.languageCode = language;
+		});
 	}
 
 	/**
@@ -5561,7 +5657,49 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/**
+	 * A settings file from before GPU baking was on for everyone says off, chosen or not, so it
+	 * turns on once. Off after that is the player's choice and stays.
+	 */
+	private static void gpuBakingMovesOnce(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama/config.json");
+			Settings settings = Settings.get();
+			try {
+				settings.save();
+				String kept = java.nio.file.Files.readString(file);
+				String old = kept.replaceAll("\\s*\"defaultsMoved\": \\d+,", "").replaceAll("\"gpuBaking\": \\w+", "\"gpuBaking\": false");
+				if (old.contains("defaultsMoved")) {
+					throw new AssertionError("The test's old settings file still says defaultsMoved");
+				}
+				java.nio.file.Files.writeString(file, old);
+				Settings moved = Settings.reload();
+				if (!moved.gpuBaking) {
+					throw new AssertionError("A settings file from before the default changed kept GPU baking off");
+				}
+				if (!java.nio.file.Files.readString(file).contains("\"defaultsMoved\": 1")) {
+					throw new AssertionError("Moving a settings file didn't save it");
+				}
+				moved.gpuBaking = false;
+				moved.save();
+				if (Settings.reload().gpuBaking) {
+					throw new AssertionError("GPU baking turned off by the player came back on");
+				}
+				java.nio.file.Files.writeString(file, "{ a typo");
+				Settings.reload();
+				if (!java.nio.file.Files.readString(file).equals("{ a typo")) {
+					throw new AssertionError("A settings file that couldn't be read was overwritten");
+				}
+				java.nio.file.Files.writeString(file, kept);
+				Settings.reload();
+			} catch (java.io.IOException e) {
+				throw new java.io.UncheckedIOException(e);
+			}
+		});
+	}
+
 	private static void settings(ClientGameTestContext context, TestSingleplayerContext world) {
+		gpuBakingMovesOnce(context);
 		world.getServer().runCommand("time set noon");
 		context.waitTicks(20);
 		context.takeScreenshot("settings-01-default-minimap");
@@ -5930,10 +6068,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "game-time-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "xaero-icons", "model-faces", "waypoints", "icons", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "fog-of-war", "settings", "overlays", "screens", "enlarge", "minimap-frames", "game-time", "map-mouse-keys", "image-export", "saved-chunks", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
