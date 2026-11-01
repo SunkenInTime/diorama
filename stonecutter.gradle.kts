@@ -12,8 +12,8 @@ plugins {
 stonecutter active "26.3"
 
 // Game tests bake with the tracer unless a run asks otherwise with DIORAMA_GPU_BAKE: it's what they
-// were written against, and what boat.dev's graphics-free VMs can do at speed. 1 forces the GPU; any
-// other value, such as auto, leaves the choice to the game, as for a player.
+// were written against, and what boat.dev's graphics-free VMs can do at speed. 0 is the tracer, 1
+// forces the GPU, and any other value, such as auto, leaves the choice to the game, as for a player.
 subprojects {
 	tasks.matching { it.name.contains("ClientGameTest") }.configureEach {
 		if (this is ProcessForkOptions && System.getenv("DIORAMA_GPU_BAKE") == null) {

@@ -325,7 +325,8 @@ public final class Settings {
 		}
 		// GPU baking used to be off unless turned on, and every file saved since says so, whether
 		// the player chose that or not. It turns on once; off from here on is the player's choice.
-		if (settings.defaultsMoved < 1) {
+		boolean moved = settings.defaultsMoved < 1;
+		if (moved) {
 			settings.gpuBaking = true;
 			settings.defaultsMoved = 1;
 		}
@@ -376,6 +377,10 @@ public final class Settings {
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
 		settings.apply();
+		// Written now, so the file says it moved even if the player never changes a setting.
+		if (moved && Files.isRegularFile(file)) {
+			settings.save();
+		}
 		return settings;
 	}
 

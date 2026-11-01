@@ -5674,6 +5674,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (!moved.gpuBaking) {
 					throw new AssertionError("A settings file from before the default changed kept GPU baking off");
 				}
+				if (!java.nio.file.Files.readString(file).contains("\"defaultsMoved\": 1")) {
+					throw new AssertionError("Moving a settings file didn't save it");
+				}
 				moved.gpuBaking = false;
 				moved.save();
 				if (Settings.reload().gpuBaking) {
