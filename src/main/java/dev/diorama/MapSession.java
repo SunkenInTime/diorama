@@ -469,7 +469,7 @@ public final class MapSession {
 				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level);
 				this.map.put(snapshot, known ? p.box : null, playerChunkX, playerChunkZ);
 				if (pins != null) {
-					Portals.chunkSeen(snapshot, dimension, pins);
+					Portals.chunkSeen(snapshot, dimension, pins, this.map);
 				}
 				budget--;
 			}

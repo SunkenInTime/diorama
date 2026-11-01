@@ -1,5 +1,6 @@
 package dev.diorama.waypoint;
 
+import dev.diorama.bake.ChunkSource;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.render.WaypointIcons;
 import java.util.ArrayList;
@@ -90,14 +91,25 @@ public final class Portals {
 	/**
 	 * A chunk of the live world came in: pins any new portal, and takes pins off portals that are
 	 * gone. A pin the player renamed stays, as it's theirs now; a language change counts as that too.
+	 * A pin can have been standing for portals nearby as well, so those are looked at again in
+	 * {@code around}, the chunks the map has.
 	 */
-	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store) {
+	public static void chunkSeen(ChunkSnapshot chunk, String dimension, WaypointStore store, ChunkSource around) {
 		List<Spot> spots = find(chunk);
 		add(spots, dimension, store);
 		for (Waypoint pin : store.withHidden(dimension)) {
 			if (pin.kind.isPortal() && pin.x >> 4 == chunk.chunkX && pin.z >> 4 == chunk.chunkZ
 				&& spots.stream().noneMatch(spot -> spot.kind() == pin.kind) && (pin.deleted || pin.name.equals(name(pin.kind)))) {
 				store.forget(pin);
+				int reach = (SAME_PORTAL + 15) >> 4;
+				for (int dx = -reach; dx <= reach; dx++) {
+					for (int dz = -reach; dz <= reach; dz++) {
+						ChunkSnapshot near = around.chunk(chunk.chunkX + dx, chunk.chunkZ + dz);
+						if (near != null) {
+							add(find(near), dimension, store);
+						}
+					}
+				}
 			}
 		}
 	}

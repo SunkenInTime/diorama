@@ -117,6 +117,17 @@ final class PortalPinsTest {
 		context.runOnClient(mc -> ServerRules.setAlwaysFogOfWar(false));
 		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "a portal lit under fog of war");
 
+		// Two portals sharing a pin: when the one it stands on goes, it moves to the other.
+		int pair = at.getX() - 110;
+		netherPortal(world, pair, y, z, 2, 3);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the first of a close pair");
+		netherPortal(world, pair + 20, y, z, 2, 3);
+		context.waitTicks(40);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the second of a close pair");
+		frameBroken(world, pair, y, z);
+		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && Math.abs(w.x - (pair + 20)) < 8), PIN_TICKS);
+		frameBroken(world, pair + 20, y, z);
+
 		fromTheSave(context, world);
 
 		// Nothing left in the air over spawn for the tests after this one.
