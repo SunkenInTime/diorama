@@ -116,9 +116,6 @@ public final class MapLevel implements ChunkSource {
 	private final ConcurrentLinkedQueue<SavedTile> fromSave = new ConcurrentLinkedQueue<>();
 	/** How long a tile from the save waits for the GPU before it's traced instead. */
 	private static final long GPU_WAIT_NANOS = 10_000_000_000L;
-	/** Tiles from the save the GPU couldn't draw in a row before the rest are traced. */
-	private static final int GPU_FAILURES = 3;
-	private final AtomicInteger savedTileGpuFailures = new AtomicInteger();
 	/** The tiles {@link SavedChunkImport} is baking, and those a live bake finished for since it started. */
 	private final Set<TileKey> savedTilesBaking = ConcurrentHashMap.newKeySet();
 	private final Set<TileKey> savedTilesRaced = ConcurrentHashMap.newKeySet();
@@ -861,16 +858,30 @@ public final class MapLevel implements ChunkSource {
 	/**
 	 * GPU baking: the mesh is built on a baker thread, drawn on the render thread, and the pixels
 	 * come back here a frame or two later. Always the whole tile, which costs the GPU little.
-	 * Falls back to tracing if the GPU didn't draw it.
+	 * Falls back to tracing if the mesher failed or the GPU didn't draw it.
 	 */
 	private void bakeOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store) {
 		BAKERS.execute(() -> {
 			try {
 				int[] saved = store == null ? null : store.read(key);
 				ChunkSource source = this.sourceFor(store);
-				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				dev.diorama.bake.GpuMesher.Mesh mesh;
+				try {
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				} catch (BlockLooks.StatesRenumbered e) {
+					throw e;
+				} catch (Throwable t) {
+					Diorama.LOGGER.error("Failed to mesh tile {}; tracing it", key, t);
+					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
+					TileImage image = TileBaker.bake(key, source, looks, null, fog, saved, overlays);
+					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
+					return;
+				}
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
+						if (!result.declined()) {
+							dev.diorama.render.gpu.GpuBakeCheck.drawn(result.pixels() != null);
+						}
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, source, looks, null, fog, saved, overlays)
 							: TileBaker.gpuImage(key, result.pixels(), saved, result.info());
@@ -909,7 +920,7 @@ public final class MapLevel implements ChunkSource {
 					if (result.pixels() == null) {
 						dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, !result.declined());
 					} else if (this.generation(key) == generation && look.equals(result.look())) {
-						dev.diorama.render.gpu.GpuBakeCheck.compare(view, result.pixels(), traced, result.info(), info);
+						dev.diorama.render.gpu.GpuBakeCheck.compare(view, result.pixels(), traced, result.info(), info, result.timing().frameNanos());
 					} else {
 						// The map's look changed while it was out: the two may have baked different looks.
 						dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, false);
@@ -1387,8 +1398,7 @@ public final class MapLevel implements ChunkSource {
 	/** Whether tiles from the save go to the GPU right now, or to the tracer. */
 	boolean savedTilesOnGpu() {
 		int view = this.roofless() ? dev.diorama.render.gpu.GpuBakeCheck.UNDER_ROOF : dev.diorama.render.gpu.GpuBakeCheck.SKY;
-		return this.savedTileGpuFailures.get() < GPU_FAILURES && dev.diorama.render.gpu.GpuBakeCheck.trusted(view)
-			&& dev.diorama.render.gpu.GpuTileBaker.keepsUpInBackground();
+		return dev.diorama.render.gpu.GpuBakeCheck.trusted(view) && dev.diorama.render.gpu.GpuTileBaker.keepsUpInBackground();
 	}
 
 	/** A sky view tile from the save: on the GPU once this GPU has shown it draws them right, else traced. */
@@ -1403,17 +1413,17 @@ public final class MapLevel implements ChunkSource {
 					takeBack.run();
 				}
 				if (result != null && result.pixels() != null) {
-					this.savedTileGpuFailures.set(0);
+					dev.diorama.render.gpu.GpuBakeCheck.drawn(true);
 					return TileBaker.gpuImage(key, result.pixels(), saved, result.info());
 				}
 				if (result != null && !result.declined()) {
-					this.savedTileGpuFailures.incrementAndGet();
+					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
 				}
 			} catch (BlockLooks.StatesRenumbered e) {
 				throw e;
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Failed to mesh tile {} from the save; tracing it", key, e);
-				this.savedTileGpuFailures.incrementAndGet();
+				dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
 			}
 		}
 		return TileBaker.bake(key, source, looks, null, false, saved, null);

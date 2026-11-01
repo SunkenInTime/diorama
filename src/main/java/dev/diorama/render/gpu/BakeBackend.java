@@ -12,10 +12,8 @@ interface BakeBackend {
 	 */
 	boolean draw(GpuTileBaker.Job job);
 
-	/** The graphics card and driver, for the log; null until the backend has set itself up. */
-	default @org.jspecify.annotations.Nullable String device() {
-		return null;
-	}
+	/** The graphics card and driver, for the log and the saved check result. Render thread. */
+	@org.jspecify.annotations.Nullable String device();
 
 	/** Finishes bakes whose pixels have come back. Called on the render thread every frame. */
 	default void poll() {
