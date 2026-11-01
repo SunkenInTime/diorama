@@ -54,7 +54,7 @@ final class RedrawTest {
 		}
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(A + 24, Projection.v(ground, A + 24), 0.7, TileKey.SURFACE));
-		context.waitFor(mc -> MapSession.get().map().memory().version() > 0, 400);
+		context.waitFor(mc -> MapSession.get().map().memory().shownTiles() > 0, 400);
 		context.waitTicks(10);
 		context.takeScreenshot("redraw-under-clouds");
 		rescanAndWait(context);
@@ -108,9 +108,28 @@ final class RedrawTest {
 			int[] pixels = MapSession.get().map().savedMap().read(pillarTile);
 			return pixels == null ? 0 : pixels[pillarPixel];
 		});
-		if (now == pillarBefore) {
+		if (now == pillarBefore || (now >>> 24) == 0) {
 			throw new AssertionError("The map came back to its first label without what changed in the world while it was away");
 		}
+	}
+
+	/** After {@link #reopened}: under a roof the same goes, under smoke. */
+	static void underRoof(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 64 0");
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().roofless() && MapSession.get().map().chunkCount() > 100, 2400);
+		context.waitFor(mc -> !MapSession.get().map().savedMap().saved(0).isEmpty(), 2400);
+		setPitch(context, 35);
+		if (context.computeOnClient(mc -> MapSession.get().map().memory() == null)) {
+			throw new AssertionError("The map under the roof remembers nothing after its tiles' label changed");
+		}
+		context.setScreen(MapScreen::new);
+		// The sky view: down here the map on its own would pick a cave slice.
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), 0.7, TileKey.SURFACE));
+		context.waitFor(mc -> MapSession.get().map().memory().shownTiles() > 0, 400);
+		context.waitTicks(10);
+		context.takeScreenshot("redraw-under-smoke");
+		context.setScreen(() -> null);
+		setPitch(context, Math.round(Settings.get().style().pitchDegrees()));
 	}
 
 	/** Notes the map as it is on the default label, in the player's own chunk, which it saw live. */

@@ -289,11 +289,11 @@ void main() {
     vec3 coverColor = alpha > 0.02 ? color / alpha : mix(shade, lit, 0.7);
     color += (1.0 - alpha) * empty * coverColor;
     alpha += (1.0 - alpha) * empty;
-    alpha *= 1.0 - MEMORY_SHOWS * (1.0 - texture(Sampler0, maskUv).a);
 
     if (alpha <= 0.002) {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
+    float memory = 1.0 - texture(Sampler0, maskUv).a;
+    fragColor = vec4(color / alpha, alpha * fogOpacity * (1.0 - MEMORY_SHOWS * memory)) * ColorModulator;
 }

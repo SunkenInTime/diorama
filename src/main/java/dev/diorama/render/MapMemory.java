@@ -30,19 +30,24 @@ import org.jspecify.annotations.Nullable;
  * on top. A memory can't be right in detail, since the old tiles show the world from another view,
  * so it stays too soft to pass for the map; nothing that needs an exact place reads it.
  *
- * <p>The folder being redrawn notes the folder it remembers in {@code redraw-from}. That's always a
- * folder of real tiles: redrawing a map that's being redrawn remembers whichever of the two shows
- * more. The note stays when the redraw ends, as a place the save has no chunks for has nothing else.
+ * <p>A folder with no tiles of its own remembers whichever folder beside it, of the same kind of
+ * view, shows the most, and notes that in {@code redraw-from}. That's always a folder of real tiles,
+ * so nothing is remembered twice over, and it works out the same for a dimension the player was away
+ * from when the label changed. The note stays when the redraw ends, as a place the save has no
+ * chunks for has nothing else.
  *
  * <p>Render thread, except where a method says otherwise.
  */
 public final class MapMemory {
 	private static final String NOTE = "redraw-from";
+	/** When the map moved away from a folder, in seconds; see {@link #noteLeft}. */
+	static final String LEFT = "left-at";
 	/** Texture pixels per tile edge. */
 	private static final int EDGE = Projection.TILE_PIXELS / 4;
 	private static final int SHRINK = Projection.TILE_PIXELS / EDGE;
-	/** Remembered tiles kept on the GPU, each a tenth of a megabyte or so. */
+	/** Remembered tiles kept on the GPU, each a tenth of a megabyte or so, unless more are in use. */
 	private static final int MAX_TILES = 96;
+	private static final long IN_USE_MS = 1000;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
 	/** Screen pixels a memory's pixel spans at least, for softness. */
@@ -59,7 +64,16 @@ public final class MapMemory {
 		return thread;
 	});
 
-	private record Entry(@Nullable MapTexture texture, byte @Nullable [] known) {
+	private static final class Entry {
+		final @Nullable MapTexture texture;
+		final byte @Nullable [] known;
+		/** When a view last drew it: a frame may still hold it for a moment after. */
+		long drawnMs;
+
+		Entry(@Nullable MapTexture texture, byte @Nullable [] known) {
+			this.texture = texture;
+			this.known = known;
+		}
 	}
 
 	private record Loaded(TileKey key, int @Nullable [] pixels, byte @Nullable [] known) {
@@ -72,6 +86,7 @@ public final class MapMemory {
 	private final Set<TileKey> loading = new HashSet<>();
 	private final ConcurrentLinkedQueue<Loaded> loaded = new ConcurrentLinkedQueue<>();
 	private long version;
+	private long shown;
 	private volatile boolean closed;
 
 	private MapMemory(Path folder, TileLabel label) {
@@ -80,37 +95,61 @@ public final class MapMemory {
 		this.cos = Math.cos(Math.toRadians(label.pitch()));
 	}
 
-	/** What {@code folder}'s map remembers, or null if it has nothing to remember. */
-	static @Nullable MapMemory open(Path folder) {
+	/**
+	 * What {@code folder}'s map remembers, or null if it has nothing to remember. Only a map that
+	 * saves to the folder notes it: {@code keep} is false for a map that just looks at it.
+	 */
+	static @Nullable MapMemory open(Path folder, boolean keep) {
 		String from = note(folder);
+		if (from == null && !hasTiles(folder)) {
+			from = fullestBeside(folder);
+			if (from != null && keep) {
+				try {
+					Files.createDirectories(folder);
+					Files.writeString(folder.resolve(NOTE), from, StandardCharsets.UTF_8);
+				} catch (IOException e) {
+					Diorama.LOGGER.warn("Couldn't note what {} remembers", folder, e);
+				}
+			}
+		}
 		TileLabel label = from == null ? null : TileLabel.parse(from);
 		return label == null || !Files.isDirectory(folder.resolveSibling(from)) ? null : new MapMemory(folder.resolveSibling(from), label);
 	}
 
-	/**
-	 * The map is moving from folder {@code from} to {@code to}: notes what {@code to} is to remember,
-	 * if it has no tiles of its own yet and {@code from} shows the same kind of view.
-	 */
-	static void noteMove(Path from, Path to) {
-		TileLabel fromLabel = TileLabel.parse(from.getFileName().toString());
-		TileLabel toLabel = TileLabel.parse(to.getFileName().toString());
-		if (fromLabel == null || toLabel == null || !toLabel.canShow(fromLabel) || note(to) != null || tileCount(to) > 0) {
-			return;
-		}
-		String source = from.getFileName().toString();
-		String beyond = note(from);
-		if (beyond != null && !beyond.equals(to.getFileName().toString()) && tileCount(from.resolveSibling(beyond)) > tileCount(from)) {
-			source = beyond;
-		}
-		if (tileCount(from.resolveSibling(source)) == 0) {
-			return;
-		}
+	/** Notes that the map moved away from a folder, for the save's chunks to be checked when it comes back. */
+	static void noteLeft(Path folder) {
 		try {
-			Files.createDirectories(to);
-			Files.writeString(to.resolve(NOTE), source, StandardCharsets.UTF_8);
+			if (Files.isDirectory(folder)) {
+				Files.writeString(folder.resolve(LEFT), Long.toString(System.currentTimeMillis() / 1000), StandardCharsets.UTF_8);
+			}
 		} catch (IOException e) {
-			Diorama.LOGGER.warn("Couldn't note what {} remembers", to, e);
+			Diorama.LOGGER.warn("Couldn't note leaving {}", folder, e);
 		}
+	}
+
+	/** The folder beside this one that shows the same kind of view and the most, or null if none shows anything. */
+	private static @Nullable String fullestBeside(Path folder) {
+		TileLabel label = TileLabel.parse(folder.getFileName().toString());
+		Path parent = folder.getParent();
+		if (label == null || parent == null || !Files.isDirectory(parent)) {
+			return null;
+		}
+		String best = null;
+		long most = 0;
+		try (Stream<Path> folders = Files.list(parent)) {
+			for (Path other : folders.toList()) {
+				String name = other.getFileName().toString();
+				TileLabel otherLabel = TileLabel.parse(name);
+				long count = otherLabel != null && label.canShow(otherLabel) && !other.equals(folder) ? tileCount(other) : 0;
+				if (count > most) {
+					most = count;
+					best = name;
+				}
+			}
+		} catch (IOException | java.io.UncheckedIOException e) {
+			Diorama.LOGGER.warn("Couldn't look beside {}", folder, e);
+		}
+		return best;
 	}
 
 	private static @Nullable String note(Path folder) {
@@ -119,6 +158,17 @@ public final class MapMemory {
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read what {} remembers", folder, e);
 			return null;
+		}
+	}
+
+	private static boolean hasTiles(Path folder) {
+		if (!Files.isDirectory(folder)) {
+			return false;
+		}
+		try (Stream<Path> files = Files.list(folder)) {
+			return files.anyMatch(file -> file.getFileName().toString().endsWith(".omt"));
+		} catch (IOException | java.io.UncheckedIOException e) {
+			return true;
 		}
 	}
 
@@ -144,13 +194,20 @@ public final class MapMemory {
 	}
 
 	/** Goes up when more of the memory becomes known, for a fog mask built on it. */
-	public long version() {
+	long version() {
 		return this.version;
+	}
+
+	/** For tests: how many remembered tiles with something on them are loaded. */
+	public long shownTiles() {
+		return this.shown;
 	}
 
 	/** Draws the memories under a view, and asks for the ones that aren't here yet. */
 	void draw(MapCanvas canvas, MapViewport.View view, int tint) {
 		this.takeLoaded();
+		long now = System.currentTimeMillis();
+		this.evict(now);
 		int lod = lod(view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double minV = this.oldV(view.minV());
@@ -165,24 +222,24 @@ public final class MapMemory {
 				if (entry == null) {
 					this.load(key);
 				}
-				if (entry == null || entry.texture() == null) {
+				if (entry == null || entry.texture == null) {
 					continue;
 				}
+				entry.drawnMs = now;
 				float x0 = view.screenX(tu * units);
 				float x1 = view.screenX((tu + 1) * units);
 				float y0 = view.screenY(this.newV(tv * units));
 				float y1 = view.screenY(this.newV((tv + 1) * units));
 				if (circle == null) {
-					canvas.rect(entry.texture(), Sampling.TILE_SMOOTH, x0, y0, x1, y1, 0, 0, 1, 1, tint);
+					canvas.rect(entry.texture, Sampling.TILE_SMOOTH, x0, y0, x1, y1, 0, 0, 1, 1, tint);
 				} else {
 					Circle.Quads inside = circle.clip(x0, y0, x1, y1, 0, 0, 1, 1);
 					if (inside != null) {
-						canvas.quad(entry.texture(), Sampling.TILE_SMOOTH, inside.corners(), inside.uvs(), tint);
+						canvas.quad(entry.texture, Sampling.TILE_SMOOTH, inside.corners(), inside.uvs(), tint);
 					}
 				}
 			}
 		}
-		this.evict();
 	}
 
 	/** Which share of map point {@code (u, v)} a view's memory shows, 0 to 1, with what's loaded so far. */
@@ -193,12 +250,12 @@ public final class MapMemory {
 		int tu = (int) Math.floor(u / units);
 		int tv = (int) Math.floor(oldV / units);
 		Entry entry = this.tiles.get(new TileKey(TileKey.SURFACE, tu, tv, lod));
-		if (entry == null || entry.known() == null) {
+		if (entry == null || entry.known == null) {
 			return 0;
 		}
 		int x = (int) Math.min(EDGE - 1L, (long) ((u - tu * units) / units * EDGE));
 		int y = (int) Math.min(EDGE - 1L, (long) ((oldV - tv * units) / units * EDGE));
-		return (entry.known()[y * EDGE + x] & 0xFF) / 255.0F;
+		return (entry.known[y * EDGE + x] & 0xFF) / 255.0F;
 	}
 
 	/**
@@ -301,18 +358,23 @@ public final class MapMemory {
 			if (done.pixels() != null && !this.closed) {
 				texture = MapTexture.create("diorama map memory", EDGE, 1);
 				texture.write(0, 0, 0, EDGE, done.pixels());
+				this.shown++;
 			}
 			this.tiles.put(done.key(), new Entry(texture, done.known()));
 			this.version++;
 		}
 	}
 
-	private void evict() {
+	/** Lets go of tiles no view has drawn for a moment: a frame can hold a texture past the call that drew it. */
+	private void evict(long now) {
 		Iterator<Map.Entry<TileKey, Entry>> it = this.tiles.entrySet().iterator();
 		while (this.tiles.size() > MAX_TILES && it.hasNext()) {
 			Entry entry = it.next().getValue();
-			if (entry.texture() != null) {
-				entry.texture().close();
+			if (now - entry.drawnMs < IN_USE_MS) {
+				continue;
+			}
+			if (entry.texture != null) {
+				entry.texture.close();
 			}
 			it.remove();
 		}
@@ -322,8 +384,8 @@ public final class MapMemory {
 		this.closed = true;
 		this.store.close();
 		for (Entry entry : this.tiles.values()) {
-			if (entry.texture() != null) {
-				entry.texture().close();
+			if (entry.texture != null) {
+				entry.texture.close();
 			}
 		}
 		this.tiles.clear();

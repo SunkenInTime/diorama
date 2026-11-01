@@ -322,7 +322,7 @@ public final class MapLevel implements ChunkSource {
 		this.storeName = this.storeName();
 		TileStore opened = new TileStore(this.folder.resolve(this.storeName));
 		opened.onOverviewChanged(this.overviewChanged::add);
-		this.memory = this.savedOnly ? null : MapMemory.open(this.folder.resolve(this.storeName));
+		this.memory = MapMemory.open(this.folder.resolve(this.storeName), !this.savedOnly);
 		return opened;
 	}
 
@@ -340,7 +340,7 @@ public final class MapLevel implements ChunkSource {
 		if (this.memory != null) {
 			this.memory.close();
 		}
-		MapMemory.noteMove(this.folder.resolve(this.storeName), this.folder.resolve(this.storeName()));
+		MapMemory.noteLeft(this.folder.resolve(this.storeName));
 		this.store = this.openStore();
 		this.unsaved.clear();
 		this.emptyTiles.clear();

@@ -237,7 +237,6 @@ public final class SavedChunkImport {
 		}
 		if (!folder.equals(this.folder)) {
 			if (this.progress != null) {
-				this.progress.left();
 				this.progress.saveIfChanged();
 			}
 			this.folder = folder;
@@ -351,7 +350,7 @@ public final class SavedChunkImport {
 		this.source.clear();
 		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
 		Plan plan = this.plans.get(region);
-		if (plan == null) {
+		if (plan == null || plan.onlyRemembered != this.onlyRemembered) {
 			plan = this.plan(region, progress);
 			if (plan == null) {
 				return;
@@ -366,7 +365,7 @@ public final class SavedChunkImport {
 		boolean leaving = false;
 		RuntimeException failure = null;
 		while (running > 0 || !leaving && !plan.order.isEmpty()) {
-			leaving |= this.stopped() || !folder.equals(this.map.importFolder());
+			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered;
 			while (!leaving && running < this.workersNow() && !this.save.serverBehind()
 				&& this.map.unwrittenTiles() < MAX_UNWRITTEN && !memoryTight()) {
 				TileKey viewTile = this.nextViewTile(inProgress);
@@ -432,10 +431,10 @@ public final class SavedChunkImport {
 			// A tile a view asked for owes the plan nothing: if the plan has it, it finds it drawn.
 			boolean planned = !forViews.remove(done.key());
 			if (!done.taken()) {
+				// One a view asked for stays checked: around a busy farm that could go on forever, and
+				// its region's plan comes to it, with the wait that has.
 				if (planned) {
 					retry.add(done.key());
-				} else {
-					this.viewChecked.remove(done.key());
 				}
 				continue;
 			}
@@ -562,11 +561,11 @@ public final class SavedChunkImport {
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
 		int[] times = this.regions.get(region);
-		Plan plan = new Plan();
-		MapMemory memory = this.onlyRemembered ? this.map.memory() : null;
+		Plan plan = new Plan(this.onlyRemembered);
+		MapMemory memory = plan.onlyRemembered ? this.map.memory() : null;
 		for (int i = 0; i < 1024; i++) {
 			int time = times[i];
-			if (!progress.isWork(regionX, regionZ, i, time, this.onlyRemembered)) {
+			if (!progress.isWork(regionX, regionZ, i, time, plan.onlyRemembered)) {
 				continue;
 			}
 			while (!this.stopped() && this.save.serverBehind()) {
@@ -587,7 +586,7 @@ public final class SavedChunkImport {
 				progress.mark(regionX, regionZ, i, time);
 				continue;
 			}
-			if (this.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
+			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
 				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
 				continue;
 			}
@@ -641,6 +640,8 @@ public final class SavedChunkImport {
 
 	/** The tiles a region still has to draw. */
 	private static final class Plan {
+		/** Made for redrawing only what's remembered; a change of mind makes a new plan. */
+		final boolean onlyRemembered;
 		/** Tiles left to draw; taken from the end. */
 		final List<TileKey> order = new ArrayList<>();
 		/** The region's new or changed chunks each tile shows. */
@@ -649,17 +650,19 @@ public final class SavedChunkImport {
 		final Map<Long, Integer> waiting = new HashMap<>();
 		/** When the save last wrote each of those chunks. */
 		final Map<Long, Integer> times = new HashMap<>();
+
+		Plan(boolean onlyRemembered) {
+			this.onlyRemembered = onlyRemembered;
+		}
 	}
 
 	/**
 	 * Which saved chunks need no drawing: for each, when the save had last written it at the time,
-	 * {@link #LIVE} or {@link #NOT_REMEMBERED}. Kept in {@code saved-chunks.bin}: {@code DSC2}, the
-	 * time the map moved to another folder if it did, then deflated, the region count and, per
-	 * region, its x, z and 1024 values. {@code DSC1} files have no time.
+	 * {@link #LIVE}, {@link #NOT_REMEMBERED} or {@link #CHANGED}. Kept in {@code saved-chunks.bin}:
+	 * {@code DSC1}, then deflated, the region count and, per region, its x, z and 1024 values.
 	 */
 	private static final class Progress {
-		private static final int MAGIC = 0x44534332;
-		private static final int FIRST_MAGIC = 0x44534331;
+		private static final int MAGIC = 0x44534331;
 		/**
 		 * The map saw this chunk live and saved its tiles, and the game saves a chunk it had loaded
 		 * a little later: not news. Without this, every place the player walks would be drawn twice.
@@ -674,6 +677,7 @@ public final class SavedChunkImport {
 		private boolean changed;
 		/** When the map last moved away from this folder, in seconds, or 0 if it's been here since. */
 		private int leftAt;
+		private boolean leftChecked;
 
 		private Progress(Path file) {
 			this.file = file;
@@ -681,16 +685,20 @@ public final class SavedChunkImport {
 
 		static Progress load(Path file) {
 			Progress progress = new Progress(file);
+			Path left = file.resolveSibling(MapMemory.LEFT);
+			try {
+				if (Files.isRegularFile(left)) {
+					progress.leftAt = Integer.parseInt(Files.readString(left).trim());
+				}
+			} catch (IOException | NumberFormatException e) {
+				Diorama.LOGGER.warn("Couldn't read when the map left {}", left, e);
+			}
 			if (!Files.exists(file)) {
 				return progress;
 			}
 			try (DataInputStream in = new DataInputStream(Files.newInputStream(file))) {
-				int magic = in.readInt();
-				if (magic != MAGIC && magic != FIRST_MAGIC) {
+				if (in.readInt() != MAGIC) {
 					return progress;
-				}
-				if (magic == MAGIC) {
-					progress.leftAt = in.readInt();
 				}
 				DataInputStream data = new DataInputStream(new InflaterInputStream(in));
 				int count = data.readInt();
@@ -734,12 +742,6 @@ public final class SavedChunkImport {
 			return false;
 		}
 
-		/** The map moved to another folder: from now on what happens to its chunks passes this one by. */
-		void left() {
-			this.leftAt = (int) (System.currentTimeMillis() / 1000);
-			this.changed = true;
-		}
-
 		/**
 		 * The map came back to this folder. A chunk it saw live is only known to be drawn as it was when
 		 * the map left, so one the save has written since is work again.
@@ -757,6 +759,7 @@ public final class SavedChunkImport {
 				}
 			}
 			this.leftAt = 0;
+			this.leftChecked = true;
 			this.changed = true;
 		}
 
@@ -777,7 +780,6 @@ public final class SavedChunkImport {
 				Path temp = this.file.resolveSibling(this.file.getFileName() + ".tmp");
 				try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(temp))) {
 					out.writeInt(MAGIC);
-					out.writeInt(this.leftAt);
 					DeflaterOutputStream deflated = new DeflaterOutputStream(out);
 					DataOutputStream data = new DataOutputStream(deflated);
 					data.writeInt(this.times.size());
@@ -793,6 +795,10 @@ public final class SavedChunkImport {
 				}
 				Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 				this.changed = false;
+				if (this.leftChecked) {
+					Files.deleteIfExists(this.file.resolveSibling(MapMemory.LEFT));
+					this.leftChecked = false;
+				}
 			} catch (IOException e) {
 				Diorama.LOGGER.warn("Couldn't save which saved chunks are drawn to {}", this.file, e);
 			}

@@ -242,6 +242,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (tests.contains("redraw")) {
 					RedrawTest.reopened(context);
+					RedrawTest.underRoof(context, reopened);
 				}
 				if (tests.contains("waypoints")) {
 					temporaryGone(context);
