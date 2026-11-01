@@ -1020,6 +1020,7 @@ public final class MapLevel implements ChunkSource {
 	private void checkOnGpu(TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, int view) {
 		CHECKER.execute(() -> {
 			boolean answered = false;
+			boolean meshed = false;
 			try {
 				// Both bakes read the same chunks, even while more are arriving, so only the GPU
 				// can make them differ.
@@ -1028,6 +1029,7 @@ public final class MapLevel implements ChunkSource {
 				// if the last saw the same as before the first, the two bakes show one look.
 				dev.diorama.MapStyle look = dev.diorama.MapStyle.get();
 				dev.diorama.bake.GpuMesher.Mesh mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays);
+				meshed = true;
 				byte[] info = overlays != null ? new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS] : null;
 				int[] traced = TileBaker.reference(key, source, looks, fog, overlays, info);
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> CHECKER.execute(() -> {
@@ -1044,8 +1046,9 @@ public final class MapLevel implements ChunkSource {
 				answered = true;
 			} catch (Throwable t) {
 				if (!answered) {
-					// The check tile never reached the GPU: hand its turn back.
-					dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, false);
+					// The check tile never reached the GPU: hand its turn back. If the mesher failed, it
+					// counts against GPU baking, or every tile of this view would try and fail again.
+					dev.diorama.render.gpu.GpuBakeCheck.undrawn(view, overlays != null, !meshed && !(t instanceof BlockLooks.StatesRenumbered));
 				}
 				logFailed("Failed to check tile {} on the GPU", key, t);
 			}
