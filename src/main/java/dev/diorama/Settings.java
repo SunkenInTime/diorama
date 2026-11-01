@@ -103,11 +103,21 @@ public final class Settings {
 	 * shows them all. 0 shows them at any distance. One of {@link #WAYPOINT_DISTANCES}.
 	 */
 	public int waypointDistance = 0;
+	/**
+	 * How big pins are drawn in each view, in percent of the size they're drawn at one pixel per GUI
+	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
+	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4.
+	 */
+	public int waypointMinimapSize = 60;
+	public int waypointMapSize = 60;
+	public int waypointWorldSize = 60;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;
 	/** The Maps button on the map, where each dimension's maps are made and switched. */
 	public boolean mapMapsButton = true;
+	/** The square at the bottom left of the map that shows the next dimension's map. */
+	public boolean mapDimensionButton = true;
 	/** Add waypoint and Add temporary waypoint in the map's right-click menu. */
 	public boolean mapAddWaypoints = true;
 	/**
@@ -131,10 +141,12 @@ public final class Settings {
 	 */
 	public Quality quality = Quality.FANCY;
 	/**
-	 * Experimental: bake map tiles on the graphics card. Off until the player turns it on; the
-	 * first tiles are checked against the tracer, which takes over again if they don't match.
+	 * Bakes map tiles on the graphics card. The first tiles are checked against the tracer, which
+	 * takes over by itself if they don't match, the card is too slow or the GPU code fails.
 	 */
-	public boolean gpuBaking = false;
+	public boolean gpuBaking = true;
+	/** How many of the old defaults {@link #load} has moved this file past. */
+	public int defaultsMoved = 0;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
@@ -194,6 +206,12 @@ public final class Settings {
 	public static final int MIN_SCALE = 50;
 	public static final int MAX_SCALE = 200;
 	public static final int SCALE_STEP = 25;
+
+	public static final int MIN_WAYPOINT_SIZE = 25;
+
+	private static int clampWaypointSize(int size) {
+		return Math.max(MIN_WAYPOINT_SIZE, Math.min(MAX_SCALE, size));
+	}
 
 	/** The nearest icon scale the settings screen can show. */
 	public static int snapScale(int scale) {
@@ -302,8 +320,16 @@ public final class Settings {
 				Diorama.LOGGER.error("Couldn't read settings from {}; using defaults", file, e);
 			}
 		}
+		boolean read = settings != null;
 		if (settings == null) {
 			settings = new Settings();
+		}
+		// GPU baking used to be off unless turned on, and every file saved since says so, whether
+		// the player chose that or not. It turns on once; off from here on is the player's choice.
+		boolean moved = settings.defaultsMoved < 1;
+		if (moved) {
+			settings.gpuBaking = true;
+			settings.defaultsMoved = 1;
 		}
 		if (settings.spawnSpots == null) {
 			settings.spawnSpots = SpawnSpots.OFF;
@@ -348,7 +374,15 @@ public final class Settings {
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);
 		settings.radarRange = nearest(RANGES, settings.radarRange);
 		settings.waypointDistance = nearest(WAYPOINT_DISTANCES, settings.waypointDistance);
+		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
+		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
+		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
 		settings.apply();
+		// Written now, so the file says it moved even if the player never changes a setting. One that
+		// couldn't be read stays as it is, for the player to mend.
+		if (moved && read) {
+			settings.save();
+		}
 		return settings;
 	}
 

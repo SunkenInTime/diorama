@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.diorama.Diorama;
+import dev.diorama.compat.Pixelmon;
 import dev.diorama.render.gpu.MapTexture;
 import dev.diorama.render.gpu.Sampling;
 import java.io.IOException;
@@ -12,9 +13,11 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -76,6 +79,8 @@ public final class XaeroRadarIcons {
 	private static @Nullable Map<EntityType<?>, Definition> definitions;
 	/** Sprites by location, shared by every file that names them; their textures are made when first drawn. */
 	private static final Map<SpriteKey, Sprite> sprites = new HashMap<>();
+	/** Sprites a mod named that can't be drawn, so they're tried once per resource load, not every frame. */
+	private static final Set<Identifier> unreadable = new HashSet<>();
 
 	private record SpriteKey(Identifier location, boolean outlined, boolean flipped) {
 	}
@@ -92,18 +97,33 @@ public final class XaeroRadarIcons {
 			loaded = definitions;
 		}
 		Definition definition = loaded.get(entity.getType());
-		if (definition == null) {
+		Icon icon = null;
+		if (definition != null) {
+			if (!definition.byTexture().isEmpty()) {
+				Identifier texture = MobFaces.texture(entity);
+				icon = texture == null ? null : definition.byTexture().get(texture.toString());
+			}
+			if (icon == null) {
+				icon = definition.fallback();
+			}
+		}
+		return icon == null || icon == Basic.OWN_FACE ? pokemon(entity) : icon;
+	}
+
+	/** A Pixelmon Pokémon's sprite, outlined to stand out from the map like a face. A pack's file for the mob comes first. */
+	private static @Nullable Icon pokemon(Entity entity) {
+		Identifier location = Pixelmon.sprite(entity);
+		if (location == null || unreadable.contains(location)) {
 			return null;
 		}
-		Icon icon = null;
-		if (!definition.byTexture().isEmpty()) {
-			Identifier texture = MobFaces.texture(entity);
-			icon = texture == null ? null : definition.byTexture().get(texture.toString());
+		ResourceManager manager = Minecraft.getInstance().getResourceManager();
+		List<String> problems = new ArrayList<>();
+		Sprite sprite = sprite(location, true, false, manager, problems);
+		if (sprite == null) {
+			unreadable.add(location);
+			Diorama.LOGGER.warn("Radar icon for {}: {}", entity.getType(), String.join("; ", problems));
 		}
-		if (icon == null) {
-			icon = definition.fallback();
-		}
-		return icon == Basic.OWN_FACE ? null : icon;
+		return sprite;
 	}
 
 	/**
@@ -139,6 +159,7 @@ public final class XaeroRadarIcons {
 			sprite.close();
 		}
 		sprites.clear();
+		unreadable.clear();
 		Map<EntityType<?>, Definition> loaded = new HashMap<>();
 		// Like Xaero's, one file per mob in the game: the top pack's file wins, and files for mobs
 		// that aren't installed (Xaero's own example_mod, a modpack's leftovers) are never read.

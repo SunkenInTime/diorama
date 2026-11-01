@@ -253,8 +253,7 @@ public final class WaypointEditScreen extends Screen {
 			this.share.active = valid;
 		}
 		if (this.teleport != null) {
-			// /tp moves within the dimension you're in, so a waypoint in another one is out of reach.
-			this.teleport.active = valid && Waypoints.canTeleport() && this.waypoint.dimension.equals(Waypoints.dimension());
+			this.teleport.active = valid && Waypoints.canTeleport(this.waypoint.dimension);
 		}
 	}
 
@@ -552,7 +551,7 @@ public final class WaypointEditScreen extends Screen {
 		if (shown == null) {
 			return;
 		}
-		Waypoints.teleport(shown.x, shown.y, shown.z);
+		Waypoints.teleport(shown.dimension, shown.x, shown.y, shown.z);
 		this.onClose();
 	}
 

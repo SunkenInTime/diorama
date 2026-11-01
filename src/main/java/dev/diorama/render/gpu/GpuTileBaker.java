@@ -5,6 +5,7 @@ import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.GpuMesher;
 import dev.diorama.bake.TileBaker;
+import dev.diorama.render.SavedChunkImport;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -14,8 +15,8 @@ import org.jspecify.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
 
 /**
- * Draws map tiles on the GPU from {@link GpuMesher} meshes instead of tracing them: an
- * experiment, on with {@code DIORAMA_GPU_BAKE=1}.
+ * Draws map tiles on the GPU from {@link GpuMesher} meshes instead of tracing them;
+ * {@link GpuBakeCheck} says when.
  *
  * <p>A bake is a few passes on the render thread:
  * <ol>
@@ -42,6 +43,14 @@ public final class GpuTileBaker {
 	 * have been measured to cost, so a backlog spreads over frames instead of landing on a few.
 	 */
 	private static final double SHARE = Math.max(0.01, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBakeShare", "0.1"))));
+	/**
+	 * The same for background tiles, which nobody is waiting for: they only draw with no other tile
+	 * queued, out of a smaller budget of their own, so a long fill doesn't weigh on the game. With
+	 * the game paused or the map open they get {@link #SHARE}.
+	 */
+	private static final double BACKGROUND_SHARE = Math.max(0.001, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBackgroundShare", "0.03"))));
+	/** About what the tracer takes over a tile. */
+	private static final double TRACE_NANOS = 1e9;
 	/** The tile plus a pixel all round, which outlines compare against, at two samples each way. */
 	static final int SCENE = (Projection.TILE_PIXELS + 2) * 2;
 	static final int SHADOW_SIZE = 2048;
@@ -58,8 +67,19 @@ public final class GpuTileBaker {
 	/** The uniform block, {@code include/bake.glsl}: eleven vec4s, four jitters, the mode, two ivec4s, 13 sky rays, two vec4s for under a roof. */
 	static final int UBO_SIZE = (11 + 4 + 1 + 2 + 13 + 2) * 16;
 
-	/** Set when the first tile is queued: until then frames don't touch the GPU code at all. */
+	/**
+	 * A drawn tile whose pixels haven't come back after this long and this many frames isn't
+	 * coming: the driver has stopped answering. Frames too, as pixels arrive between frames and a
+	 * game busy loading a world doesn't draw any.
+	 */
+	private static final long STUCK_NANOS = 20_000_000_000L;
+	private static final int STUCK_FRAMES = 240;
+
+	/** Set when GPU baking is first wanted: until then frames don't touch the GPU code at all. */
 	private static volatile boolean used;
+	/** The GPU code failed outside any one tile: frames leave it alone from then on. */
+	private static volatile boolean dead;
+	private static volatile @Nullable String device;
 
 	/** Made on the first frame after a tile is queued, so a session without GPU baking never sets one up. */
 	private static final class Backend {
@@ -74,19 +94,26 @@ public final class GpuTileBaker {
 	}
 
 	private static final ConcurrentLinkedQueue<Job> QUEUE = new ConcurrentLinkedQueue<>();
+	private static final ConcurrentLinkedQueue<Job> BACKGROUND = new ConcurrentLinkedQueue<>();
 	/** Jobs drawn and waiting for their pixels to come back. */
 	private static final java.util.Set<Job> PENDING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	// The bake budget, in nanoseconds of frame time, and the measured cost of a bake.
 	private static long lastFrame;
 	private static double budget;
-	private static double renderCost = 1e6;
-	private static double gpuCost = 1e6;
+	private static double backgroundBudget;
+	private static long frames;
+	private static volatile double renderCost = 1e6;
+	private static volatile double gpuCost = 1e6;
 
 	private GpuTileBaker() {
 	}
 
 	/** What a bake cost, for the experiment's numbers. Times are nanoseconds, -1 where not known. */
 	public record Timing(long meshNanos, long packNanos, long recordNanos, long gpuNanos, long latencyNanos, int faces, int casters, int bytes) {
+		/** How long the bake held up a frame, at the dearer of the render thread and the GPU. */
+		public long frameNanos() {
+			return Math.max(this.recordNanos, this.gpuNanos);
+		}
 	}
 
 	/**
@@ -102,8 +129,60 @@ public final class GpuTileBaker {
 	 * render thread, or null pixels if the GPU couldn't draw it.
 	 */
 	public static void submit(GpuMesher.Mesh mesh, Consumer<Result> done) {
-		QUEUE.add(new Job(mesh, done));
+		Job job = new Job(mesh, done);
+		if (dead) {
+			job.fail();
+			return;
+		}
+		QUEUE.add(job);
 		used = true;
+		// Frames may have stopped while it went in, and they won't see it now.
+		if (dead && QUEUE.remove(job)) {
+			job.fail();
+		}
+	}
+
+	/** Lets frames start on the GPU code, for {@link GpuBakeCheck#open}. */
+	static void use() {
+		used = true;
+	}
+
+	/** After a failure, for {@link GpuBakeCheck#retry}. */
+	static void retry() {
+		dead = false;
+	}
+
+	/**
+	 * The same for a tile nobody is waiting for; see {@link #BACKGROUND_SHARE}. The returned task
+	 * takes it back if it hasn't been drawn yet, handing the caller a null result.
+	 */
+	public static Runnable submitBackground(GpuMesher.Mesh mesh, Consumer<Result> done) {
+		Job job = new Job(mesh, done);
+		if (dead) {
+			job.fail();
+			return () -> {
+			};
+		}
+		BACKGROUND.add(job);
+		used = true;
+		// Frames may have stopped while it went in, and they won't see it now.
+		if (dead && BACKGROUND.remove(job)) {
+			job.fail();
+		}
+		return () -> {
+			if (BACKGROUND.remove(job)) {
+				job.cancel();
+			}
+		};
+	}
+
+	/**
+	 * Whether this GPU's background budget gets through a tile about as soon as the tracer would.
+	 * On a slow GPU it doesn't: a tile that costs the frames too much takes its budget many seconds
+	 * to save up.
+	 */
+	public static boolean keepsUpInBackground() {
+		return cost() / BACKGROUND_SHARE < TRACE_NANOS;
 	}
 
 	/**
@@ -116,6 +195,9 @@ public final class GpuTileBaker {
 		while ((job = QUEUE.poll()) != null) {
 			job.cancel();
 		}
+		while ((job = BACKGROUND.poll()) != null) {
+			job.cancel();
+		}
 		for (Job pending : PENDING) {
 			pending.cancel();
 		}
@@ -123,49 +205,111 @@ public final class GpuTileBaker {
 
 	/** The graphics card and driver the bakes run on, for the log. */
 	public static String device() {
-		String device = used ? Backend.INSTANCE.device() : null;
-		return device == null ? "a GPU not set up yet" : device;
+		String name = device;
+		return name == null ? "a GPU not set up yet" : name;
 	}
 
 	/** Draws queued tiles. Call on the render thread at the start of a frame, outside any pass. */
 	public static void frame() {
-		if (!used) {
+		if (!used || dead) {
 			return;
 		}
-		Backend.INSTANCE.poll();
-		long now = System.nanoTime();
+		try {
+			if (!GpuBakeCheck.opened()) {
+				device = Backend.INSTANCE.device();
+				GpuBakeCheck.open(device);
+				if (GpuBakeCheck.failed()) {
+					cancelAll();
+					return;
+				}
+			}
+			Backend.INSTANCE.poll();
+			long now = System.nanoTime();
+			frames++;
+			for (Job job : PENDING) {
+				if (now - job.drawn > STUCK_NANOS && frames - job.drawnFrame > STUCK_FRAMES) {
+					throw new IllegalStateException("the pixels of " + job.mesh.key + " never came back");
+				}
+			}
+			drawQueued(now);
+		} catch (Throwable t) {
+			// Nothing here may reach the frame: it would take the game down with it.
+			Diorama.LOGGER.error("GPU baking stopped", t);
+			dead = true;
+			GpuBakeCheck.broken(String.valueOf(t));
+			failAll();
+		}
+	}
+
+	/** Gives every job back to be traced. */
+	private static void failAll() {
+		Job job;
+		while ((job = QUEUE.poll()) != null) {
+			job.fail();
+		}
+		while ((job = BACKGROUND.poll()) != null) {
+			job.fail();
+		}
+		for (Job pending : PENDING) {
+			pending.fail();
+		}
+	}
+
+	private static void drawQueued(long now) {
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
 			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
+			double backgroundShare = SavedChunkImport.playing() ? BACKGROUND_SHARE : SHARE;
+			backgroundBudget = Math.min(backgroundBudget + backgroundShare * (now - lastFrame), cost());
 		}
 		lastFrame = now;
 		while (budget >= cost()) {
 			Job job = QUEUE.poll();
 			if (job == null) {
-				return;
+				break;
 			}
-			try {
-				if (job.mesh.empty) {
-					// Rays start below the view's limit: the tracer leaves every pixel unknown.
-					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
-					job.free();
-				} else if (job.mesh.traceInstead
-					|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
-					// Something the GPU doesn't draw as the tracer does, or more than the textures that
-					// hold its sky occlusion take: trace it. Not the GPU's fault.
-					job.cancel();
-				} else if (!Backend.INSTANCE.draw(job)) {
-					// This GPU can't draw it: trace it.
-					job.fail();
-				} else {
-					// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
-					budget -= cost();
-				}
-			} catch (Throwable t) {
-				Diorama.LOGGER.error("GPU bake of {} failed", job.mesh.key, t);
-				job.fail();
+			if (draw(job)) {
+				// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
+				budget -= cost();
 			}
 		}
+		if (!QUEUE.isEmpty()) {
+			return;
+		}
+		while (backgroundBudget >= cost()) {
+			Job job = BACKGROUND.poll();
+			if (job == null) {
+				return;
+			}
+			if (draw(job)) {
+				backgroundBudget -= cost();
+			}
+		}
+	}
+
+	/** Draws a job, or hands it back for tracing; returns whether the GPU drew anything. */
+	private static boolean draw(Job job) {
+		try {
+			if (job.mesh.empty) {
+				// Rays start below the view's limit: the tracer leaves every pixel unknown.
+				job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+				job.free();
+			} else if (GpuBakeCheck.failed() || job.mesh.traceInstead
+				|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
+				// Something the GPU doesn't draw as the tracer does, or more than the textures that
+				// hold its sky occlusion take: trace it. Not the GPU's fault.
+				job.cancel();
+			} else if (Backend.INSTANCE.draw(job)) {
+				return true;
+			} else {
+				// This GPU can't draw it: trace it.
+				job.fail();
+			}
+		} catch (Throwable t) {
+			Diorama.LOGGER.error("GPU bake of {} failed", job.mesh.key, t);
+			job.fail();
+		}
+		return false;
 	}
 
 	/** What the next bake is expected to cost, in the dearer of render-thread and GPU time. */
@@ -211,6 +355,8 @@ public final class GpuTileBaker {
 		/** The look the uniforms were built with, so a check can tell if it changed under it. */
 		MapStyle look;
 		final long submitted = System.nanoTime();
+		long drawn;
+		long drawnFrame;
 		/** Set by the first of done or fail; the other is then ignored. */
 		final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
 		final long packNanos;
@@ -385,6 +531,8 @@ public final class GpuTileBaker {
 
 		/** Drawn: waiting for the pixels. */
 		void pending() {
+			this.drawn = System.nanoTime();
+			this.drawnFrame = frames;
 			PENDING.add(this);
 		}
 

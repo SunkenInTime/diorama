@@ -11,6 +11,21 @@ plugins {
 // and back. Version-specific code that isn't a rename goes in //? if blocks.
 stonecutter active "26.3"
 
+// Game tests bake with the tracer unless a run asks otherwise with DIORAMA_GPU_BAKE: it's what they
+// were written against, and what boat.dev's graphics-free VMs can do at speed. 0 is the tracer, 1
+// forces the GPU, and any other value, such as auto, leaves the choice to the game, as for a player.
+subprojects {
+	tasks.matching { it.name.contains("ClientGameTest") && it is ProcessForkOptions }.configureEach {
+		// As it runs: set while configuring, the whole environment lands in the configuration cache,
+		// and a rerun gets the last run's display.
+		doFirst {
+			if (System.getenv("DIORAMA_GPU_BAKE") == null) {
+				(this as ProcessForkOptions).environment("DIORAMA_GPU_BAKE", "0")
+			}
+		}
+	}
+}
+
 stonecutter parameters {
 	// The mod loader the jar is for, as //? if fabric, //? if neoforge and //? if forge conditions.
 	// Versions named <minecraft>-neoforge are NeoForge, <minecraft>-forge Forge (settings.gradle.kts);

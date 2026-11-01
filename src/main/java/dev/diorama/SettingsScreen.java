@@ -1,5 +1,6 @@
 package dev.diorama;
 
+import dev.diorama.render.Pins;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -13,6 +14,7 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
+import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.tabs.GridLayoutTab;
 //? if >=26.2 {
@@ -46,6 +48,7 @@ public final class SettingsScreen extends Screen {
 	/** The settings' width; two checkbox columns with a gap between them. */
 	private static final int CONTENT = 280;
 	private static final int COLUMN_GAP = 8;
+	private static final int HEADING = 11;
 	private static final int TAB_BAR_HEIGHT = 24;
 	private static final Identifier LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/inworld_menu_list_background.png");
 
@@ -127,6 +130,8 @@ public final class SettingsScreen extends Screen {
 		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
 		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
 		overlays.toggle("slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
+		// Here rather than with the other map buttons: another row there runs into Done on a short window.
+		overlays.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));
@@ -148,6 +153,12 @@ public final class SettingsScreen extends Screen {
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],
 			i -> distances[i] == 0 ? Component.translatable("diorama.settings.waypoint_distance.any") : Component.literal(distances[i] + " m"));
+		int[] pinSizes = Pins.sizes();
+		waypoints.heading("waypoint_size");
+		waypoints.slider("waypoint_size_minimap", nearestIndex(pinSizes, s.waypointMinimapSize), pinSizes.length, i -> s.waypointMinimapSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));
+		waypoints.slider("waypoint_size_map", nearestIndex(pinSizes, s.waypointMapSize), pinSizes.length, i -> s.waypointMapSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));
+		waypoints.slider("waypoint_size_world", nearestIndex(pinSizes, s.waypointWorldSize), pinSizes.length, i -> s.waypointWorldSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));
+		waypoints.lastThreeSideBySide();
 		waypoints.open("teleport_command", Component.literal("/" + s.teleportCommand), () -> this.minecraft.gui.setScreen(new TeleportCommandScreen(this)));
 
 		SettingsTab look = new SettingsTab("diorama.settings.look");
@@ -158,8 +169,14 @@ public final class SettingsScreen extends Screen {
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
 			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));
-		// On, but turned off this session because the graphics card's tiles didn't match: say so.
-		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> s.gpuBaking = i == 1, SettingsScreen::gpuBakingValue);
+		// On, but turned itself off on this graphics card: say why. Turning it back on tries again.
+		this.gpuBaking = look.cycle("gpu_baking", () -> s.gpuBaking ? 1 : 0, 2, i -> {
+			s.gpuBaking = i == 1;
+			if (s.gpuBaking) {
+				dev.diorama.render.gpu.GpuBakeCheck.retry();
+				this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
+			}
+		}, SettingsScreen::gpuBakingValue);
 		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 		look.cycle("arrow_color", () -> s.arrowColor, Settings.ARROW_COLORS.length, i -> s.arrowColor = i,
 			//? if >=1.21 {
@@ -190,7 +207,12 @@ public final class SettingsScreen extends Screen {
 	}
 
 	private static Component gpuBakingValue(int on) {
-		return Component.translatable(on == 0 ? "options.off" : dev.diorama.render.gpu.GpuBakeCheck.failed() ? "diorama.settings.gpu_baking.no_match" : "options.on");
+		dev.diorama.render.gpu.GpuBakeCheck.Off off = dev.diorama.render.gpu.GpuBakeCheck.off();
+		return Component.translatable(on == 0 ? "options.off" : off == null ? "options.on" : switch (off) {
+			case NO_MATCH -> "diorama.settings.gpu_baking.no_match";
+			case TOO_SLOW -> "diorama.settings.gpu_baking.too_slow";
+			case CRASHED -> "diorama.settings.gpu_baking.crashed";
+		});
 	}
 
 	@Override
@@ -220,6 +242,8 @@ public final class SettingsScreen extends Screen {
 		private final List<AbstractWidget> wide = new ArrayList<>();
 		/** Wide widgets that share a row with the one after them. */
 		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
+		private final java.util.Set<AbstractWidget> tripled = new java.util.HashSet<>();
+		private final java.util.Set<AbstractWidget> headings = new java.util.HashSet<>();
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
@@ -288,6 +312,17 @@ public final class SettingsScreen extends Screen {
 			this.pairedWithNext.add(this.wide.get(this.wide.size() - 2));
 		}
 
+		void lastThreeSideBySide() {
+			this.tripled.add(this.wide.get(this.wide.size() - 3));
+		}
+
+		/** A line of text over the next widgets, naming them together. */
+		void heading(String key) {
+			StringWidget heading = new StringWidget(Component.translatable("diorama.settings." + key), SettingsScreen.this.font);
+			this.headings.add(heading);
+			this.wide.add(heading);
+		}
+
 		@Override
 		public void visitChildren(Consumer<AbstractWidget> consumer) {
 			this.checkboxes.forEach(consumer);
@@ -299,16 +334,35 @@ public final class SettingsScreen extends Screen {
 			int content = Math.min(CONTENT, area.width() - 10);
 			int column = (content - COLUMN_GAP) / 2;
 			int left = area.left() + (area.width() - content) / 2;
-			int y = area.top() + 12;
+			int rows = this.wide.size() - this.pairedWithNext.size() - this.tripled.size() * 2 - this.headings.size();
+			int checkRows = (this.checkboxes.size() + 1) / 2;
+			// On a small window, closer together rather than into the buttons below.
+			boolean tight = 22 + checkRows * 22 + rows * 24 + this.headings.size() * HEADING > area.height();
+			int rowStep = tight ? 22 : 24;
+			int y = area.top() + (tight ? 6 : 12);
 			for (int i = 0; i < this.checkboxes.size(); i++) {
-				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * 22);
+				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * (tight ? 20 : 22));
 			}
 			if (!this.checkboxes.isEmpty()) {
-				y += (this.checkboxes.size() + 1) / 2 * 22 + 10;
+				y += checkRows * (tight ? 20 : 22) + (tight ? 3 : 10);
 			}
 			for (int i = 0; i < this.wide.size(); i++) {
 				AbstractWidget widget = this.wide.get(i);
-				if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
+				if (this.headings.contains(widget)) {
+					widget.setPosition(left, y);
+					widget.setWidth(content);
+					y += HEADING;
+					continue;
+				}
+				if (this.tripled.contains(widget)) {
+					int third = (content - 8) / 3;
+					for (int j = 0; j < 3; j++) {
+						AbstractWidget part = this.wide.get(i + j);
+						part.setPosition(left + j * (content - third) / 2, y);
+						part.setWidth(third);
+					}
+					i += 2;
+				} else if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
 					int half = (content - 4) / 2;
 					widget.setPosition(left, y);
 					widget.setWidth(half);
@@ -319,7 +373,7 @@ public final class SettingsScreen extends Screen {
 					widget.setPosition(left, y);
 					widget.setWidth(content);
 				}
-				y += 24;
+				y += rowStep;
 			}
 		}
 	}
@@ -367,6 +421,17 @@ public final class SettingsScreen extends Screen {
 
 	private static Component label(Component name, Component value) {
 		return Component.empty().append(name).append(": ").append(value);
+	}
+
+	/** Where in {@code values}, ascending, the one nearest {@code value} is; halfway rounds up, as {@code Pins.scale} does. */
+	private static int nearestIndex(int[] values, int value) {
+		int nearest = 0;
+		for (int i = 1; i < values.length; i++) {
+			if (Math.abs(values[i] - value) <= Math.abs(values[nearest] - value)) {
+				nearest = i;
+			}
+		}
+		return nearest;
 	}
 
 	private static int indexOf(int[] values, int value) {

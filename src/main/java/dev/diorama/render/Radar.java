@@ -306,6 +306,11 @@ public final class Radar {
 		return Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
 	}
 
+	/** Screen pixels to a GUI pixel. */
+	static int pixelsPerGuiPixel() {
+		return (int) guiScale();
+	}
+
 	/**
 	 * Pushes a pose with one unit per texel and its origin at the icon's top left, centred on
 	 * (x, y), and draws the shadow and outline of a w x h icon there. The caller draws the icon at

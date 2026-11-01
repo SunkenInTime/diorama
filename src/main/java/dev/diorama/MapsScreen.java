@@ -88,6 +88,10 @@ public final class MapsScreen extends Screen {
 		if (here != null) {
 			found.add(here);
 		}
+		// The map may have opened this on a modded dimension it was looking at.
+		if (this.dimension != null) {
+			found.add(this.dimension);
+		}
 		if (maps != null) {
 			found.addAll(maps.dimensions());
 		}
