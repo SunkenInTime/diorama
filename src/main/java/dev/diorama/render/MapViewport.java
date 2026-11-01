@@ -271,12 +271,14 @@ public final class MapViewport {
 		for (int tu = nearU - NEAR_TILES; tu <= nearU + NEAR_TILES; tu++) {
 			for (int tv = nearV - NEAR_TILES; tv <= nearV + NEAR_TILES; tv++) {
 				TileKey key = new TileKey(view.layer(), tu, tv, 0);
-				MapTile tile = level.want(key, distance(key, view));
-				if (tile == null || tile.texture() == null) {
-					continue;
-				}
 				float sx = view.screenX((double) tu * units);
 				float sy = view.screenY((double) tv * units);
+				boolean visible = sx < view.x() + view.width() && sx + size > view.x() && sy < view.y() + view.height() && sy + size > view.y();
+				// As in drawTiles: those just outside the view bake too, after everything in it.
+				MapTile tile = level.want(key, distance(key, view) + (visible ? 0 : 100_000));
+				if (!visible || tile == null || tile.texture() == null) {
+					continue;
+				}
 				if (circle == null) {
 					canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
 					continue;
