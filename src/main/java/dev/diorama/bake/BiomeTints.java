@@ -65,6 +65,12 @@ public final class BiomeTints {
 		int[] green = new int[RESOLVERS.length];
 		int[] blue = new int[RESOLVERS.length];
 		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		// Neighbouring columns share most of the blocks they blend, at the same height unless the
+		// ground steps, so each block's colours are worked out once per height.
+		int size = 16 + radius * 2;
+		int[] heights = new int[size * size];
+		java.util.Arrays.fill(heights, Integer.MIN_VALUE);
+		int[][] sampled = new int[RESOLVERS.length][size * size];
 		for (int z = 0; z < 16; z++) {
 			for (int x = 0; x < 16; x++) {
 				int bx = (snapshot.chunkX << 4) + x;
@@ -75,9 +81,16 @@ public final class BiomeTints {
 				java.util.Arrays.fill(blue, 0);
 				for (int dz = -radius; dz <= radius; dz++) {
 					for (int dx = -radius; dx <= radius; dx++) {
-						Biome biome = biomes.getBiome(pos.set(bx + dx, y, bz + dz)).value();
+						int cell = (z + dz + radius) * size + x + dx + radius;
+						if (heights[cell] != y) {
+							heights[cell] = y;
+							Biome biome = biomes.getBiome(pos.set(bx + dx, y, bz + dz)).value();
+							for (int r = 0; r < RESOLVERS.length; r++) {
+								sampled[r][cell] = RESOLVERS[r].getColor(biome, bx + dx, bz + dz);
+							}
+						}
 						for (int r = 0; r < RESOLVERS.length; r++) {
-							int color = RESOLVERS[r].getColor(biome, bx + dx, bz + dz);
+							int color = sampled[r][cell];
 							red[r] += ARGB.red(color);
 							green[r] += ARGB.green(color);
 							blue[r] += ARGB.blue(color);

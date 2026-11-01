@@ -5,6 +5,7 @@ import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.GpuMesher;
 import dev.diorama.bake.TileBaker;
+import dev.diorama.render.SavedChunkImport;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -42,6 +43,14 @@ public final class GpuTileBaker {
 	 * have been measured to cost, so a backlog spreads over frames instead of landing on a few.
 	 */
 	private static final double SHARE = Math.max(0.01, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBakeShare", "0.1"))));
+	/**
+	 * The same for background tiles, which nobody is waiting for: they only draw with no other tile
+	 * queued, out of a smaller budget of their own, so a long fill doesn't weigh on the game. With
+	 * the game paused or the map open they get {@link #SHARE}.
+	 */
+	private static final double BACKGROUND_SHARE = Math.max(0.001, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBackgroundShare", "0.03"))));
+	/** About what the tracer takes over a tile. */
+	private static final double TRACE_NANOS = 1e9;
 	/** The tile plus a pixel all round, which outlines compare against, at two samples each way. */
 	static final int SCENE = (Projection.TILE_PIXELS + 2) * 2;
 	static final int SHADOW_SIZE = 2048;
@@ -85,14 +94,16 @@ public final class GpuTileBaker {
 	}
 
 	private static final ConcurrentLinkedQueue<Job> QUEUE = new ConcurrentLinkedQueue<>();
+	private static final ConcurrentLinkedQueue<Job> BACKGROUND = new ConcurrentLinkedQueue<>();
 	/** Jobs drawn and waiting for their pixels to come back. */
 	private static final java.util.Set<Job> PENDING = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	// The bake budget, in nanoseconds of frame time, and the measured cost of a bake.
 	private static long lastFrame;
 	private static double budget;
+	private static double backgroundBudget;
 	private static long frames;
-	private static double renderCost = 1e6;
-	private static double gpuCost = 1e6;
+	private static volatile double renderCost = 1e6;
+	private static volatile double gpuCost = 1e6;
 
 	private GpuTileBaker() {
 	}
@@ -142,6 +153,39 @@ public final class GpuTileBaker {
 	}
 
 	/**
+	 * The same for a tile nobody is waiting for; see {@link #BACKGROUND_SHARE}. The returned task
+	 * takes it back if it hasn't been drawn yet, handing the caller a null result.
+	 */
+	public static Runnable submitBackground(GpuMesher.Mesh mesh, Consumer<Result> done) {
+		Job job = new Job(mesh, done);
+		if (dead) {
+			job.fail();
+			return () -> {
+			};
+		}
+		BACKGROUND.add(job);
+		used = true;
+		// Frames may have stopped while it went in, and they won't see it now.
+		if (dead && BACKGROUND.remove(job)) {
+			job.fail();
+		}
+		return () -> {
+			if (BACKGROUND.remove(job)) {
+				job.cancel();
+			}
+		};
+	}
+
+	/**
+	 * Whether this GPU's background budget gets through a tile about as soon as the tracer would.
+	 * On a slow GPU it doesn't: a tile that costs the frames too much takes its budget many seconds
+	 * to save up.
+	 */
+	public static boolean keepsUpInBackground() {
+		return cost() / BACKGROUND_SHARE < TRACE_NANOS;
+	}
+
+	/**
 	 * Fails every job not finished yet, queued or drawn, so their callers fall back at once. For
 	 * waits on the render thread, which the GPU's results need to arrive. A result that still
 	 * arrives later is dropped.
@@ -149,6 +193,9 @@ public final class GpuTileBaker {
 	public static void cancelAll() {
 		Job job;
 		while ((job = QUEUE.poll()) != null) {
+			job.cancel();
+		}
+		while ((job = BACKGROUND.poll()) != null) {
 			job.cancel();
 		}
 		for (Job pending : PENDING) {
@@ -200,6 +247,9 @@ public final class GpuTileBaker {
 		while ((job = QUEUE.poll()) != null) {
 			job.fail();
 		}
+		while ((job = BACKGROUND.poll()) != null) {
+			job.fail();
+		}
 		for (Job pending : PENDING) {
 			pending.fail();
 		}
@@ -209,35 +259,57 @@ public final class GpuTileBaker {
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
 			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
+			double backgroundShare = SavedChunkImport.playing() ? BACKGROUND_SHARE : SHARE;
+			backgroundBudget = Math.min(backgroundBudget + backgroundShare * (now - lastFrame), cost());
 		}
 		lastFrame = now;
 		while (budget >= cost()) {
 			Job job = QUEUE.poll();
 			if (job == null) {
-				return;
+				break;
 			}
-			try {
-				if (job.mesh.empty) {
-					// Rays start below the view's limit: the tracer leaves every pixel unknown.
-					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
-					job.free();
-				} else if (GpuBakeCheck.failed() || job.mesh.traceInstead
-					|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
-					// Something the GPU doesn't draw as the tracer does, or more than the textures that
-					// hold its sky occlusion take: trace it. Not the GPU's fault.
-					job.cancel();
-				} else if (!Backend.INSTANCE.draw(job)) {
-					// This GPU can't draw it: trace it.
-					job.fail();
-				} else {
-					// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
-					budget -= cost();
-				}
-			} catch (Throwable t) {
-				Diorama.LOGGER.error("GPU bake of {} failed", job.mesh.key, t);
-				job.fail();
+			if (draw(job)) {
+				// Only a drawn bake spends the budget, so tiles this GPU can't draw reach the tracer at once.
+				budget -= cost();
 			}
 		}
+		if (!QUEUE.isEmpty()) {
+			return;
+		}
+		while (backgroundBudget >= cost()) {
+			Job job = BACKGROUND.poll();
+			if (job == null) {
+				return;
+			}
+			if (draw(job)) {
+				backgroundBudget -= cost();
+			}
+		}
+	}
+
+	/** Draws a job, or hands it back for tracing; returns whether the GPU drew anything. */
+	private static boolean draw(Job job) {
+		try {
+			if (job.mesh.empty) {
+				// Rays start below the view's limit: the tracer leaves every pixel unknown.
+				job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
+				job.free();
+			} else if (GpuBakeCheck.failed() || job.mesh.traceInstead
+				|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
+				// Something the GPU doesn't draw as the tracer does, or more than the textures that
+				// hold its sky occlusion take: trace it. Not the GPU's fault.
+				job.cancel();
+			} else if (Backend.INSTANCE.draw(job)) {
+				return true;
+			} else {
+				// This GPU can't draw it: trace it.
+				job.fail();
+			}
+		} catch (Throwable t) {
+			Diorama.LOGGER.error("GPU bake of {} failed", job.mesh.key, t);
+			job.fail();
+		}
+		return false;
 	}
 
 	/** What the next bake is expected to cost, in the dearer of render-thread and GPU time. */

@@ -7,6 +7,16 @@ import org.jspecify.annotations.Nullable;
 public interface ChunkSource {
 	@Nullable ChunkSnapshot chunk(int chunkX, int chunkZ);
 
+	/**
+	 * See {@link ChunkSnapshot#topBelow}, or {@code Integer.MIN_VALUE} without a chunk. Bakes ask this
+	 * of many more chunks than they end up reading, so a source that has to load chunks answers it
+	 * without loading them.
+	 */
+	default int topBelow(int chunkX, int chunkZ, int ceiling) {
+		ChunkSnapshot chunk = this.chunk(chunkX, chunkZ);
+		return chunk == null ? Integer.MIN_VALUE : chunk.topBelow(ceiling);
+	}
+
 	/** Lowest block y in this dimension. */
 	int minY();
 
