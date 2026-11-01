@@ -31,16 +31,17 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast) {
+	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
 	}
 
 	/**
 	 * Where and how big a map is drawn, and what part of the map it shows. A {@code round} view
-	 * shows only the circle filling it (the round minimap).
+	 * shows only the circle filling it (the round minimap); a {@code follows} view is on the player,
+	 * so what's around its middle has to stay up to date (the minimap again).
 	 */
-	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round) {
+	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round, boolean follows) {
 		public View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
-			this(x, y, width, height, centerU, centerV, zoom, layer, false);
+			this(x, y, width, height, centerU, centerV, zoom, layer, false, false);
 		}
 
 		public double minU() {
@@ -65,6 +66,13 @@ public final class MapViewport {
 
 	/** Below this zoom (GUI pixels per block) overlay lines and dots would blur into noise. */
 	private static final double OVERLAY_ZOOM = 1.0;
+
+	/**
+	 * How many tiles each way from the middle a {@link View#follows following} view draws detailed
+	 * tiles over its overviews. Overviews are made from saved tiles, seconds behind, so the ground
+	 * under a moving player would still be fog. This is as far as the game usually has chunks.
+	 */
+	private static final int NEAR_TILES = 2;
 
 	/** The most the fog shader's opacity code can say: it has five spare bits. */
 	private static final int OPACITY_CODES = 31;
@@ -238,10 +246,49 @@ public final class MapViewport {
 				}
 			}
 		}
+		if (this.drawsNear(view, lod)) {
+			drawNear(level, view, canvas, sampling, circle, tint);
+		}
 		if (lit != null) {
 			lit.run();
 		}
 		above.forEach(Runnable::run);
+	}
+
+	/**
+	 * Whether detailed tiles go over this view's overviews. Not on a see-through map: the ground
+	 * would show through twice, as a brighter square, so it waits for the overviews instead.
+	 */
+	private boolean drawsNear(View view, int lod) {
+		return lod > 0 && view.follows() && this.opacity >= 1;
+	}
+
+	private static void drawNear(MapLevel level, View view, MapCanvas canvas, Sampling sampling, @Nullable Circle circle, int tint) {
+		int units = Projection.TILE_UNITS;
+		float size = (float) (units * view.zoom());
+		int nearU = (int) Math.floor(view.centerU() / units);
+		int nearV = (int) Math.floor(view.centerV() / units);
+		for (int tu = nearU - NEAR_TILES; tu <= nearU + NEAR_TILES; tu++) {
+			for (int tv = nearV - NEAR_TILES; tv <= nearV + NEAR_TILES; tv++) {
+				TileKey key = new TileKey(view.layer(), tu, tv, 0);
+				float sx = view.screenX((double) tu * units);
+				float sy = view.screenY((double) tv * units);
+				boolean visible = sx < view.x() + view.width() && sx + size > view.x() && sy < view.y() + view.height() && sy + size > view.y();
+				// As in drawTiles: those just outside the view bake too, after everything in it.
+				MapTile tile = level.want(key, distance(key, view) + (visible ? 0 : 100_000));
+				if (!visible || tile == null || tile.texture() == null) {
+					continue;
+				}
+				if (circle == null) {
+					canvas.rect(tile.texture(), sampling, sx, sy, sx + size, sy + size, 0, 0, 1, 1, tint);
+					continue;
+				}
+				Circle.Quads inside = circle.clip(sx, sy, sx + size, sy + size, 0, 0, 1, 1);
+				if (inside != null) {
+					canvas.quad(tile.texture(), sampling, inside.corners(), inside.uvs(), tint);
+				}
+			}
+		}
 	}
 
 	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view) {
@@ -309,7 +356,10 @@ public final class MapViewport {
 		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
 		// only eat small explored areas that are a few texels across.
 		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast);
+		boolean drawsNear = this.drawsNear(view, lod);
+		int nearU = drawsNear ? (int) Math.floor(view.centerU() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
+		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
@@ -320,6 +370,9 @@ public final class MapViewport {
 		int lastTu = Integer.MIN_VALUE;
 		int lastTv = Integer.MIN_VALUE;
 		MapTile tile = null;
+		int lastNearTu = Integer.MIN_VALUE;
+		int lastNearTv = Integer.MIN_VALUE;
+		MapTile nearTile = null;
 		for (int j = 0; j < MASK; j++) {
 			double v = originV + (j + 0.5) * texel;
 			int tv = (int) Math.floor(v / units);
@@ -336,6 +389,24 @@ public final class MapViewport {
 				if (tile != null && tile.hasCoverage()) {
 					int cellX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - tu * units) / cellUnits));
 					known = tile.coverage(cellX, cellY);
+				}
+				// Ground the overviews don't have yet can be on a detailed tile drawn over them.
+				if (drawsNear && known < 1) {
+					int nearTu = (int) Math.floor(u / Projection.TILE_UNITS);
+					int nearTv = (int) Math.floor(v / Projection.TILE_UNITS);
+					if (Math.abs(nearTu - nearU) <= NEAR_TILES && Math.abs(nearTv - nearV) <= NEAR_TILES) {
+						if (nearTu != lastNearTu || nearTv != lastNearTv) {
+							nearTile = level.peek(new TileKey(view.layer(), nearTu, nearTv, 0));
+							lastNearTu = nearTu;
+							lastNearTv = nearTv;
+						}
+						if (nearTile != null && nearTile.hasCoverage()) {
+							double cell = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+							int nearX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - nearTu * (double) Projection.TILE_UNITS) / cell));
+							int nearY = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - nearTv * (double) Projection.TILE_UNITS) / cell));
+							known = Math.max(known, nearTile.coverage(nearX, nearY));
+						}
+					}
 				}
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(known * 255);
 			}

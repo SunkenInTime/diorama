@@ -170,12 +170,12 @@ public final class MinimapHud implements HudElement {
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
 		int wantedLayer = settings.autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
-		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
+		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), zoom(session.map(), wantedLayer), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
 		float opacity = settings.opacity();
 		this.viewport.opacity(opacity);
 
-		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), layer, round);
+		MapViewport.View view = new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), zoom(session.map(), layer), layer, round, true);
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
 			() -> session.lights().draw(graphics, view, partialTick, opacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
 		DrawingStore drawings = DrawingStore.get();
@@ -227,13 +227,22 @@ public final class MinimapHud implements HudElement {
 			this.holdStart = now;
 		}
 		MapViewport.View shown = new MapViewport.View(wanted.x(), wanted.y(), wanted.width(), wanted.height(),
-			wanted.centerU(), wanted.centerV(), wanted.zoom(), this.shownLayer);
+			wanted.centerU(), wanted.centerV(), zoom(level, this.shownLayer), this.shownLayer);
 		// The old slice only helps if it has something to show: after a teleport or a new dimension it doesn't.
 		if (MapViewport.ready(level, wanted) || now - this.holdStart > LAYER_HOLD_MS || !MapViewport.showsAnything(level, shown)) {
 			this.shownLayer = wanted.layer();
 			this.holdStart = -1;
 		}
 		return this.shownLayer;
+	}
+
+	/**
+	 * The zoom to draw this slice at. Cave slices and unsaved maps have no overview tiles, so they
+	 * stop at the detailed zoom, as they do on the fullscreen map.
+	 */
+	private static double zoom(MapLevel level, int layer) {
+		double zoom = Settings.get().zoom();
+		return layer == TileKey.SURFACE && level.hasOverviews() ? zoom : Math.max(zoom, MapViewport.DETAILED_ZOOM);
 	}
 
 	/**
