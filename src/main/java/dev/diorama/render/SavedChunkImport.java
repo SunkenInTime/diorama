@@ -10,6 +10,7 @@ import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.SavedChunkSource;
 import dev.diorama.data.SavedChunks;
+import dev.diorama.waypoint.Portals;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -33,6 +34,7 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import net.minecraft.client.Minecraft;
@@ -126,22 +128,22 @@ public final class SavedChunkImport {
 	private int drawnCount;
 	private long drawNanos;
 
-	private SavedChunkImport(MapLevel map, SavedChunks save) {
+	private SavedChunkImport(MapLevel map, SavedChunks save, Consumer<List<Portals.Spot>> portals) {
 		this.map = map;
 		this.save = save;
-		this.source = new SavedChunkSource(map, save);
+		this.source = new SavedChunkSource(map, save, portals);
 		this.thread = new Thread(this::run, "diorama-saved-chunks");
 		this.thread.setDaemon(true);
 		this.thread.setPriority(Thread.MIN_PRIORITY);
 	}
 
 	/** Starts drawing the save behind this map, or returns null when there's no save here. */
-	public static @Nullable SavedChunkImport start(MapLevel map, ClientLevel level) {
+	public static @Nullable SavedChunkImport start(MapLevel map, ClientLevel level, Consumer<List<Portals.Spot>> portals) {
 		SavedChunks save = SavedChunks.open(level, map.roofless());
 		if (save == null) {
 			return null;
 		}
-		SavedChunkImport job = new SavedChunkImport(map, save);
+		SavedChunkImport job = new SavedChunkImport(map, save, portals);
 		map.watchLiveChunks(true);
 		job.thread.start();
 		return job;

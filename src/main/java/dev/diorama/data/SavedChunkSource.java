@@ -1,8 +1,11 @@
 package dev.diorama.data;
 
 import dev.diorama.bake.ChunkSource;
+import dev.diorama.waypoint.Portals;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -23,9 +26,13 @@ public final class SavedChunkSource implements ChunkSource {
 		}
 	};
 
-	public SavedChunkSource(ChunkSource live, SavedChunks save) {
+	/** Told the portals in each chunk read that has any, on the reading thread. */
+	private final Consumer<List<Portals.Spot>> portals;
+
+	public SavedChunkSource(ChunkSource live, SavedChunks save, Consumer<List<Portals.Spot>> portals) {
 		this.live = live;
 		this.save = save;
+		this.portals = portals;
 	}
 
 	@Override
@@ -49,6 +56,10 @@ public final class SavedChunkSource implements ChunkSource {
 				}
 			}
 			snapshot = ChunkSnapshot.fromSave(chunk, around, this.save.level());
+			List<Portals.Spot> spots = Portals.find(snapshot);
+			if (!spots.isEmpty()) {
+				this.portals.accept(spots);
+			}
 		}
 		this.snapshots.put(key, snapshot);
 		return snapshot;

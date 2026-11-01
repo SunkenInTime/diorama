@@ -130,7 +130,8 @@ public final class SettingsScreen extends Screen {
 		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
 		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
 		overlays.toggle("slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
-		// Here rather than with the other map buttons: another row there runs into Done on a short window.
+		// These two here rather than with the other map buttons: another row there runs into Done on a short window.
+		overlays.toggle("map_maps_button", () -> s.mapMapsButton, v -> s.mapMapsButton = v);
 		overlays.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
@@ -145,10 +146,10 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("waypoints_world", () -> s.waypointsInWorld, v -> s.waypointsInWorld = v);
 		waypoints.toggle("deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
+		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
 		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
 		waypoints.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		waypoints.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
-		waypoints.toggle("map_maps_button", () -> s.mapMapsButton, v -> s.mapMapsButton = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],

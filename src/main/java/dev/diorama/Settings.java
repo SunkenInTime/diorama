@@ -104,6 +104,8 @@ public final class Settings {
 	public boolean deathMarkers = true;
 	/** A pin on the bed the player last slept in ({@link dev.diorama.waypoint.Waypoints#watchSleep}). */
 	public boolean bedMarkers = true;
+	/** Pins on the lit portals the map has found ({@link dev.diorama.waypoint.Portals}). */
+	public boolean portalMarkers = false;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
 	/**
 	 * Waypoints further than this many blocks away leave the world and the minimap; the map still
