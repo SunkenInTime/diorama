@@ -362,8 +362,8 @@ public final class BlockLooks {
 				looks.spawnIn[id] = false;
 			}
 			// A mod's block can give a null shape or throw when asked, and under ModernFix, which builds
-			// each state's cache on first use, the same goes for any question that reads the cache. The
-			// block may never be placed, so it counts as a full block that draws its model.
+			// each state's cache on first use, so can anything that reads the cache. The table covers every
+			// block, placed or not, so one that fails counts as a full block and keeps its model's colours.
 			byte kind = SOLID;
 			try {
 				kind = classify(state);
