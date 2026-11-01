@@ -6,6 +6,7 @@ import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.CraftBaker;
 import dev.diorama.bake.CraftBlocks;
+import dev.diorama.bake.ChunkSource;
 import dev.diorama.bake.CraftShadow;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.TileBaker;
@@ -116,7 +117,7 @@ final class CraftPainter {
 		int ppu = Projection.PIXELS_PER_UNIT;
 		boolean surface = view.layer() == TileKey.SURFACE;
 		// Under fog of war a craft mustn't give away tunnels not seen yet.
-		if (!surface && this.map.fogOfWar()) {
+		if ((!surface || this.map.roof() != ChunkSource.NO_ROOF) && this.map.fogOfWar()) {
 			return;
 		}
 		List<Drawn> drawn = new ArrayList<>();

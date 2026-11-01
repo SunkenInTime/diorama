@@ -108,7 +108,7 @@ final class CraftFile {
 			for (int r = 0; r + 1 < this.runs.length; r += 2) {
 				int p = this.runs[r];
 				int length = this.runs[r + 1];
-				if (p < 0 || p >= ids.length || length < 0 || at + length > volume) {
+				if (p < 0 || p >= ids.length || length < 0 || length > volume - at) {
 					return null;
 				}
 				java.util.Arrays.fill(states, at, at + length, ids[p]);

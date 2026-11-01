@@ -101,7 +101,9 @@ public final class Crafts {
 		for (Body body : bodies) {
 			live.add(body.id());
 			Craft craft = this.crafts.computeIfAbsent(body.id(), Craft::new);
-			if (craft.parked) {
+			// What was saved has no body's coordinates, so it's read again before it's placed.
+			boolean back = craft.parked;
+			if (back) {
 				craft.parked = false;
 				this.dirty = true;
 			}
@@ -109,11 +111,12 @@ public final class Crafts {
 			craft.nearSince = -1;
 			// Spread the periodic reads out over ticks, so many crafts don't all copy at once.
 			boolean due = (tick + (craft.id.hashCode() & 0x7FFFFFFF)) % READ_EVERY == 0;
-			if (craft.blocks == null || due) {
+			if (craft.blocks == null || due || back) {
 				Body.Blocks read = body.read(looks);
 				if (read != null && (craft.blocks == null || !read.blocks().looksLike(craft.blocks.blocks(), looks)
 					|| !java.util.Arrays.equals(read.min(), craft.blocks.min()))) {
 					craft.blocks = read;
+					this.dirty = true;
 				}
 			}
 			if (craft.blocks != null && body.pose(craft.blocks.min(), 1, craft.pose)) {
