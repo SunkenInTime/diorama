@@ -125,6 +125,10 @@ public final class GpuTileBaker {
 		}
 		QUEUE.add(job);
 		used = true;
+		// Frames may have stopped while it went in, and they won't see it now.
+		if (dead && QUEUE.remove(job)) {
+			job.fail();
+		}
 	}
 
 	/** Lets frames start on the GPU code, for {@link GpuBakeCheck#open}. */
@@ -217,7 +221,7 @@ public final class GpuTileBaker {
 					// Rays start below the view's limit: the tracer leaves every pixel unknown.
 					job.done(new int[Projection.TILE_PIXELS * Projection.TILE_PIXELS], job.mesh.overlays == null ? null : new byte[Projection.TILE_PIXELS * Projection.TILE_PIXELS], 0, 0);
 					job.free();
-				} else if (job.mesh.traceInstead
+				} else if (GpuBakeCheck.failed() || job.mesh.traceInstead
 					|| job.voxels != null && (job.voxelRows > VOXEL_HEIGHT || (long) (job.opaqueCount + job.waterCount) * 4 > (long) SKY_WIDTH * SKY_HEIGHT)) {
 					// Something the GPU doesn't draw as the tracer does, or more than the textures that
 					// hold its sky occlusion take: trace it. Not the GPU's fault.

@@ -174,6 +174,7 @@ public final class SettingsScreen extends Screen {
 			s.gpuBaking = i == 1;
 			if (s.gpuBaking) {
 				dev.diorama.render.gpu.GpuBakeCheck.retry();
+				this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();
 			}
 		}, SettingsScreen::gpuBakingValue);
 		this.gpuFailedShown = dev.diorama.render.gpu.GpuBakeCheck.failed();

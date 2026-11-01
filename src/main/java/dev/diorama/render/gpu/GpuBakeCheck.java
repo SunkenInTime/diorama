@@ -100,7 +100,7 @@ public final class GpuBakeCheck {
 	 * cut short, so it holds up the frame it lands on by about this long, however thin the budget
 	 * spreads bakes out. Tests that force GPU baking on don't stop for it.
 	 */
-	private static final long MAX_COST = (long) (Double.parseDouble(System.getProperty("diorama.gpuBakeMaxMs", "50")) * 1e6);
+	private static final long MAX_COST = Long.getLong("diorama.gpuBakeMaxMs", 50) * 1_000_000;
 	/** Finished bakes in a row the GPU couldn't draw before giving up on it, once it passed. */
 	private static final int FAILURES_IN_A_ROW = 3;
 
@@ -110,6 +110,8 @@ public final class GpuBakeCheck {
 	private static volatile boolean opened;
 	/** This session's first bakes are unproven, and marked so in the record. */
 	private static boolean unproven;
+	/** The player asked for a new try: {@link #open} forgets this card's saved result. */
+	private static boolean retrying;
 	private static boolean closingHooked;
 	private static int failuresInARow;
 	/** The views, as {@link #mode} and the rest take them. */
@@ -206,6 +208,10 @@ public final class GpuBakeCheck {
 					record.off.put(crashed, new GpuBakeRecord.Entry(Off.CRASHED, record.startingMod));
 				}
 			}
+			if (retrying) {
+				retrying = false;
+				record.off.remove(device);
+			}
 			Off saved = forcedOn() ? null : record.result(device, mod);
 			if (saved != null) {
 				off = saved;
@@ -233,23 +239,30 @@ public final class GpuBakeCheck {
 	private static void proven() {
 		synchronized (LOCK) {
 			if (unproven) {
-				unproven = false;
 				GpuBakeRecord record = GpuBakeRecord.load();
-				record.starting = null;
+				clearMark(record);
 				record.save();
 			}
 		}
 	}
 
-	/** The player turned the setting back on: forgets this card's result and checks it again. */
+	/** Drops this game's mark, leaving one another game in the folder has set since. */
+	private static void clearMark(GpuBakeRecord record) {
+		unproven = false;
+		if (record.startingProcess == ProcessHandle.current().pid()) {
+			record.starting = null;
+		}
+	}
+
+	/**
+	 * The player turned the setting back on: forgets this card's result and checks it again. Before
+	 * the session's first bake the result hasn't been read yet, so that's when it's forgotten.
+	 */
 	public static void retry() {
 		synchronized (LOCK) {
+			retrying = true;
 			if (off == null) {
 				return;
-			}
-			GpuBakeRecord record = GpuBakeRecord.load();
-			if (record.off.remove(GpuTileBaker.device()) != null) {
-				record.save();
 			}
 			off = null;
 			opened = false;
@@ -435,8 +448,7 @@ public final class GpuBakeCheck {
 		GpuBakeRecord record = GpuBakeRecord.load();
 		record.off.put(device, new GpuBakeRecord.Entry(why, modVersion()));
 		if (unproven) {
-			record.starting = null;
-			unproven = false;
+			clearMark(record);
 		}
 		record.save();
 		if (why == Off.TOO_SLOW) {
