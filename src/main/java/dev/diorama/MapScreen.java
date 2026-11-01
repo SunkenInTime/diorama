@@ -399,6 +399,9 @@ public final class MapScreen extends Screen {
 		// Held lights belong to this dimension's map, not one shown from elsewhere.
 		this.viewport.draw(graphics, shown, view, elsewhere ? 0 : overlayBits(session), !elsewhere && Settings.get().claims != Settings.ClaimsShown.OFF,
 			elsewhere ? null : () -> session.lights().draw(graphics, view, a, 1, ServerRules.radarAllowed() && Settings.get().radarOnMap));
+		if (!elsewhere) {
+			session.crafts().draw(graphics, view, a, 1);
+		}
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && (this.draw.active() || Settings.get().drawings != Settings.DrawingsShown.OFF)) {
 			this.draw.drawMap(graphics, this.font, view, drawings.in(this.dimension()), mouseX, mouseY, !this.overControls(mouseX, mouseY));

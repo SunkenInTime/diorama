@@ -21,11 +21,32 @@ public record SurfaceArea(int tileU0, int tileV0, int columns, int rows, @Nullab
 		return surface.index(Math.floorMod(pu, Projection.TILE_PIXELS), Math.floorMod(pv, Projection.TILE_PIXELS));
 	}
 
+	/** How near the camera the nearest thing a surface tile's pixel (pu, pv) shows is, in camera depth, or NaN. */
+	public float near(int pu, int pv) {
+		TileSurface surface = this.at(pu, pv);
+		int i = surface == null ? -1 : index(surface, pu, pv);
+		return i < 0 || surface.near().length == 0 ? Float.NaN : surface.near()[i];
+	}
+
 	/** The ground's world y at map pixel (pu, pv), or NaN. */
 	public float y(int pu, int pv) {
 		TileSurface surface = this.at(pu, pv);
 		int i = surface == null ? -1 : index(surface, pu, pv);
 		return i < 0 ? Float.NaN : surface.y()[i];
+	}
+
+	/** The share of the light at map pixel (pu, pv) that comes straight from the sun, 0..1. */
+	public float sun(int pu, int pv) {
+		TileSurface surface = this.at(pu, pv);
+		int i = surface == null ? -1 : index(surface, pu, pv);
+		return i < 0 ? 0 : (surface.sun()[i] & 0xFF) / 255.0F;
+	}
+
+	/** The ground at map pixel (pu, pv) as the tile would draw it out of the sun, an ABGR pixel; 0 where that isn't known. */
+	public int shaded(int pu, int pv) {
+		TileSurface surface = this.at(pu, pv);
+		int i = surface == null ? -1 : index(surface, pu, pv);
+		return i < 0 ? 0 : surface.albedo()[i];
 	}
 
 	/** Whether the ground at map pixel (pu, pv), which has some, is a top face (else a south one). */
@@ -53,5 +74,18 @@ public record SurfaceArea(int tileU0, int tileV0, int columns, int rows, @Nullab
 		float[] lin = TileBaker.SRGB_TO_LINEAR;
 		int pixel = TileBaker.abgr(style, lin[albedo >> 16 & 0xFF] * scratch[0], lin[albedo >> 8 & 0xFF] * scratch[1], lin[albedo & 0xFF] * scratch[2], alpha * (albedo >>> 24) / 255);
 		return surface.outlined()[i] ? TileBaker.darken(pixel, 1 - style.outline()) : pixel;
+	}
+
+	/** Whether this is the same ground as {@code other}: the same surfaces of the same tiles. */
+	public boolean same(SurfaceArea other) {
+		if (this.tileU0 != other.tileU0 || this.tileV0 != other.tileV0 || this.columns != other.columns || this.rows != other.rows) {
+			return false;
+		}
+		for (int i = 0; i < this.tiles.length; i++) {
+			if (this.tiles[i] != other.tiles[i]) {
+				return false;
+			}
+		}
+		return true;
 	}
 }

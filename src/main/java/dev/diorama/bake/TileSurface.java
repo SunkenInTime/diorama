@@ -1,18 +1,20 @@
 package dev.diorama.bake;
 
 /**
- * What the camera sees at each pixel of the part of a cave slice's tile lights reach, for lights drawn over it: where the
- * ground is, which way it faces, its colour, and what lit it. Made by the tiles' own tracer and
- * lighting, so it matches their pixels.
+ * What the camera sees at each pixel of the part of a tile moving things need, for drawing them
+ * into it: where the ground is, which way it faces, its colour, and what lit it. Made by the
+ * tiles' own tracer and lighting, so it matches their pixels.
  *
  * <p>Per pixel: {@code y} is the ground's world y (its x is the pixel's u, and its z follows from
  * u, v and y), NaN where the map knows nothing; {@code top} whether it's a top face (else a south
- * one); {@code albedo} the pixel as drawn with its light taken out but a side's darkening kept,
- * in sRGB as 0xAARRGGBB with the pixel's alpha, so water keeps its depth and edges their
- * coverage; {@code light}, what lit it there ({@link #caveLight}), so a moving light can light it
- * again; and {@code outlined}, whether the style's outline darkens it.
+ * one); {@code sun}, on a surface tile, the share of its light from the sun, 0..255, 0 where the
+ * world's own blocks shade it, {@code near} the camera depth of the nearest of the pixel's samples, as a tile pixel at a block's edge shows that block even if its middle misses (NaN where none hits), and {@code albedo} the pixel as an ABGR pixel with the sun taken out, 0 on water. On a cave slice, {@code albedo} is the pixel as drawn with its
+ * light taken out but a side's darkening kept, in sRGB as 0xAARRGGBB with the pixel's alpha, so
+ * water keeps its depth and edges their coverage; {@code light}, what lit it there
+ * ({@link #caveLight}), so a moving light can light it again; and {@code outlined}, whether the
+ * style's outline darkens it.
  */
-public record TileSurface(int revision, int x0, int y0, int width, int height, float[] y, boolean[] top, int[] albedo, int[] light, boolean[] outlined) {
+public record TileSurface(int revision, int x0, int y0, int width, int height, float[] y, float[] near, boolean[] top, byte[] sun, int[] albedo, int[] light, boolean[] outlined) {
 	/** The arrays' index for tile pixel (px, py), or -1 outside the part of the tile this covers. */
 	int index(int px, int py) {
 		int x = px - this.x0;

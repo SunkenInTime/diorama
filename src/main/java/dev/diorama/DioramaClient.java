@@ -1,6 +1,8 @@
 package dev.diorama;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.diorama.compat.Contraptions;
+import dev.diorama.craft.Crafts;
 //? if >=1.21.6 {
 import dev.diorama.render.DioramaPipelines;
 //?}
@@ -58,6 +60,7 @@ public final class DioramaClient {
 
 	/** Called once, from the loader's entrypoint. */
 	public static void init() {
+		Crafts.register(Contraptions::bodies);
 		//? if >=1.21.6 {
 		DioramaPipelines.init();
 		//?}

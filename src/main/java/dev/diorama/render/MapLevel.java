@@ -643,15 +643,15 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * What the camera sees at tile pixels (x0, y0) to (x1, y1) of a baked cave slice tile, with
+	 * What the camera sees at tile pixels (x0, y0) to (x1, y1) of a baked tile, with
 	 * what other lights asked for lately and a little around them so a walking light seldom outgrows it. Made on the surface thread, again
 	 * if the light moves out of it or at most every {@link #SURFACE_INTERVAL_MS} if its pixels
 	 * change. Until a new one is ready the last one stands in; null before the first, and for
-	 * tiles that have none (the surface, overviews, under a roof). Render thread.
+	 * tiles that have none (overviews, under a roof). Render thread.
 	 */
 	private @Nullable TileSurface surface(TileKey key, int x0, int y0, int x1, int y1) {
 		MapTile tile = this.tiles.get(key);
-		if (tile == null || key.lod() != 0 || key.layer() == TileKey.SURFACE || this.roofless()) {
+		if (tile == null || key.lod() != 0 || this.roofless()) {
 			return null;
 		}
 		long now = System.currentTimeMillis();

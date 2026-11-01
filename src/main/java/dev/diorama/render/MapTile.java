@@ -31,7 +31,7 @@ public final class MapTile {
 	long pixelsChanged;
 	/** The {@link #pixelsRevision} {@link #claims} was painted for. */
 	int claimsRevision;
-	/** The ground under the tile's pixels, for lights; see {@link MapLevel#surface}. */
+	/** The ground under the tile's pixels, for lights and crafts; see {@link MapLevel#surface}. */
 	@Nullable TileSurface surface;
 	@Nullable CompletableFuture<@Nullable TileSurface> surfacePending;
 	/** The tile pixels (x0, y0, x1, y1) {@link #surfacePending} covers. */
