@@ -5,6 +5,7 @@ import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.bake.GpuMesher;
 import dev.diorama.bake.TileBaker;
+import dev.diorama.render.SavedChunkImport;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -44,7 +45,8 @@ public final class GpuTileBaker {
 	private static final double SHARE = Math.max(0.01, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBakeShare", "0.1"))));
 	/**
 	 * The same for background tiles, which nobody is waiting for: they only draw with no other tile
-	 * queued, out of a smaller budget of their own, so a long fill doesn't weigh on the game.
+	 * queued, out of a smaller budget of their own, so a long fill doesn't weigh on the game. With
+	 * the game paused or the map open they get {@link #SHARE}.
 	 */
 	private static final double BACKGROUND_SHARE = Math.max(0.001, Math.min(1, Double.parseDouble(System.getProperty("diorama.gpuBackgroundShare", "0.03"))));
 	/** About what the tracer takes over a tile. */
@@ -257,7 +259,8 @@ public final class GpuTileBaker {
 		if (lastFrame != 0) {
 			// Never more than a few bakes' worth saved up, so a long pause doesn't buy a burst.
 			budget = Math.min(budget + SHARE * (now - lastFrame), 3 * cost());
-			backgroundBudget = Math.min(backgroundBudget + BACKGROUND_SHARE * (now - lastFrame), cost());
+			double backgroundShare = SavedChunkImport.playing() ? BACKGROUND_SHARE : SHARE;
+			backgroundBudget = Math.min(backgroundBudget + backgroundShare * (now - lastFrame), cost());
 		}
 		lastFrame = now;
 		while (budget >= cost()) {

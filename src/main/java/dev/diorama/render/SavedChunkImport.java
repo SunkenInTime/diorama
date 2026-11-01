@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import dev.diorama.Diorama;
+import dev.diorama.MapScreen;
 import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.TileBaker;
@@ -73,9 +74,9 @@ public final class SavedChunkImport {
 	/** A height to turn a map row into a place in the world, for picking the nearest region. */
 	private static final int TYPICAL_Y = 64;
 	/**
-	 * Tiles drawn at once with the game paused: as many as the map's bakers leave room for. While
-	 * playing it's one, as each worker more costs frame rate and, in the launcher's usual 2 GB, full
-	 * collections, whether the tiles go to the GPU or the tracer.
+	 * Tiles drawn at once with the game paused or the map open: as many as the map's bakers leave
+	 * room for. While playing it's one, as each worker more costs frame rate and, in the launcher's
+	 * usual 2 GB, full collections, whether the tiles go to the GPU or the tracer.
 	 */
 	private static final int WORKERS = Math.max(1, MapLevel.BAKER_COUNT - 1);
 	/**
@@ -340,7 +341,7 @@ public final class SavedChunkImport {
 						try {
 							boolean taken = this.map.bakeFromSave(key, this.source, looks);
 							long nanos = System.nanoTime() - start;
-							if (PACED && !Minecraft.getInstance().isPaused()) {
+							if (PACED && playing()) {
 								this.pause(3 * nanos / 1_000_000);
 							}
 							return new Drawn(key, taken, nanos, null);
@@ -436,7 +437,16 @@ public final class SavedChunkImport {
 
 	/** How many tiles may be drawing right now. */
 	private int workersNow() {
-		return Minecraft.getInstance().isPaused() ? WORKERS : 1;
+		return playing() ? 1 : WORKERS;
+	}
+
+	/**
+	 * Whether the frames are the player's to spend on the game. Not with the game paused, nor on the
+	 * map, which doesn't pause it: the player is looking at what the fill is drawing.
+	 */
+	public static boolean playing() {
+		Minecraft mc = Minecraft.getInstance();
+		return !mc.isPaused() && !(mc.gui.screen() instanceof MapScreen);
 	}
 
 	/** A tile is drawn or needs no drawing: the chunks that were only waiting for it are done. */
