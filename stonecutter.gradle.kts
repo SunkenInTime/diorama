@@ -15,9 +15,13 @@ stonecutter active "26.3"
 // were written against, and what boat.dev's graphics-free VMs can do at speed. 0 is the tracer, 1
 // forces the GPU, and any other value, such as auto, leaves the choice to the game, as for a player.
 subprojects {
-	tasks.matching { it.name.contains("ClientGameTest") }.configureEach {
-		if (this is ProcessForkOptions && System.getenv("DIORAMA_GPU_BAKE") == null) {
-			environment("DIORAMA_GPU_BAKE", "0")
+	tasks.matching { it.name.contains("ClientGameTest") && it is ProcessForkOptions }.configureEach {
+		// As it runs: set while configuring, the whole environment lands in the configuration cache,
+		// and a rerun gets the last run's display.
+		doFirst {
+			if (System.getenv("DIORAMA_GPU_BAKE") == null) {
+				(this as ProcessForkOptions).environment("DIORAMA_GPU_BAKE", "0")
+			}
 		}
 	}
 }
