@@ -49,9 +49,9 @@ public final class DioramaClient {
 
 	private static void changeZoom(int step) {
 		Settings s = Settings.get();
-		int next = Math.max(0, Math.min(Settings.ZOOMS.length - 1, s.minimapZoom + step));
-		if (next != s.minimapZoom) {
-			s.minimapZoom = next;
+		int next = Math.max(0, Math.min(Settings.ZOOMS.length - 1, s.zoomStep() + step));
+		if (next != s.zoomStep()) {
+			s.zoomStep(next);
 			s.save();
 		}
 	}

@@ -31,7 +31,11 @@ public final class Settings {
 	}
 
 	/** Minimap zoom steps, in GUI pixels per block. */
-	public static final double[] ZOOMS = {0.75, 1, 1.5, 2, 3, 4};
+	public static final double[] ZOOMS = {0.1875, 0.25, 0.375, 0.5, 0.75, 1, 1.5, 2, 3, 4};
+	/** Steps added before the ones {@link #minimapZoom} counts from. */
+	private static final int STEPS_BEFORE_OLD_ZOOMS = 4;
+	/** How many steps {@link #minimapZoom} counted. */
+	private static final int OLD_ZOOMS = 6;
 	/** Radar height ranges, in blocks. */
 	public static final int[] RANGES = {16, 32, 64, 128};
 	/** How near a waypoint has to be to show in the world and on the minimap, in blocks; 0 is any distance. */
@@ -61,7 +65,10 @@ public final class Settings {
 	public Corner minimapCorner = Corner.TOP_RIGHT;
 	/** The minimap's size while the enlarge key is held, in percent of {@link #minimapSize}. */
 	public int minimapEnlarged = 200;
-	public int minimapZoom = 3;
+	/** One of {@link #ZOOMS}. Saved as the value, so adding a step doesn't move anyone's zoom. */
+	public double minimapPixelsPerBlock = 2;
+	/** Files from before {@link #minimapPixelsPerBlock} say this instead, a place in the steps as they were. Read once. */
+	private @Nullable Integer minimapZoom;
 	/** How opaque the minimap's map is, in percent. Files from before this setting leave it at 100. */
 	public int minimapOpacity = MAX_OPACITY;
 	public boolean compass = true;
@@ -264,7 +271,22 @@ public final class Settings {
 	}
 
 	public double zoom() {
-		return ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, this.minimapZoom))];
+		return ZOOMS[this.zoomStep()];
+	}
+
+	/** Which of {@link #ZOOMS} the minimap is on. */
+	public int zoomStep() {
+		int nearest = 0;
+		for (int i = 1; i < ZOOMS.length; i++) {
+			if (Math.abs(ZOOMS[i] - this.minimapPixelsPerBlock) < Math.abs(ZOOMS[nearest] - this.minimapPixelsPerBlock)) {
+				nearest = i;
+			}
+		}
+		return nearest;
+	}
+
+	public void zoomStep(int step) {
+		this.minimapPixelsPerBlock = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, step))];
 	}
 
 	/** How opaque the minimap's map is, 0 to 1. */
@@ -368,7 +390,11 @@ public final class Settings {
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		// Hand-edited numbers: snap to a value the settings screen can show.
-		settings.minimapZoom = Math.max(0, Math.min(ZOOMS.length - 1, settings.minimapZoom));
+		if (settings.minimapZoom != null) {
+			settings.zoomStep(STEPS_BEFORE_OLD_ZOOMS + Math.max(0, Math.min(OLD_ZOOMS - 1, settings.minimapZoom)));
+			settings.minimapZoom = null;
+		}
+		settings.zoomStep(settings.zoomStep());
 		settings.minimapSize = snapSize(settings.minimapSize);
 		settings.minimapOpacity = snapOpacity(settings.minimapOpacity);
 		settings.minimapEnlarged = snapEnlarged(settings.minimapEnlarged);

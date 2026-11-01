@@ -187,6 +187,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("screens")) {
 				screens(context, world);
 			}
+			if (tests.contains("minimap-zoom")) {
+				MinimapZoomTest.ruler(context, world);
+			}
 			if (tests.contains("enlarge")) {
 				enlarge(context);
 			}
@@ -5793,7 +5796,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
 			s.minimapSize = 176;
-			s.minimapZoom = 1;
+			s.minimapPixelsPerBlock = 1;
 			s.save();
 		});
 		settle(context, 20);
@@ -5813,7 +5816,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.TOP_RIGHT;
 			s.minimapSize = 96;
-			s.minimapZoom = 3;
+			s.minimapPixelsPerBlock = 2;
 			s.save();
 		});
 		world.getServer().runCommand("effect give @a speed 60 0");
@@ -5831,13 +5834,35 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError(e);
 			}
 			Settings s = Settings.reload();
-			if (s.minimapZoom != 0 || s.radarRange != Settings.RANGES[0] || s.minimapOpacity != Settings.MIN_OPACITY) {
-				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.minimapZoom + ", range " + s.radarRange + ", opacity " + s.minimapOpacity);
+			if (s.zoom() != 0.75 || s.radarRange != Settings.RANGES[0] || s.minimapOpacity != Settings.MIN_OPACITY) {
+				throw new AssertionError("Bad numbers weren't fixed on load: zoom " + s.zoom() + ", range " + s.radarRange + ", opacity " + s.minimapOpacity);
 			}
 			s.minimapOpacity = Settings.MAX_OPACITY;
-			s.minimapZoom = 3;
+			s.minimapPixelsPerBlock = 2;
 			s.radarRange = 32;
 			s.save();
+		});
+		// Files from when the zoom was saved as a place in the steps keep the zoom they had.
+		context.runOnClient(mc -> {
+			java.nio.file.Path file = mc.gameDirectory.toPath().resolve("diorama").resolve("config.json");
+			double[] zooms = {0.75, 1, 1.5, 2, 3, 4};
+			for (int place = 0; place < zooms.length; place++) {
+				try {
+					java.nio.file.Files.writeString(file, "{\"minimapZoom\": " + place + "}");
+				} catch (java.io.IOException e) {
+					throw new AssertionError(e);
+				}
+				Settings s = Settings.reload();
+				if (s.zoom() != zooms[place]) {
+					throw new AssertionError("A saved zoom of " + place + " loaded as " + s.zoom());
+				}
+				s.save();
+				if (Settings.reload().zoom() != zooms[place]) {
+					throw new AssertionError("A saved zoom of " + place + " moved on saving again: " + Settings.get().zoom());
+				}
+			}
+			Settings.get().minimapPixelsPerBlock = 2;
+			Settings.get().save();
 		});
 		// Settings saved before Size was a slider keep their size, and odd sizes snap to the slider's steps.
 		String[][] sizes = {{"\"SMALL\"", "96"}, {"\"MEDIUM\"", "128"}, {"\"LARGE\"", "176"}, {"100", "104"}, {"500", "224"}, {"null", "96"}};
@@ -6213,7 +6238,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Waits until no tile has been baking for a while. */
-	private static void settle(ClientGameTestContext context, int minTicks) {
+	static void settle(ClientGameTestContext context, int minTicks) {
 		context.waitTicks(minTicks);
 		try (WorldPause paused = WorldPause.pause(context)) {
 			int quiet = 0;
