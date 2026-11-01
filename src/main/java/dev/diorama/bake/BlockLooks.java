@@ -338,6 +338,7 @@ public final class BlockLooks {
 		List<float[]> shapes = new ArrayList<>();
 		shapes.add(new float[0]);
 		int failedModels = 0;
+		int failedShapes = 0;
 		//? if >=26.1 {
 		List<BlockStateModelPart> parts = new ArrayList<>();
 		//?} else if >=1.21.5 {
@@ -360,11 +361,21 @@ public final class BlockLooks {
 				looks.spawnOn[id] = false;
 				looks.spawnIn[id] = false;
 			}
-			byte kind = classify(state);
-			looks.kind[id] = kind;
-			if (kind == SOLID) {
-				looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
+			// A mod's block can give a null shape or throw when asked, and under ModernFix, which builds
+			// each state's cache on first use, the same goes for any question that reads the cache. The
+			// block may never be placed, so it counts as a full block that draws its model.
+			byte kind = SOLID;
+			try {
+				kind = classify(state);
+				if (kind == SOLID) {
+					looks.shape[id] = shapeIndex(state, shapeByVoxels, shapeByBoxes, shapes);
+				}
+			} catch (RuntimeException | LinkageError e) {
+				if (failedShapes++ == 0) {
+					Diorama.LOGGER.warn("The shape of {} failed when asked for ({}); such blocks draw as full blocks", state, e.toString());
+				}
 			}
+			looks.kind[id] = kind;
 			if (kind == AIR) {
 				continue;
 			}
@@ -515,6 +526,9 @@ public final class BlockLooks {
 		/*// The model shaper outlives resource reloads; the missing model is baked anew with each.
 		builtFrom = mc.getModelManager().getMissingBlockStateModel();
 		*///?}
+		if (failedShapes > 1) {
+			Diorama.LOGGER.warn("{} block shapes in all failed when asked for", failedShapes);
+		}
 		if (failedModels > 1) {
 			Diorama.LOGGER.warn("{} block models in all failed when asked for their faces", failedModels);
 		}
