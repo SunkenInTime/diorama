@@ -414,6 +414,10 @@ public final class TileBaker {
 		if (this.surfaceDepthOnly) {
 			return;
 		}
+		// Crafts' shadows cross a small block at its base, so a fence doesn't break their edge up by its rows of pixels.
+		if (partial && !this.cave) {
+			this.surfaceY = by;
+		}
 		this.shade(id, x, by, bz, fx, hitY, hitZ, top, partial, 0);
 		this.surfaceShaded = this.cave ? 0 : this.withoutSun();
 		this.surfaceTop = top;
