@@ -1396,7 +1396,7 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/** Whether tiles from the save go to the GPU right now, or to the tracer. */
-	boolean savedTilesOnGpu() {
+	private boolean savedTilesOnGpu() {
 		int view = this.roofless() ? dev.diorama.render.gpu.GpuBakeCheck.UNDER_ROOF : dev.diorama.render.gpu.GpuBakeCheck.SKY;
 		return dev.diorama.render.gpu.GpuBakeCheck.trusted(view) && dev.diorama.render.gpu.GpuTileBaker.keepsUpInBackground();
 	}

@@ -47,8 +47,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Runs on a low-priority thread, a region file at a time, the region nearest what the player
  * is looking at first; a map panned to another region takes over after the tiles in progress. Tiles
- * are drawn on low-priority workers: a few on the GPU, one traced while playing, more with the game
- * paused, and fewer on a machine with few cores. Each tile is merged into the saved map like any bake, and pictures that are already whole stay as
+ * are drawn on a low-priority worker while playing, more with the game paused, and on the GPU once
+ * it has shown it draws them right. Each tile is merged into the saved map like any bake, and pictures that are already whole stay as
  * they are. Progress is kept per chunk in the sky view's folder (a folder for another kind of view
  * starts over), so quitting costs a few tiles, and a later visit only draws what's new. Saves are
  * listed again every so often, so a pre-generation running while the player plays shows up as it
@@ -72,10 +72,12 @@ public final class SavedChunkImport {
 	private static final int MAX_UNWRITTEN = 32;
 	/** A height to turn a map row into a place in the world, for picking the nearest region. */
 	private static final int TYPICAL_Y = 64;
-	/** The most tiles drawn at once: as many as the map's bakers leave room for. */
-	private static final int WORKERS = Integer.getInteger("diorama.savedChunkWorkers", Math.max(1, MapLevel.BAKER_COUNT - 1));
-	/** The same while playing: the GPU does most of the work of a tile, and tracing costs frame rate per worker. */
-	private static final int GPU_WORKERS = Math.min(WORKERS, Integer.getInteger("diorama.savedChunkGpuWorkers", 2));
+	/**
+	 * Tiles drawn at once with the game paused: as many as the map's bakers leave room for. While
+	 * playing it's one, as each worker more costs frame rate and, in the launcher's usual 2 GB, full
+	 * collections, whether the tiles go to the GPU or the tracer.
+	 */
+	private static final int WORKERS = Math.max(1, MapLevel.BAKER_COUNT - 1);
 	/**
 	 * On a machine with few cores even one busy thread costs the game frames, and so does what a
 	 * tile leaves behind for the disk and the collector, so while playing a worker rests three
@@ -434,7 +436,7 @@ public final class SavedChunkImport {
 
 	/** How many tiles may be drawing right now. */
 	private int workersNow() {
-		return Minecraft.getInstance().isPaused() ? WORKERS : this.map.savedTilesOnGpu() ? GPU_WORKERS : 1;
+		return Minecraft.getInstance().isPaused() ? WORKERS : 1;
 	}
 
 	/** A tile is drawn or needs no drawing: the chunks that were only waiting for it are done. */
