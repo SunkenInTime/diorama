@@ -1413,6 +1413,7 @@ public final class MapLevel implements ChunkSource {
 				throw e;
 			} catch (RuntimeException e) {
 				Diorama.LOGGER.warn("Failed to mesh tile {} from the save; tracing it", key, e);
+				this.savedTileGpuFailures.incrementAndGet();
 			}
 		}
 		return TileBaker.bake(key, source, looks, null, false, saved, null);
