@@ -53,7 +53,7 @@ public final class MapLevel implements ChunkSource {
 	private static final long MAX_WAIT_MS = 1500;
 
 	private static final AtomicInteger THREAD_ID = new AtomicInteger();
-	private static final int BAKER_COUNT = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 3));
+	static final int BAKER_COUNT = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 3));
 	private static final ExecutorService BAKERS = Executors.newFixedThreadPool(
 		BAKER_COUNT,
 		task -> {
@@ -114,9 +114,14 @@ public final class MapLevel implements ChunkSource {
 	private final ConcurrentLinkedQueue<TileImage> finished = new ConcurrentLinkedQueue<>();
 	/** Tiles drawn from the world's save, waiting for the render thread to take them. */
 	private final ConcurrentLinkedQueue<SavedTile> fromSave = new ConcurrentLinkedQueue<>();
-	/** The tile {@link SavedChunkImport} is baking, and whether a live bake finished for it since it started. */
-	private volatile @Nullable TileKey savedTileBaking;
-	private volatile boolean savedTileRaced;
+	/** How long a tile from the save waits for the GPU before it's traced instead. */
+	private static final long GPU_WAIT_NANOS = 10_000_000_000L;
+	/** Tiles from the save the GPU couldn't draw in a row before the rest are traced. */
+	private static final int GPU_FAILURES = 3;
+	private final AtomicInteger savedTileGpuFailures = new AtomicInteger();
+	/** The tiles {@link SavedChunkImport} is baking, and those a live bake finished for since it started. */
+	private final Set<TileKey> savedTilesBaking = ConcurrentHashMap.newKeySet();
+	private final Set<TileKey> savedTilesRaced = ConcurrentHashMap.newKeySet();
 	/** Chunks loaded live whose tiles may not be saved yet, while {@link SavedChunkImport} is watching. */
 	private final Set<Long> liveChunks = new HashSet<>();
 	/** Chunks loaded live with their tiles saved, for {@link SavedChunkImport} to take. */
@@ -627,8 +632,8 @@ public final class MapLevel implements ChunkSource {
 		while ((image = this.finished.poll()) != null) {
 			this.bakeFinished(image);
 			// After the image reached the store, so a tile from the save either reads it or hears of it.
-			if (image.key().equals(this.savedTileBaking)) {
-				this.savedTileRaced = true;
+			if (this.savedTilesBaking.contains(image.key())) {
+				this.savedTilesRaced.add(image.key());
 			}
 		}
 		SavedTile savedTile;
@@ -760,7 +765,7 @@ public final class MapLevel implements ChunkSource {
 	private boolean tileFromSave(TileImage image) {
 		TileKey key = image.key();
 		TileStore store = this.store;
-		if (store == null || this.closed || image.generation() != this.generation(key) || this.savedTileRaced || this.inFlight.contains(key)) {
+		if (store == null || this.closed || image.generation() != this.generation(key) || this.savedTilesRaced.contains(key) || this.inFlight.contains(key)) {
 			return false;
 		}
 		MapTile tile = this.tiles.get(key);
@@ -1348,7 +1353,7 @@ public final class MapLevel implements ChunkSource {
 	/**
 	 * Bakes a sky view tile from {@code save} on the calling thread, merged with what's saved like
 	 * any bake, and waits for the render thread to take it. Returns whether it did; see
-	 * {@link #tileFromSave}. One at a time.
+	 * {@link #tileFromSave}. Any thread, one bake per tile at a time.
 	 */
 	boolean bakeFromSave(TileKey key, ChunkSource save, BlockLooks looks) {
 		TileStore store = this.store;
@@ -1358,26 +1363,91 @@ public final class MapLevel implements ChunkSource {
 		// As for a live bake to be saved: the pixels and the spots have to see the same chunks.
 		ChunkSource source = new PinnedSource(save);
 		int generation = this.generation(key);
-		this.savedTileRaced = false;
-		this.savedTileBaking = key;
+		this.savedTilesRaced.remove(key);
+		this.savedTilesBaking.add(key);
 		try {
 			int[] saved = store.read(key);
-			TileImage image = TileBaker.bake(key, source, looks, null, false, saved, null);
+			TileImage image = this.drawFromSave(key, source, looks, saved);
 			image = image.withSpots(TileSpots.pick(image, source, looks, false, store.spots(key))).withGeneration(generation);
 			CompletableFuture<Boolean> taken = new CompletableFuture<>();
 			this.fromSave.add(new SavedTile(image, taken));
-			while (!this.closed) {
-				try {
-					return taken.get(50, java.util.concurrent.TimeUnit.MILLISECONDS);
-				} catch (java.util.concurrent.TimeoutException e) {
-					// The render thread takes it on its next update.
-				} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
-					return false;
-				}
-			}
-			return false;
+			Boolean accepted = this.awaitWhileOpen(taken);
+			return accepted != null && accepted;
 		} finally {
-			this.savedTileBaking = null;
+			this.savedTilesBaking.remove(key);
 		}
+	}
+
+	/** How many tiles are in memory waiting for the disk, which a fill must not outrun. */
+	int unwrittenTiles() {
+		TileStore store = this.store;
+		return store == null ? 0 : store.unwrittenTiles();
+	}
+
+	/** Whether tiles from the save go to the GPU right now, or to the tracer. */
+	boolean savedTilesOnGpu() {
+		int view = this.roofless() ? dev.diorama.render.gpu.GpuBakeCheck.UNDER_ROOF : dev.diorama.render.gpu.GpuBakeCheck.SKY;
+		return this.savedTileGpuFailures.get() < GPU_FAILURES && dev.diorama.render.gpu.GpuBakeCheck.trusted(view)
+			&& dev.diorama.render.gpu.GpuTileBaker.keepsUpInBackground();
+	}
+
+	/** A sky view tile from the save: on the GPU once this GPU has shown it draws them right, else traced. */
+	private TileImage drawFromSave(TileKey key, ChunkSource source, BlockLooks looks, int @Nullable [] saved) {
+		int view = this.roofless() ? dev.diorama.render.gpu.GpuBakeCheck.UNDER_ROOF : dev.diorama.render.gpu.GpuBakeCheck.SKY;
+		if (this.savedTilesOnGpu()) {
+			try {
+				CompletableFuture<dev.diorama.render.gpu.GpuTileBaker.Result> drawn = new CompletableFuture<>();
+				Runnable takeBack = dev.diorama.render.gpu.GpuTileBaker.submitBackground(dev.diorama.bake.GpuMesher.build(key, source, looks, false, null), drawn::complete);
+				dev.diorama.render.gpu.GpuTileBaker.Result result = this.awaitGpu(drawn, view);
+				if (result == null) {
+					takeBack.run();
+				}
+				if (result != null && result.pixels() != null) {
+					this.savedTileGpuFailures.set(0);
+					return TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+				}
+				if (result != null && !result.declined()) {
+					this.savedTileGpuFailures.incrementAndGet();
+				}
+			} catch (BlockLooks.StatesRenumbered e) {
+				throw e;
+			} catch (RuntimeException e) {
+				Diorama.LOGGER.warn("Failed to mesh tile {} from the save; tracing it", key, e);
+			}
+		}
+		return TileBaker.bake(key, source, looks, null, false, saved, null);
+	}
+
+	/**
+	 * A GPU bake's answer, or null if it stops being worth waiting for: GPU baking was turned off,
+	 * or the frames that draw it aren't coming, and a tile from the save has nothing to wait for but
+	 * the tracer.
+	 */
+	private dev.diorama.render.gpu.GpuTileBaker.@Nullable Result awaitGpu(CompletableFuture<dev.diorama.render.gpu.GpuTileBaker.Result> drawn, int view) {
+		long deadline = System.nanoTime() + GPU_WAIT_NANOS;
+		while (!this.closed && dev.diorama.render.gpu.GpuBakeCheck.trusted(view) && System.nanoTime() < deadline) {
+			try {
+				return drawn.get(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+			} catch (java.util.concurrent.TimeoutException e) {
+				// It comes with a coming frame.
+			} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
+				return null;
+			}
+		}
+		return null;
+	}
+
+	/** What the render thread answers, or null once the map closes, when it may never answer. */
+	private <T> @Nullable T awaitWhileOpen(CompletableFuture<T> answer) {
+		while (!this.closed) {
+			try {
+				return answer.get(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+			} catch (java.util.concurrent.TimeoutException e) {
+				// It comes with a coming frame.
+			} catch (InterruptedException | java.util.concurrent.ExecutionException e) {
+				return null;
+			}
+		}
+		return null;
 	}
 }

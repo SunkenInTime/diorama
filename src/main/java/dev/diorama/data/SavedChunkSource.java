@@ -7,11 +7,12 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What a bake from the world's save reads: the map's own snapshot where it has one, since that's
- * the live world and the save can be behind it, else the chunk as saved. One thread only.
+ * the live world and the save can be behind it, else the chunk as saved. Any thread: reads take
+ * turns, which they would on the server's one storage thread anyway, and bakes share what's read.
  */
 public final class SavedChunkSource implements ChunkSource {
 	/** Snapshots kept between tiles: neighbouring tiles read many of the same chunks. */
-	private static final int CACHED_SNAPSHOTS = 768;
+	private static final int CACHED_SNAPSHOTS = Runtime.getRuntime().maxMemory() > 3L << 30 ? 1536 : 512;
 
 	private final ChunkSource live;
 	private final SavedChunks save;
@@ -30,9 +31,10 @@ public final class SavedChunkSource implements ChunkSource {
 	@Override
 	public @Nullable ChunkSnapshot chunk(int chunkX, int chunkZ) {
 		ChunkSnapshot live = this.live.chunk(chunkX, chunkZ);
-		if (live != null) {
-			return live;
-		}
+		return live != null ? live : this.saved(chunkX, chunkZ);
+	}
+
+	private synchronized @Nullable ChunkSnapshot saved(int chunkX, int chunkZ) {
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		if (this.snapshots.containsKey(key)) {
 			return this.snapshots.get(key);
@@ -52,8 +54,31 @@ public final class SavedChunkSource implements ChunkSource {
 		return snapshot;
 	}
 
+	@Override
+	public int topBelow(int chunkX, int chunkZ, int ceiling) {
+		ChunkSnapshot live = this.live.chunk(chunkX, chunkZ);
+		if (live != null) {
+			return live.topBelow(ceiling);
+		}
+		int top;
+		synchronized (this) {
+			top = this.save.top(chunkX, chunkZ);
+		}
+		if (top == Integer.MIN_VALUE || top < ceiling) {
+			return top == Integer.MIN_VALUE ? top : top + 1;
+		}
+		// Taller than the ceiling: which of its blocks stand below it takes the chunk itself.
+		ChunkSnapshot chunk = this.chunk(chunkX, chunkZ);
+		return chunk == null ? Integer.MIN_VALUE : chunk.topBelow(ceiling);
+	}
+
+	/** Forgets how tall a region's chunks are: its file changed. */
+	public synchronized void forgetTops(long region) {
+		this.save.forgetTops(region);
+	}
+
 	/** Lets go of everything read: the save may have moved on, and between jobs it's only memory. */
-	public void clear() {
+	public synchronized void clear() {
 		this.snapshots.clear();
 		this.save.clear();
 	}

@@ -324,10 +324,7 @@ public final class TileBaker {
 		int top = Integer.MIN_VALUE;
 		for (int cx = x0 - 2; cx <= x1; cx++) {
 			for (int cz = z0; cz <= z1 + 1; cz++) {
-				ChunkSnapshot chunk = source.chunk(cx, cz);
-				if (chunk != null) {
-					top = Math.max(top, chunk.topBelow(ceiling));
-				}
+				top = Math.max(top, source.topBelow(cx, cz, ceiling));
 			}
 		}
 		return top == Integer.MIN_VALUE ? ceiling : Math.min(ceiling, top);

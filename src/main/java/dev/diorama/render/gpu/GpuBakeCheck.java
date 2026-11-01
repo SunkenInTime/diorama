@@ -127,6 +127,15 @@ public final class GpuBakeCheck {
 	}
 
 	/**
+	 * Whether tiles of a {@code view} may go to the GPU without being checked, for bakes that aren't
+	 * made to read the same chunks twice: GPU baking is on and this GPU drew this view right, with
+	 * overlays or without. Until then such a bake traces, and the map's own bakes do the checking.
+	 */
+	public static boolean trusted(int view) {
+		return wanted() && !failed() && (check(view, false).passed || check(view, true).passed);
+	}
+
+	/**
 	 * How the next bake of a {@code view} ({@link #SKY}, {@link #CAVE} or {@link #UNDER_ROOF}) runs,
 	 * with fog of war and overlays or not. A {@link Mode#CHECK} must be answered with {@link #compare} or {@link #undrawn},
 	 * exactly once, with the same kind, and its two bakes must read the same chunks.

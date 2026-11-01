@@ -14,7 +14,11 @@ import org.jspecify.annotations.Nullable;
 public final class PinnedSource implements ChunkSource {
 	private final ChunkSource live;
 	private final Map<Long, @Nullable ChunkSnapshot> chunks = new HashMap<>();
+	private final Map<Top, Integer> tops = new HashMap<>();
 	private final int topY;
+
+	private record Top(int chunkX, int chunkZ, int ceiling) {
+	}
 
 	public PinnedSource(ChunkSource live) {
 		this.live = live;
@@ -30,6 +34,12 @@ public final class PinnedSource implements ChunkSource {
 		ChunkSnapshot chunk = this.live.chunk(chunkX, chunkZ);
 		this.chunks.put(key, chunk);
 		return chunk;
+	}
+
+	/** Pinned apart from the chunks, as the source may answer this without loading them. */
+	@Override
+	public int topBelow(int chunkX, int chunkZ, int ceiling) {
+		return this.tops.computeIfAbsent(new Top(chunkX, chunkZ, ceiling), top -> this.live.topBelow(chunkX, chunkZ, ceiling));
 	}
 
 	@Override

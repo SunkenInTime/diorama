@@ -15,14 +15,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -38,9 +45,10 @@ import org.jspecify.annotations.Nullable;
  * {@link SavedChunks}). Only the sky view: reading cave slices from the save would show caves the
  * player never found, so those keep showing only what the player has been near.
  *
- * <p>Runs on one low-priority thread, a region file at a time, the region nearest what the player
- * is looking at first; a map panned to another region takes over after the tile in progress. Each
- * tile is merged into the saved map like any bake, and pictures that are already whole stay as
+ * <p>Runs on a low-priority thread, a region file at a time, the region nearest what the player
+ * is looking at first; a map panned to another region takes over after the tiles in progress. Tiles
+ * are drawn on low-priority workers: a few on the GPU, one traced while playing, more with the game
+ * paused, and fewer on a machine with few cores. Each tile is merged into the saved map like any bake, and pictures that are already whole stay as
  * they are. Progress is kept per chunk in the sky view's folder (a folder for another kind of view
  * starts over), so quitting costs a few tiles, and a later visit only draws what's new. Saves are
  * listed again every so often, so a pre-generation running while the player plays shows up as it
@@ -57,15 +65,30 @@ public final class SavedChunkImport {
 	 */
 	private static final long RETRY_MS = 30_000;
 	private static final long BUSY_WAIT_MS = 250;
-	/** Tiles are baked in columns this many tiles wide, north to south, so chunks read for one tile serve the next. */
-	private static final int STRIP_TILES = 4;
+	/** Tiles a fill may leave waiting for the disk, at a megabyte or so each. */
+	private static final int MAX_UNWRITTEN = 32;
 	/** A height to turn a map row into a place in the world, for picking the nearest region. */
 	private static final int TYPICAL_Y = 64;
+	/** The most tiles drawn at once: as many as the map's bakers leave room for. */
+	private static final int WORKERS = Integer.getInteger("diorama.savedChunkWorkers", Math.max(1, MapLevel.BAKER_COUNT - 1));
+	/** The same while playing: the GPU does most of the work of a tile, and tracing costs frame rate per worker. */
+	private static final int GPU_WORKERS = Math.min(WORKERS, Integer.getInteger("diorama.savedChunkGpuWorkers", 2));
+	/**
+	 * On a machine with few cores even one busy thread costs the game frames, so while playing a
+	 * worker rests as long as its tile took.
+	 */
+	private static final boolean PACED = MapLevel.BAKER_COUNT == 1;
 
 	private final MapLevel map;
 	private final SavedChunks save;
 	private final SavedChunkSource source;
 	private final Thread thread;
+	private final ExecutorService workers = Executors.newFixedThreadPool(WORKERS, task -> {
+		Thread thread = new Thread(task, "diorama-saved-chunks-worker");
+		thread.setDaemon(true);
+		thread.setPriority(Thread.MIN_PRIORITY);
+		return thread;
+	});
 	private final CountDownLatch stop = new CountDownLatch(1);
 	private volatile boolean idle;
 	private volatile boolean rescanAsked;
@@ -77,6 +100,8 @@ public final class SavedChunkImport {
 	/** The save's chunks by {@link SavedChunks#regionKey}, as of the last listing; see {@link SavedChunks#scan}. */
 	private Map<Long, int[]> regions = Map.of();
 	private long lastScan;
+	/** When the last listing started, in seconds: chunk heights are at least this recent. */
+	private int scannedAt;
 	private long lastSave;
 	/** Regions with chunks to draw, as of the last listing. */
 	private final Set<Long> pending = new HashSet<>();
@@ -175,6 +200,7 @@ public final class SavedChunkImport {
 			}
 			stopped = this.stopped();
 		}
+		this.workers.shutdown();
 		if (this.progress != null) {
 			this.progress.saveIfChanged();
 		}
@@ -209,7 +235,14 @@ public final class SavedChunkImport {
 			this.idle = false;
 			this.rescanAsked = false;
 			this.lastScan = now;
+			this.scannedAt = (int) (now / 1000);
+			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
+			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
+				if (!Arrays.equals(region.getValue(), before.get(region.getKey()))) {
+					this.source.forgetTops(region.getKey());
+				}
+			}
 			this.pending.clear();
 			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
 				if (progress.hasWork(region.getKey(), region.getValue())) {
@@ -266,10 +299,10 @@ public final class SavedChunkImport {
 
 	/** Draws a region, or as much of it as it can before something else needs doing. */
 	private void draw(long region, BlockLooks looks, Path folder, Progress progress) {
-		// Everything read from here on is at least this recent, which is what makes a tile drawn
-		// below good enough for a chunk saved before now, here or in the region next door.
+		// Everything read from here on, heights too, is at least this recent, which is what makes a
+		// tile drawn below good enough for a chunk saved before then, here or in the region next door.
 		this.source.clear();
-		int readSince = (int) (System.currentTimeMillis() / 1000);
+		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
 		Plan plan = this.plans.get(region);
 		if (plan == null) {
 			plan = this.plan(region, progress);
@@ -279,48 +312,79 @@ public final class SavedChunkImport {
 			this.plans.put(region, plan);
 		}
 		List<TileKey> retry = new ArrayList<>();
-		while (!plan.order.isEmpty()) {
-			if (this.stopped() || !folder.equals(this.map.importFolder())) {
-				return;
+		CompletionService<Drawn> drawing = new ExecutorCompletionService<>(this.workers);
+		int running = 0;
+		boolean leaving = false;
+		RuntimeException failure = null;
+		while (running > 0 || !leaving && !plan.order.isEmpty()) {
+			leaving |= this.stopped() || !folder.equals(this.map.importFolder());
+			while (!leaving && running < this.workersNow() && !plan.order.isEmpty() && !this.save.serverBehind() && this.map.unwrittenTiles() < MAX_UNWRITTEN) {
+				Long nearest = this.nearestPending();
+				if (nearest != null && nearest != region) {
+					// Looking somewhere else now. The plan keeps its place for later.
+					leaving = true;
+					break;
+				}
+				TileKey key = plan.order.remove(plan.order.size() - 1);
+				if (this.needsDrawing(key, plan.tiles.get(key), plan, progress)) {
+					drawing.submit(() -> {
+						long start = System.nanoTime();
+						try {
+							boolean taken = this.map.bakeFromSave(key, this.source, looks);
+							long nanos = System.nanoTime() - start;
+							if (PACED && !Minecraft.getInstance().isPaused()) {
+								this.pause(nanos / 1_000_000);
+							}
+							return new Drawn(key, taken, nanos, null);
+						} catch (RuntimeException e) {
+							return new Drawn(key, false, 0, e);
+						}
+					});
+					running++;
+				} else {
+					this.tileDone(key, plan, progress);
+				}
 			}
-			if (this.save.serverBehind()) {
-				this.pause(BUSY_WAIT_MS);
+			if (running == 0) {
+				if (!leaving && !plan.order.isEmpty()) {
+					this.pause(BUSY_WAIT_MS);
+				}
 				continue;
 			}
-			Long nearest = this.nearestPending();
-			if (nearest != null && nearest != region) {
-				// Looking somewhere else now. The plan keeps its place for later.
-				plan.order.addAll(retry);
+			Drawn done;
+			try {
+				done = drawing.take().get();
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
 				return;
+			} catch (ExecutionException e) {
+				// The worker catches what a tile throws: this is something else, and nothing to wait on.
+				throw new CompletionException(e.getCause());
 			}
-			TileKey key = plan.order.remove(plan.order.size() - 1);
-			Set<Long> chunks = plan.tiles.get(key);
-			if (this.needsDrawing(key, chunks, plan, progress)) {
-				long start = System.nanoTime();
-				boolean taken = this.map.bakeFromSave(key, this.source, looks);
-				if (this.stopped()) {
-					// Reads were cut short, so these chunks may not be in the tile.
-					return;
-				}
-				if (!taken) {
-					retry.add(key);
-					continue;
-				}
-				this.drawNanos += System.nanoTime() - start;
-				this.drawnCount++;
-				this.drawn.put(key, readSince);
+			running--;
+			if (done.failure() != null && failure == null) {
+				failure = done.failure();
+				leaving = true;
 			}
-			for (long chunk : chunks) {
-				if (plan.waiting.merge(chunk, -1, Integer::sum) == 0) {
-					int cx = (int) (chunk >> 32);
-					int cz = (int) chunk;
-					progress.mark(cx >> 5, cz >> 5, index(cx, cz), plan.times.get(chunk));
-				}
+			if (this.stopped()) {
+				// Reads were cut short, so its chunks may not be in the tile.
+				continue;
 			}
-			if (System.currentTimeMillis() - this.lastSave > SAVE_PROGRESS_MS) {
-				progress.saveIfChanged();
-				this.lastSave = System.currentTimeMillis();
+			if (!done.taken()) {
+				retry.add(done.key());
+				continue;
 			}
+			this.drawNanos += done.nanos();
+			this.drawnCount++;
+			this.drawn.put(done.key(), readSince);
+			this.tileDone(done.key(), plan, progress);
+		}
+		if (leaving) {
+			plan.order.addAll(retry);
+			if (failure != null) {
+				throw failure;
+			}
+			return;
 		}
 		if (!retry.isEmpty()) {
 			plan.order.addAll(retry);
@@ -331,6 +395,30 @@ public final class SavedChunkImport {
 		this.pending.remove(region);
 		this.heldUntil.remove(region);
 		progress.saveIfChanged();
+	}
+
+	/** How many tiles may be drawing right now. */
+	private int workersNow() {
+		return Minecraft.getInstance().isPaused() ? WORKERS : this.map.savedTilesOnGpu() ? GPU_WORKERS : 1;
+	}
+
+	/** A tile is drawn or needs no drawing: the chunks that were only waiting for it are done. */
+	private void tileDone(TileKey key, Plan plan, Progress progress) {
+		for (long chunk : plan.tiles.get(key)) {
+			if (plan.waiting.merge(chunk, -1, Integer::sum) == 0) {
+				int cx = (int) (chunk >> 32);
+				int cz = (int) chunk;
+				progress.mark(cx >> 5, cz >> 5, index(cx, cz), plan.times.get(chunk));
+			}
+		}
+		if (System.currentTimeMillis() - this.lastSave > SAVE_PROGRESS_MS) {
+			progress.saveIfChanged();
+			this.lastSave = System.currentTimeMillis();
+		}
+	}
+
+	/** A worker's tile, whether the map took it, how long it took, and what stopped it if anything did. */
+	private record Drawn(TileKey key, boolean taken, long nanos, @Nullable RuntimeException failure) {
 	}
 
 	/**
@@ -388,8 +476,9 @@ public final class SavedChunkImport {
 			}
 		}
 		plan.order.addAll(plan.tiles.keySet());
-		// Taken from the end: columns of tiles west to east, each north to south.
-		plan.order.sort(Comparator.<TileKey>comparingInt(key -> Math.floorDiv(key.tileU(), STRIP_TILES)).thenComparingInt(TileKey::tileV).thenComparingInt(TileKey::tileU).reversed());
+		// Taken from the end: one column of tiles after another, west to east, each north to south, so
+		// the chunks read for a tile serve the tiles beside it.
+		plan.order.sort(Comparator.comparingInt(TileKey::tileU).thenComparingInt(TileKey::tileV).reversed());
 		return plan;
 	}
 

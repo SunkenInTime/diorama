@@ -70,8 +70,15 @@ import org.jspecify.annotations.Nullable;
  */
 public final class SavedChunks {
 	private static final Pattern REGION_FILE = Pattern.compile("r\\.(-?\\d{1,8})\\.(-?\\d{1,8})\\.mca");
-	/** Chunks kept between reads: drawing a tile reads the same chunks over again for their biomes. */
-	private static final int CACHED_CHUNKS = 1024;
+	/**
+	 * Chunks kept between reads: with memory to spare, enough for the two columns of tiles nearest,
+	 * so a column drawn after the last reads no chunk twice, and for the biomes round each. In the
+	 * launcher's usual 2 GB they'd push the game into long collections, and one column has to do.
+	 */
+	private static final int CACHED_CHUNKS = Runtime.getRuntime().maxMemory() > 3L << 30 ? 2048 : 768;
+	/** In {@link #tops}: this chunk's top isn't known yet, or it has nothing finished to draw. */
+	private static final short UNKNOWN = Short.MIN_VALUE;
+	private static final short NONE = Short.MIN_VALUE + 1;
 	/** A server tick has 50 ms; past this the game is close to slowing down. */
 	private static final long SERVER_BEHIND_NANOS = 40_000_000;
 
@@ -89,6 +96,8 @@ public final class SavedChunks {
 			return this.size() > CACHED_CHUNKS;
 		}
 	};
+	/** Each chunk's highest block by {@link #regionKey}, indexed {@code (z << 5) | x}; see {@link #top}. */
+	private final Map<Long, short[]> tops = new HashMap<>();
 	/** Set when the map stops reading: reads waiting on a server that's shutting down give up. */
 	private volatile boolean closed;
 
@@ -233,6 +242,32 @@ public final class SavedChunks {
 	 * or null if the save has none. Much cheaper than {@link #read}.
 	 */
 	public @Nullable Summary summary(int chunkX, int chunkZ) {
+		Summary summary = this.summarize(chunkX, chunkZ);
+		short top = summary == null || !summary.finished() || summary.maxY() <= this.level.getMinY() ? NONE : (short) summary.maxY();
+		this.tops.computeIfAbsent(regionKey(chunkX >> 5, chunkZ >> 5), k -> {
+			short[] tops = new short[1024];
+			java.util.Arrays.fill(tops, UNKNOWN);
+			return tops;
+		})[((chunkZ & 31) << 5) | (chunkX & 31)] = top;
+		return summary;
+	}
+
+	/**
+	 * The chunk's highest block, or {@code Integer.MIN_VALUE} if it has nothing finished to draw.
+	 * Bakes ask this of every chunk that could reach into a tile, far more than they read, so the
+	 * answer is kept until {@link #forgetTops}.
+	 */
+	public int top(int chunkX, int chunkZ) {
+		short[] tops = this.tops.get(regionKey(chunkX >> 5, chunkZ >> 5));
+		short top = tops == null ? UNKNOWN : tops[((chunkZ & 31) << 5) | (chunkX & 31)];
+		if (top == UNKNOWN) {
+			this.summary(chunkX, chunkZ);
+			top = this.tops.get(regionKey(chunkX >> 5, chunkZ >> 5))[((chunkZ & 31) << 5) | (chunkX & 31)];
+		}
+		return top == NONE ? Integer.MIN_VALUE : top;
+	}
+
+	private @Nullable Summary summarize(int chunkX, int chunkZ) {
 		ChunkPos pos = new ChunkPos(chunkX, chunkZ);
 		CollectFields fields = new CollectFields(
 			new FieldSelector(IntTag.TYPE, "DataVersion"),
@@ -300,6 +335,11 @@ public final class SavedChunks {
 			this.cache.put(key, chunk);
 		}
 		return chunk;
+	}
+
+	/** Forgets the region's chunk tops: its file changed. */
+	public void forgetTops(long region) {
+		this.tops.remove(region);
 	}
 
 	/** Lets go of every chunk kept. */
