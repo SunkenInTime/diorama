@@ -141,10 +141,12 @@ public final class Settings {
 	 */
 	public Quality quality = Quality.FANCY;
 	/**
-	 * Experimental: bake map tiles on the graphics card. Off until the player turns it on; the
-	 * first tiles are checked against the tracer, which takes over again if they don't match.
+	 * Bakes map tiles on the graphics card. The first tiles are checked against the tracer, which
+	 * takes over by itself if they don't match, the card is too slow or the GPU code fails.
 	 */
-	public boolean gpuBaking = false;
+	public boolean gpuBaking = true;
+	/** How many of the old defaults {@link #load} has moved this file past. */
+	public int defaultsMoved = 0;
 	public boolean chunkGrid = false;
 	public boolean slimeChunks = false;
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
@@ -318,8 +320,16 @@ public final class Settings {
 				Diorama.LOGGER.error("Couldn't read settings from {}; using defaults", file, e);
 			}
 		}
+		boolean read = settings != null;
 		if (settings == null) {
 			settings = new Settings();
+		}
+		// GPU baking used to be off unless turned on, and every file saved since says so, whether
+		// the player chose that or not. It turns on once; off from here on is the player's choice.
+		boolean moved = settings.defaultsMoved < 1;
+		if (moved) {
+			settings.gpuBaking = true;
+			settings.defaultsMoved = 1;
 		}
 		if (settings.spawnSpots == null) {
 			settings.spawnSpots = SpawnSpots.OFF;
@@ -368,6 +378,11 @@ public final class Settings {
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
 		settings.apply();
+		// Written now, so the file says it moved even if the player never changes a setting. One that
+		// couldn't be read stays as it is, for the player to mend.
+		if (moved && read) {
+			settings.save();
+		}
 		return settings;
 	}
 

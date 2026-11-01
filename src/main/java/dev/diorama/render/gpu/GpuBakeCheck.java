@@ -16,7 +16,7 @@ import net.fabricmc.loader.api.FabricLoader;
 *///?}
 
 /**
- * Whether a bake goes to the GPU. The player turns GPU baking on in the settings
+ * Whether a bake goes to the GPU. It does unless the player turns GPU baking off in the settings
  * ({@code DIORAMA_GPU_BAKE=1} or {@code 0} forces it for tests). Before the map shows any GPU tile,
  * the first few are also traced and the two compared: a graphics driver that draws them differently
  * turns GPU baking off, so it can't spoil a map. So does a card too slow to bake without the
@@ -161,10 +161,10 @@ public final class GpuBakeCheck {
 
 	/** Whether GPU baking is asked for, by the setting or a test. */
 	public static boolean wanted() {
-		if (FORCED != null && !FORCED.isEmpty()) {
-			return "1".equals(FORCED);
+		if ("0".equals(FORCED)) {
+			return false;
 		}
-		return Settings.get().gpuBaking;
+		return forcedOn() || Settings.get().gpuBaking;
 	}
 
 	/** Whether GPU baking turned itself off, this session or from the saved result. */
