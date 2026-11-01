@@ -65,6 +65,8 @@ public final class SavedChunkImport {
 	 */
 	private static final long RETRY_MS = 30_000;
 	private static final long BUSY_WAIT_MS = 250;
+	/** How full the heap may be for a tile to start. */
+	private static final double MAX_HEAP_SHARE = 0.9;
 	/** Tiles a fill may leave waiting for the disk, at a megabyte or so each. */
 	private static final int MAX_UNWRITTEN = 32;
 	/** A height to turn a map row into a place in the world, for picking the nearest region. */
@@ -319,7 +321,8 @@ public final class SavedChunkImport {
 		RuntimeException failure = null;
 		while (running > 0 || !leaving && !plan.order.isEmpty()) {
 			leaving |= this.stopped() || !folder.equals(this.map.importFolder());
-			while (!leaving && running < this.workersNow() && !plan.order.isEmpty() && !this.save.serverBehind() && this.map.unwrittenTiles() < MAX_UNWRITTEN) {
+			while (!leaving && running < this.workersNow() && !plan.order.isEmpty() && !this.save.serverBehind()
+				&& this.map.unwrittenTiles() < MAX_UNWRITTEN && !memoryTight()) {
 				Long nearest = this.nearestPending();
 				if (nearest != null && nearest != region) {
 					// Looking somewhere else now. The plan keeps its place for later.
@@ -396,6 +399,12 @@ public final class SavedChunkImport {
 		this.pending.remove(region);
 		this.heldUntil.remove(region);
 		progress.saveIfChanged();
+	}
+
+	/** Whether the heap is nearly full: another tile now could tip the game into a long collection. */
+	private static boolean memoryTight() {
+		Runtime runtime = Runtime.getRuntime();
+		return runtime.totalMemory() - runtime.freeMemory() > runtime.maxMemory() * MAX_HEAP_SHARE;
 	}
 
 	/** How many tiles may be drawing right now. */
