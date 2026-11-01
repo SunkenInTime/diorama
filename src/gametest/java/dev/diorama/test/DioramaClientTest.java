@@ -5682,6 +5682,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (Settings.reload().gpuBaking) {
 					throw new AssertionError("GPU baking turned off by the player came back on");
 				}
+				java.nio.file.Files.writeString(file, "{ a typo");
+				Settings.reload();
+				if (!java.nio.file.Files.readString(file).equals("{ a typo")) {
+					throw new AssertionError("A settings file that couldn't be read was overwritten");
+				}
 				java.nio.file.Files.writeString(file, kept);
 				Settings.reload();
 			} catch (java.io.IOException e) {

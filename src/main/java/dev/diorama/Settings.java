@@ -320,6 +320,7 @@ public final class Settings {
 				Diorama.LOGGER.error("Couldn't read settings from {}; using defaults", file, e);
 			}
 		}
+		boolean read = settings != null;
 		if (settings == null) {
 			settings = new Settings();
 		}
@@ -377,8 +378,9 @@ public final class Settings {
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);
 		settings.apply();
-		// Written now, so the file says it moved even if the player never changes a setting.
-		if (moved && Files.isRegularFile(file)) {
+		// Written now, so the file says it moved even if the player never changes a setting. One that
+		// couldn't be read stays as it is, for the player to mend.
+		if (moved && read) {
 			settings.save();
 		}
 		return settings;
