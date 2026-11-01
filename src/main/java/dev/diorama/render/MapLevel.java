@@ -1530,7 +1530,10 @@ public final class MapLevel implements ChunkSource {
 				}
 				if (result != null && result.pixels() != null) {
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(true);
-					return TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+					// The check may have failed this GPU while the tile was out.
+					if (dev.diorama.render.gpu.GpuBakeCheck.trusted(view)) {
+						return TileBaker.gpuImage(key, result.pixels(), saved, result.info());
+					}
 				}
 				if (result != null && !result.declined()) {
 					dev.diorama.render.gpu.GpuBakeCheck.drawn(false);
