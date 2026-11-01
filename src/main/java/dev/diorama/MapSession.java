@@ -405,14 +405,21 @@ public final class MapSession {
 		return Minecraft.getInstance();
 	}
 
-	/** Starts or stops filling in from the save with the setting. */
+	/**
+	 * Starts or stops drawing from the save: filling the map in, with the setting, and redrawing what
+	 * a map remembers, which every map needs, but only as far as it remembers without the setting.
+	 */
 	private void updateSavedChunks(Minecraft mc) {
-		boolean on = Settings.get().mapSavedChunks && this.mainMap && mc.getSingleplayerServer() != null;
+		boolean fill = Settings.get().mapSavedChunks && this.mainMap;
+		boolean on = (fill || this.map.memory() != null) && mc.getSingleplayerServer() != null;
 		if (on && this.savedChunks == null) {
 			this.savedChunks = SavedChunkImport.start(this.map, this.level);
 		} else if (!on && this.savedChunks != null) {
 			this.savedChunks.stop();
 			this.savedChunks = null;
+		}
+		if (this.savedChunks != null) {
+			this.savedChunks.onlyRemembered(!fill);
 		}
 	}
 
