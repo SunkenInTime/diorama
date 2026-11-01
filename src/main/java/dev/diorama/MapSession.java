@@ -5,6 +5,7 @@ import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
+import dev.diorama.light.Lights;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.SavedChunkImport;
 import java.nio.file.Path;
@@ -53,6 +54,7 @@ public final class MapSession {
 	private final boolean mainMap;
 	/** Fills the main map in from the world's save, in singleplayer; null elsewhere and when turned off. */
 	private @Nullable SavedChunkImport savedChunks;
+	private final Lights lights;
 	private final Map<Long, Pending> pending = new LinkedHashMap<>();
 	private boolean underground;
 	private MapStyle style = MapStyle.get();
@@ -63,6 +65,7 @@ public final class MapSession {
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, mapFolder(level, key));
 		this.mainMap = key != null && Maps.of(key).active(level.dimension().identifier().toString()).isEmpty();
+		this.lights = new Lights(level, this.map);
 	}
 
 	/** Stops filling in from the save, then saves and closes the map. */
@@ -70,6 +73,7 @@ public final class MapSession {
 		if (this.savedChunks != null) {
 			this.savedChunks.stop();
 		}
+		this.lights.close();
 		this.map.close();
 	}
 
@@ -500,6 +504,10 @@ public final class MapSession {
 
 	public MapLevel map() {
 		return this.map;
+	}
+
+	public Lights lights() {
+		return this.lights;
 	}
 
 	public boolean isUnderground() {

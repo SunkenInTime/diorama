@@ -5,7 +5,9 @@ import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileImage;
+import dev.diorama.bake.TileSurface;
 import dev.diorama.render.gpu.MapTexture;
+import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
 
 /** A baked tile on the GPU, plus the coverage the fog reads. Render thread only. */
@@ -29,8 +31,41 @@ public final class MapTile {
 	long pixelsChanged;
 	/** The {@link #pixelsRevision} {@link #claims} was painted for. */
 	int claimsRevision;
+	/** The ground under the tile's pixels, for lights; see {@link MapLevel#surface}. */
+	@Nullable TileSurface surface;
+	@Nullable CompletableFuture<@Nullable TileSurface> surfacePending;
+	/** The tile pixels (x0, y0, x1, y1) {@link #surfacePending} covers. */
+	int @Nullable [] surfacePendingArea;
+	/** Goes up whenever pixels {@link #surface} or {@link #surfacePending} covers change. */
+	int surfaceChanges;
+	/** When {@link #surfacePending} was last started, and when lights last asked for the surface. */
+	long surfaceStarted;
+	long surfaceAsked;
+	/** All the tile pixels (x0, y0, x1, y1) lights asked for lately, as lights apart share a tile, and since when. */
+	int @Nullable [] surfaceWanted;
+	long surfaceWantedSince;
+
+	/** Notes a re-bake for the surface, if it changes pixels the surface covers. */
+	private void surfaceChanged(TileImage image) {
+		if (image.isFull()) {
+			this.surfaceChanges++;
+			return;
+		}
+		int edge = TileImage.BLOCK;
+		for (TileImage.Patch patch : image.patches()) {
+			int x0 = patch.blockX() * edge;
+			int y0 = patch.blockY() * edge;
+			int[] area = this.surfacePendingArea;
+			if (this.surface != null && this.surface.touches(x0, y0, x0 + edge, y0 + edge)
+				|| this.surfacePending != null && x0 < area[2] && area[0] < x0 + edge && y0 < area[3] && area[1] < y0 + edge) {
+				this.surfaceChanges++;
+				return;
+			}
+		}
+	}
 
 	void upload(TileImage image) {
+		this.surfaceChanged(image);
 		if (image.isFull()) {
 			this.coverage = image.coverage();
 			this.info = image.info();
@@ -204,6 +239,10 @@ public final class MapTile {
 	}
 
 	void close() {
+		if (this.surfacePending != null) {
+			this.surfacePending.cancel(false);
+			this.surfacePending = null;
+		}
 		if (this.claims != null) {
 			this.claims.close();
 			this.claims = null;
