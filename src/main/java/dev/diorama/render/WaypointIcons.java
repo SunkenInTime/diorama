@@ -29,6 +29,8 @@ public final class WaypointIcons {
 		"diorama:mine", "diorama:storage", "diorama:portal", "diorama:danger", "diorama:treasure");
 	/** What the bed waypoint shows. */
 	public static final String BED = "diorama:bed";
+	/** What a portal's pin shows, and what marks a waypoint of the player's as a portal's. */
+	public static final String PORTAL = "diorama:portal";
 	private static final String FOLDER = "textures/waypoint_icons/";
 	private static final Map<String, Optional<PinArt.Image>> IMAGES = new HashMap<>();
 

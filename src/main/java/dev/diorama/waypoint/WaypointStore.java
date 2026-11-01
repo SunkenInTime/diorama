@@ -145,7 +145,7 @@ public final class WaypointStore {
 		int count = 0;
 		for (List<Waypoint> list : List.of(this.waypoints, this.elsewhere)) {
 			for (Waypoint waypoint : list) {
-				if (waypoint.dimension.equals(dimension) && Maps.id(waypoint.map).equals(map) && waypoint.kind != Waypoint.Kind.TEMPORARY) {
+				if (waypoint.dimension.equals(dimension) && Maps.id(waypoint.map).equals(map) && waypoint.kind != Waypoint.Kind.TEMPORARY && !hidden(waypoint)) {
 					count++;
 				}
 			}
@@ -153,15 +153,28 @@ public final class WaypointStore {
 		return count;
 	}
 
+	/**
+	 * Whether this is a portal pin kept out of the player's sight: they deleted it, or portal pins
+	 * are turned off. Those stay in the file ({@link Portals}), and nothing lists them.
+	 */
+	private static boolean hidden(Waypoint waypoint) {
+		return waypoint.kind.isPortal() && (waypoint.deleted || !Settings.get().portalMarkers);
+	}
+
 	public List<Waypoint> all() {
-		return this.waypoints;
+		return this.waypoints.stream().filter(w -> !hidden(w)).toList();
+	}
+
+	/** The waypoints in a dimension on the map in use, hidden portal pins included. For {@link Portals}. */
+	List<Waypoint> withHidden(String dimension) {
+		return this.waypoints.stream().filter(w -> w.dimension.equals(dimension)).toList();
 	}
 
 	/** The waypoints in a dimension, its known waystones included. */
 	public List<Waypoint> in(String dimension) {
 		List<Waypoint> out = new ArrayList<>();
 		for (Waypoint waypoint : this.waypoints) {
-			if (waypoint.dimension.equals(dimension)) {
+			if (waypoint.dimension.equals(dimension) && !hidden(waypoint)) {
 				out.add(waypoint);
 			}
 		}
@@ -363,7 +376,18 @@ public final class WaypointStore {
 		return all;
 	}
 
+	/** Deletes a waypoint. A portal pin stays behind, hidden, or the portal would get a new one. */
 	public void remove(Waypoint waypoint) {
+		if (waypoint.kind.isPortal()) {
+			waypoint.deleted = true;
+			this.save();
+		} else {
+			this.forget(waypoint);
+		}
+	}
+
+	/** Drops a waypoint for good. */
+	void forget(Waypoint waypoint) {
 		this.waypoints.remove(waypoint);
 		this.save();
 	}

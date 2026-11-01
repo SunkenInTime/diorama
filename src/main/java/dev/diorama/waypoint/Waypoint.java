@@ -16,7 +16,17 @@ public final class Waypoint {
 		/** A waystone the Waystones mod told the client about ({@link Waystones}). Never saved, and Waystones names it. */
 		WAYSTONE,
 		/** The bed the player last slept in, kept up to date: one per dimension. */
-		BED
+		BED,
+		/** A lit portal the map found ({@link Portals}). */
+		NETHER_PORTAL,
+		/** A lit portal the map found ({@link Portals}). */
+		END_PORTAL,
+		/** A lit portal the map found ({@link Portals}). */
+		END_GATEWAY;
+
+		public boolean isPortal() {
+			return this == NETHER_PORTAL || this == END_PORTAL || this == END_GATEWAY;
+		}
 	}
 
 	/** Colours a waypoint can take, picked to stay readable on both grass and water. */
@@ -46,6 +56,8 @@ public final class Waypoint {
 	public long created = System.currentTimeMillis();
 	/** The dimension's map it was made on ({@link dev.diorama.Maps}); null for the main map. */
 	public @org.jspecify.annotations.Nullable String map;
+	/** A portal pin the player deleted: kept out of sight, so finding the portal again doesn't bring it back. */
+	public boolean deleted;
 
 	public Waypoint() {
 	}

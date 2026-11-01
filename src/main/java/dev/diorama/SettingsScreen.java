@@ -145,6 +145,7 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("waypoints_world", () -> s.waypointsInWorld, v -> s.waypointsInWorld = v);
 		waypoints.toggle("deaths", () -> s.deathMarkers, v -> s.deathMarkers = v);
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
+		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
 		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
 		waypoints.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		waypoints.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
