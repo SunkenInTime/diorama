@@ -130,6 +130,25 @@ final class PortalPinsTest {
 		frameBroken(world, pair, y, z);
 		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && Math.abs(w.x - (pair + 20)) < 8), PIN_TICKS);
 		frameBroken(world, pair + 20, y, z);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking the last of a close pair");
+
+		// The same with both in one chunk, where a portal of the kind is still there. A pin moves
+		// and is kept whatever the player did to it, so a deleted one doesn't come back.
+		int chunk = (at.getX() - 140) & ~15;
+		netherPortal(world, chunk, y, z, 2, 3);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 3, "the first portal in a chunk");
+		netherPortal(world, chunk + 8, y, z, 2, 3);
+		context.waitTicks(40);
+		frameBroken(world, chunk, y, z);
+		context.waitFor(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.kind == Waypoint.Kind.NETHER_PORTAL && w.x >= chunk + 8 && w.x <= chunk + 11), PIN_TICKS);
+		context.runOnClient(mc -> WaypointStore.get().remove(pinNowNear(chunk + 9)));
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "deleting that pin");
+		netherPortal(world, chunk, y, z, 2, 3);
+		context.waitTicks(40);
+		frameBroken(world, chunk + 8, y, z);
+		context.waitTicks(40);
+		expectPins(context, Waypoint.Kind.NETHER_PORTAL, 2, "breaking a portal with a deleted pin on it");
+		frameBroken(world, chunk, y, z);
 
 		fromTheSave(context, world);
 
