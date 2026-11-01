@@ -1,5 +1,6 @@
 package dev.diorama.waypoint;
 
+import dev.diorama.MapSession;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
 import dev.diorama.render.Pins;
@@ -11,7 +12,7 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -32,12 +33,12 @@ public final class WaypointHud implements HudElement {
 	/*public void extractRenderState(GuiGraphicsExtractor graphics, float partialTick) {
 	*///?}
 		Minecraft mc = Minecraft.getInstance();
-		LocalPlayer player = mc.player;
+		Entity viewer = MapSession.viewer();
 		WaypointStore store = WaypointStore.get();
 		//? if >=26.2 {
-		if (player == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
+		if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
 		//?} else {
-		/*if (player == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.options.hideGui || !ServerRules.minimapAllowed()) {
+		/*if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.options.hideGui || !ServerRules.minimapAllowed()) {
 		*///?}
 			return;
 		}
@@ -53,7 +54,7 @@ public final class WaypointHud implements HudElement {
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
 		float margin = 28 * Math.max(1, scale);
 		for (Waypoint waypoint : waypoints) {
-			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, player)) {
+			if (!WaypointStore.isShown(waypoint) || !WaypointStore.isNear(waypoint, viewer)) {
 				continue;
 			}
 			double dx = waypoint.x + 0.5 - eye.x;

@@ -2,6 +2,7 @@ package dev.diorama.render;
 
 import dev.diorama.Diorama;
 import dev.diorama.MapScreen;
+import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.TileBaker;
@@ -36,7 +37,7 @@ import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -283,9 +284,9 @@ public final class SavedChunkImport {
 			x = focus[0];
 			z = Projection.zAt(focus[1], TYPICAL_Y);
 		} else {
-			LocalPlayer player = Minecraft.getInstance().player;
-			x = player == null ? 0 : player.getX();
-			z = player == null ? 0 : player.getZ();
+			Entity viewer = MapSession.viewer();
+			x = viewer == null ? 0 : viewer.getX();
+			z = viewer == null ? 0 : viewer.getZ();
 		}
 		Long best = null;
 		double bestDistance = Double.MAX_VALUE;

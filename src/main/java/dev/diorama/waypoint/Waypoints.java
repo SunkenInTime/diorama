@@ -1,5 +1,6 @@
 package dev.diorama.waypoint;
 
+import dev.diorama.MapSession;
 import dev.diorama.Settings;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -8,6 +9,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /** Making waypoints (where the player stands, at a picked spot, where they die) and going to them. */
@@ -22,11 +24,11 @@ public final class Waypoints {
 		return mc.level == null ? null : mc.level.dimension().identifier().toString();
 	}
 
-	/** A new, unsaved waypoint where the player stands. */
+	/** A new, unsaved waypoint where the player stands, or at who they're watching through. */
 	public static @Nullable Waypoint atPlayer() {
-		LocalPlayer player = Minecraft.getInstance().player;
+		Entity viewer = MapSession.viewer();
 		String dimension = dimension();
-		return player == null || dimension == null ? null : at(player.blockPosition(), dimension);
+		return viewer == null || dimension == null ? null : at(viewer.blockPosition(), dimension);
 	}
 
 	/** A new, unsaved waypoint at a block position, named and coloured so the next one differs. */

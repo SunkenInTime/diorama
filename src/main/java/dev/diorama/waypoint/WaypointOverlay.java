@@ -11,7 +11,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -125,7 +125,7 @@ public final class WaypointOverlay {
 	}
 
 	/** "Home · 120 m · 4 below" */
-	public static Component describe(Waypoint waypoint, Player viewer) {
+	public static Component describe(Waypoint waypoint, Entity viewer) {
 		int distance = (int) Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ()));
 		int dy = (int) Math.round(waypoint.y - viewer.getY());
 		String height = dy > 2 ? " · " + dy + " above" : dy < -2 ? " · " + (-dy) + " below" : "";

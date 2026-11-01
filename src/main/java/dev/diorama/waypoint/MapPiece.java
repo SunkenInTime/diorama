@@ -14,10 +14,10 @@ import dev.diorama.render.gpu.Sampling;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.BiomeColors;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -117,15 +117,15 @@ final class MapPiece {
 		int left = x + 1;
 		int top = y + 1;
 		Minecraft mc = Minecraft.getInstance();
-		LocalPlayer player = mc.player;
+		Entity viewer = MapSession.viewer();
 		ClientLevel level = mc.level;
 		MapStyle style = MapStyle.get();
 		BlockLooks looks = BlockLooks.get();
-		if (player == null || level == null || looks == null) {
+		if (viewer == null || level == null || looks == null) {
 			graphics.fill(left, top, left + this.width, top + this.depth + this.side, 0xFF6E8B4A);
 			return;
 		}
-		MapViewport.View view = new MapViewport.View(left, top, this.width, this.depth, player.getX(), Projection.v(player.getY(), player.getZ()), ZOOM, TileKey.SURFACE);
+		MapViewport.View view = new MapViewport.View(left, top, this.width, this.depth, viewer.getX(), Projection.v(viewer.getY(), viewer.getZ()), ZOOM, TileKey.SURFACE);
 		MapSession session = MapSession.get();
 		MapLevel map = session != null ? session.map() : null;
 		if (map != null && MapViewport.showsAnything(map, view)) {
@@ -135,13 +135,13 @@ final class MapPiece {
 				// Asks for the tiles, so the real map takes over once they've baked.
 				MapViewport.ready(map, view);
 			}
-			graphics.fill(left, top, left + this.width, top + this.depth, argb(grassTop(looks, level, player.blockPosition(), style)));
+			graphics.fill(left, top, left + this.width, top + this.depth, argb(grassTop(looks, level, viewer.blockPosition(), style)));
 		}
 
 		int x0 = (int) Math.floor(view.minU());
 		int columns = Math.min(FACE_TEXTURE, (int) Math.floor(view.minU() + this.width / ZOOM) - x0 + 1);
 		double edge = view.minV() + this.depth / ZOOM;
-		MapTexture texture = this.face(level, looks, style, x0, columns, edge, player.blockPosition());
+		MapTexture texture = this.face(level, looks, style, x0, columns, edge, viewer.blockPosition());
 		int faceTop = top + this.depth;
 		graphics.enableScissor(left, faceTop, left + this.width, faceTop + this.side);
 		MapCanvas.of(graphics).rect(texture, Sampling.CLAMP_CRISP, view.screenX(x0), faceTop, view.screenX(x0 + columns), faceTop + this.side,

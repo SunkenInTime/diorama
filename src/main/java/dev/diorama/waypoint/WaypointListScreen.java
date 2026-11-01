@@ -2,6 +2,7 @@ package dev.diorama.waypoint;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.diorama.DioramaClient;
+import dev.diorama.MapSession;
 import dev.diorama.render.Pins;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,9 +18,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 //?}
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -204,10 +205,10 @@ public final class WaypointListScreen extends Screen {
 	protected void init() {
 		this.all.clear();
 		WaypointStore store = WaypointStore.get();
-		LocalPlayer player = this.minecraft.player;
+		Entity viewer = MapSession.viewer();
 		String here = this.minecraft.level == null ? null : this.minecraft.level.dimension().identifier().toString();
 		this.collectFolders(store, here);
-		if (store != null && player != null && here != null) {
+		if (store != null && viewer != null && here != null) {
 			String key = this.folder().key();
 			for (Waypoint waypoint : key.equals(WaypointStore.WAYSTONES_KEY) ? store.waystones() : store.all()) {
 				if (store.folderKey(waypoint).equals(key)) {
@@ -216,7 +217,7 @@ public final class WaypointListScreen extends Screen {
 			}
 			// This dimension's waypoints nearest first; any from other dimensions after them, by name.
 			this.all.sort(Comparator.<Waypoint, Boolean>comparing(w -> !w.dimension.equals(here))
-				.thenComparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(player.getX(), player.getY(), player.getZ()) : 0)
+				.thenComparingDouble(w -> w.dimension.equals(here) ? w.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ()) : 0)
 				.thenComparing(w -> w.name.toLowerCase(Locale.ROOT)));
 		}
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
@@ -555,7 +556,7 @@ public final class WaypointListScreen extends Screen {
 			}
 		}
 		ScreenArt.list(graphics, 0, LIST_TOP, this.width, this.listBottom);
-		LocalPlayer player = this.minecraft.player;
+		Entity viewer = MapSession.viewer();
 		if (this.rows.isEmpty()) {
 			graphics.centeredText(this.font, Component.translatable(this.all.isEmpty() ? "diorama.folder.empty" : "diorama.waypoints.no_match"), cx, LIST_TOP + 20, HINT);
 		}
@@ -580,8 +581,8 @@ public final class WaypointListScreen extends Screen {
 			String detail = waypoint.x + ", " + waypoint.y + ", " + waypoint.z;
 			if (!waypoint.dimension.equals(here)) {
 				detail = Waypoints.dimensionName(waypoint.dimension).getString() + " · " + detail;
-			} else if (player != null) {
-				detail = Math.round(waypoint.distanceTo(player.getX(), player.getY(), player.getZ())) + " m · " + detail;
+			} else if (viewer != null) {
+				detail = Math.round(waypoint.distanceTo(viewer.getX(), viewer.getY(), viewer.getZ())) + " m · " + detail;
 			}
 			if (!waypoint.visible) {
 				detail += "  ·  " + Component.translatable("diorama.waypoint.hidden").getString();

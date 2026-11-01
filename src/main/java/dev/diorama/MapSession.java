@@ -20,6 +20,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.LightLayer;
@@ -173,6 +174,18 @@ public final class MapSession {
 			started++;
 		}
 		return current;
+	}
+
+	/**
+	 * Who the map follows: whoever the camera is on. Watching through another player or a mob, the
+	 * server moves the camera, and itself, while this client's own player stays where it started,
+	 * so everything about where the view is goes by this. Only what's about the player's self, like
+	 * their deaths, their bed and what they're allowed to see, stays on {@code mc.player}.
+	 */
+	public static @Nullable Entity viewer() {
+		Minecraft mc = mc();
+		Entity camera = mc.getCameraEntity();
+		return camera != null ? camera : mc.player;
 	}
 
 	public static void chunkLoaded(ClientLevel level, LevelChunk chunk) {
@@ -357,10 +370,10 @@ public final class MapSession {
 	private int ticks;
 
 	/** Queues any loaded chunk the map hasn't seen, in case its load event was missed. */
-	private void sweepLoadedChunks(LocalPlayer player) {
+	private void sweepLoadedChunks(Entity viewer) {
 		int radius = mc().options.renderDistance().get() + 2;
-		int pcx = player.blockPosition().getX() >> 4;
-		int pcz = player.blockPosition().getZ() >> 4;
+		int pcx = viewer.blockPosition().getX() >> 4;
+		int pcz = viewer.blockPosition().getZ() >> 4;
 		for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
 			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
 				if (this.map.chunk(cx, cz) == null && !this.pending.containsKey(ChunkSnapshot.key(cx, cz))
@@ -372,13 +385,13 @@ public final class MapSession {
 	}
 
 	private void resnapshotLoaded() {
-		LocalPlayer player = mc().player;
-		if (player == null) {
+		Entity viewer = viewer();
+		if (viewer == null) {
 			return;
 		}
 		int radius = mc().options.renderDistance().get() + 2;
-		int pcx = player.blockPosition().getX() >> 4;
-		int pcz = player.blockPosition().getZ() >> 4;
+		int pcx = viewer.blockPosition().getX() >> 4;
+		int pcz = viewer.blockPosition().getZ() >> 4;
 		for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
 			for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
 				if (this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false) != null) {
@@ -410,15 +423,15 @@ public final class MapSession {
 
 	private void tickSession(Minecraft mc) {
 		this.updateSavedChunks(mc);
-		LocalPlayer player = mc.player;
-		if (player != null && this.ticks++ % 40 == 0) {
-			this.sweepLoadedChunks(player);
+		Entity viewer = viewer();
+		if (viewer != null && this.ticks++ % 40 == 0) {
+			this.sweepLoadedChunks(viewer);
 		}
 		if (this.ticks % 600 == 0) {
 			this.map.saveSeen();
 		}
-		int playerChunkX = player == null ? 0 : player.blockPosition().getX() >> 4;
-		int playerChunkZ = player == null ? 0 : player.blockPosition().getZ() >> 4;
+		int playerChunkX = viewer == null ? 0 : viewer.blockPosition().getX() >> 4;
+		int playerChunkZ = viewer == null ? 0 : viewer.blockPosition().getZ() >> 4;
 		long now = System.currentTimeMillis();
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();
@@ -451,10 +464,10 @@ public final class MapSession {
 		boolean overlays = settings.chunkGrid || settings.slimeChunks || spawnSpots;
 		this.map.setOverlays(overlays ? new Overlays(this.slimeSeed(), spawnSpots) : null);
 		this.map.update();
-		if (player != null) {
-			this.updateUnderground(player);
+		if (viewer != null) {
+			this.updateUnderground(viewer);
 			if (this.underground) {
-				this.updateSight(player);
+				this.updateSight(viewer);
 			}
 		}
 	}
@@ -464,9 +477,9 @@ public final class MapSession {
 	private @Nullable CaveSight sight;
 
 	/** Marks the blocks the player can see (see {@link CaveSight}) when their eyes move to a new block. */
-	private void updateSight(LocalPlayer player) {
+	private void updateSight(Entity viewer) {
 		BlockLooks looks = BlockLooks.get();
-		BlockPos eye = BlockPos.containing(player.getEyePosition());
+		BlockPos eye = BlockPos.containing(viewer.getEyePosition());
 		if (looks == null || eye.equals(this.lastSightOrigin) && this.sightCooldown-- > 0) {
 			return;
 		}
@@ -475,7 +488,7 @@ public final class MapSession {
 		if (this.sight == null) {
 			this.sight = new CaveSight(this.level);
 		}
-		int[] box = this.sight.spread(looks, player.getEyePosition(), this.map.seen());
+		int[] box = this.sight.spread(looks, viewer.getEyePosition(), this.map.seen());
 		if (Diorama.DEBUG) {
 			Diorama.LOGGER.info("Sight from {}: visited {}, newly seen box {}", eye, this.sight.visited(), java.util.Arrays.toString(box));
 		}
@@ -486,12 +499,12 @@ public final class MapSession {
 
 	private static final Direction[] DIRECTIONS = Direction.values();
 
-	private void updateUnderground(LocalPlayer player) {
+	private void updateUnderground(Entity viewer) {
 		if (this.level.dimensionType().hasCeiling()) {
 			this.underground = true;
 			return;
 		}
-		BlockPos eye = BlockPos.containing(player.getEyePosition());
+		BlockPos eye = BlockPos.containing(viewer.getEyePosition());
 		int sky = this.level.getBrightness(LightLayer.SKY, eye);
 		boolean covered = !this.level.canSeeSky(eye);
 		// Separate thresholds so walking along a cave mouth doesn't flip the map back and forth.
@@ -520,7 +533,7 @@ public final class MapSession {
 	}
 
 	/** The layer the minimap should show right now. */
-	public int autoLayer(LocalPlayer player) {
-		return this.underground ? caveLayerFor(player.getY()) : TileKey.SURFACE;
+	public int autoLayer(Entity viewer) {
+		return this.underground ? caveLayerFor(viewer.getY()) : TileKey.SURFACE;
 	}
 }
