@@ -194,6 +194,11 @@ vec3 lit_light(vec3 p, float ao) {
         // Deeper below the cut reads darker.
         l *= 1.0 - min(0.5, (Mode.z - p.y) / 60.0);
     }
+    // Bright light eases toward a ceiling instead of washing blocks out, keeping its colour, as Lighting.cave.
+    float peak = max(l.r, max(l.g, l.b));
+    if (peak > 0.5) {
+        l *= (0.5 + 0.3 * (1.0 - exp(-(peak - 0.5) / 0.3))) / peak;
+    }
     return l;
 }
 #endif

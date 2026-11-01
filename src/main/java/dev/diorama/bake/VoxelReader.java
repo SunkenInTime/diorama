@@ -78,7 +78,7 @@ public final class VoxelReader {
 	}
 
 	/** With {@code shapes}, {@link #solid} tells blocks smaller than a cube apart. */
-	VoxelReader(ChunkSource source, @Nullable BlockLooks looks, boolean shapes) {
+	public VoxelReader(ChunkSource source, @Nullable BlockLooks looks, boolean shapes) {
 		this.source = source;
 		this.looks = looks;
 		this.kinds = looks == null ? null : looks.kind;

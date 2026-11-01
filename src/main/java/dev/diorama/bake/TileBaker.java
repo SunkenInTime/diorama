@@ -76,6 +76,8 @@ public final class TileBaker {
 		SKY_WEIGHTS[ring * 2] = 1.5;
 	}
 	private static final float[] AO_LEVELS = {0.6F, 0.74F, 0.87F, 1.0F};
+	/** Faces that aren't up read darker, the way Minecraft shades its own block sides. */
+	static final float SIDE = 0.82F;
 	/** How much nearer a neighbouring pixel has to be, in blocks, before an outline is drawn. */
 	private static final float OUTLINE_DEPTH = 1.5F;
 	/** How far below the cut a cave slice looks. */
@@ -91,7 +93,7 @@ public final class TileBaker {
 	public static final int SHADOW_REACH_Z = (int) Math.ceil(SHADOW_DISTANCE * Math.cos(Math.toRadians(dev.diorama.MapStyle.MIN_SUN_ELEVATION)) * SUN_AZIMUTH_Z) + 1;
 	public static final int SHADOW_REACH_Y = (int) Math.ceil(SHADOW_DISTANCE * Math.sin(Math.toRadians(dev.diorama.MapStyle.MAX_SUN_ELEVATION))) + 1;
 
-	private static final float[] SRGB_TO_LINEAR = new float[256];
+	static final float[] SRGB_TO_LINEAR = new float[256];
 	private static final int[] LINEAR_TO_SRGB = new int[4096];
 
 	static {
@@ -129,6 +131,9 @@ public final class TileBaker {
 	private final java.util.Map<Long, Boolean> slimeChunks = new java.util.HashMap<>();
 	private final ChunkSource source;
 	private final MapStyle style;
+	private final Lighting lighting;
+	private final float[] light = new float[3];
+	private final float[] unlit = new float[3];
 	// The camera angle when this bake started; a change mid-bake makes the result stale anyway.
 	private final double sin;
 	private final double cos;
@@ -176,6 +181,14 @@ public final class TileBaker {
 	/** Four samples per pixel even when the Quality setting asks for one: see {@link #reference}. */
 	private boolean fourSamples;
 
+	/** Finds where rays land without lighting them, for {@link #surface}. */
+	private boolean surfaceOnly;
+	// Where the last surface-only trace landed, NaN for nowhere, and whether on a top face.
+	private float surfaceY;
+	private boolean surfaceTop;
+	/** What lit the last surface a cave trace landed on; see {@link TileSurface#caveLight}. */
+	private int surfaceLight;
+
 	private TileBaker(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
 		this.key = key;
 		this.overlays = overlays;
@@ -187,6 +200,7 @@ public final class TileBaker {
 		this.source = source;
 		this.fogOfWar = this.lit && fogOfWar;
 		this.style = MapStyle.get();
+		this.lighting = new Lighting(this.style);
 		double elevation = Math.toRadians(this.style.sunElevation());
 		this.sunX = Math.cos(elevation) * SUN_AZIMUTH_X;
 		this.sunY = Math.sin(elevation);
@@ -306,6 +320,88 @@ public final class TileBaker {
 	}
 
 	/**
+	 * What each pixel of tile pixels (x0, y0) to (x0 + width, y0 + height) of a cave slice shows, for lights drawn over it: where its camera ray
+	 * lands, which way the face there points, the pixel as baked with its light taken out, and
+	 * what lit it. Water counts as ground at its surface. With {@code fogOfWar}, ground not seen
+	 * yet has none, as the tile shows none. Any thread.
+	 */
+	public static TileSurface surface(TileKey key, int revision, ChunkSource source, BlockLooks looks, boolean fogOfWar, int x0, int y0, int width, int height) {
+		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, null);
+		int count = width * height;
+		TileSurface surface = new TileSurface(revision, x0, y0, width, height, new float[count], new boolean[count], new int[count], new int[count], new boolean[count]);
+		java.util.Arrays.fill(surface.y(), Float.NaN);
+		// Only cave slices, and not under a roof, where the light is lifted off the rock above.
+		if (!baker.cave || baker.startY <= baker.limitY || baker.lifted) {
+			return surface;
+		}
+		int[] pixels = new int[count];
+		float[] linear = new float[count * 4];
+		baker.bakePixels(x0, y0, width, height, pixels, null, linear);
+		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
+		baker.surfaceOnly = true;
+		for (int py = 0; py < height; py++) {
+			for (int px = 0; px < width; px++) {
+				int i = py * width + px;
+				baker.surfaceY = Float.NaN;
+				baker.surfaceLight = 0;
+				if (pixels[i] == 0) {
+					continue;
+				}
+				// The middle of the pixel first; at an edge it can miss what the pixel's samples hit.
+				double u = key.minU() + (x0 + px + 0.5) * unitsPerPixel;
+				double v = key.minV() + (y0 + py + 0.5) * unitsPerPixel;
+				boolean hit = baker.trace(u, v, 0) && !Float.isNaN(baker.surfaceY);
+				for (int s = 0; s < SAMPLES.length && !hit; s++) {
+					baker.surfaceY = Float.NaN;
+					baker.surfaceLight = 0;
+					hit = baker.trace(key.minU() + (x0 + px + SAMPLES[s][0]) * unitsPerPixel, key.minV() + (y0 + py + SAMPLES[s][1]) * unitsPerPixel, s) && !Float.isNaN(baker.surfaceY);
+				}
+				if (!hit) {
+					continue;
+				}
+				surface.y()[i] = baker.surfaceY;
+				surface.top()[i] = baker.surfaceTop;
+				surface.light()[i] = baker.surfaceLight;
+				surface.outlined()[i] = linear[i * 4 + 3] > 0;
+				// A light relights what the pixel shows, water and all: the baked pixel with the
+				// light that lit it taken out.
+				surface.albedo()[i] = pixels[i] & 0xFF000000 | srgb(linear[i * 4], linear[i * 4 + 1], linear[i * 4 + 2]);
+			}
+		}
+		return surface;
+	}
+
+	/** Records a surface-only trace landing on a block, lit as a traced one would be. */
+	private void landed(int id, int x, int by, int bz, double fx, double hitY, double hitZ, boolean top, boolean partial) {
+		this.shade(id, x, by, bz, fx, hitY, hitZ, top, partial, 0);
+		this.surfaceY = (float) hitY;
+		this.surfaceTop = top;
+	}
+
+	/** Records a surface-only trace landing on water at height {@code y}. */
+	private void landedOnWater(int waterId, int x, int by, int bz, double y) {
+		this.albedo(waterId, x, bz, true);
+		this.surfaceLight = this.waterLight(x, by, bz, y);
+		this.surfaceY = (float) y;
+		this.surfaceTop = true;
+	}
+
+	/**
+	 * What lights water block (x, by, bz), seen at height {@code y}, in a cave slice: the light
+	 * above it, as {@link #mixWater} lights it; see {@link TileSurface#caveLight}.
+	 */
+	private int waterLight(int x, int by, int bz, double y) {
+		float fade = 1 - Math.min(0.5F, (float) (this.startY - y) / 60.0F);
+		return TileSurface.caveLight(this.reader.blockLight(x, by + 1, bz), this.reader.skyLight(x, by + 1, bz), 1, fade, 0) | TileSurface.WATER;
+	}
+
+	private static int srgb(float r, float g, float b) {
+		return LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (r * 4095)))] << 16
+			| LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (g * 4095)))] << 8
+			| LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (b * 4095)))];
+	}
+
+	/**
 	 * One above the tallest block any ray or shadow ray of this tile can touch. Starting rays here
 	 * instead of at the tallest block in the whole dimension skips a lot of empty sky.
 	 */
@@ -365,7 +461,7 @@ public final class TileBaker {
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
 			byte[] info = overlays == null ? null : new byte[size * size];
-			baker.bakePixels(0, 0, size, size, pixels, info);
+			baker.bakePixels(0, 0, size, size, pixels, info, null);
 			merge(pixels, saved, 0, 0, size);
 			return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size), info);
 		}
@@ -376,7 +472,7 @@ public final class TileBaker {
 			int by = i / perRow;
 			int[] pixels = new int[TileImage.BLOCK * TileImage.BLOCK];
 			byte[] info = overlays == null ? null : new byte[TileImage.BLOCK * TileImage.BLOCK];
-			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels, info);
+			baker.bakePixels(bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK, TileImage.BLOCK, pixels, info, null);
 			merge(pixels, saved, bx * TileImage.BLOCK, by * TileImage.BLOCK, TileImage.BLOCK);
 			patches.add(new TileImage.Patch(bx, by, Mipmaps.build(pixels, TileImage.BLOCK), coverage(pixels, TileImage.BLOCK, TileImage.BLOCK), info));
 		}
@@ -402,7 +498,7 @@ public final class TileBaker {
 		baker.fourSamples = true;
 		int size = Projection.TILE_PIXELS;
 		int[] pixels = new int[size * size];
-		baker.bakePixels(0, 0, size, size, pixels, info);
+		baker.bakePixels(0, 0, size, size, pixels, info, null);
 		return pixels;
 	}
 
@@ -436,7 +532,12 @@ public final class TileBaker {
 		}
 	}
 
-	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info) {
+	/**
+	 * Traces pixels into {@code out}, and when {@code linear} isn't null, four floats per pixel
+	 * into it: the pixel's colour in linear light with each sample's own cave light taken out
+	 * (all but a side's darkening), then 1 where an outline darkens it.
+	 */
+	private void bakePixels(int px0, int py0, int width, int height, int[] out, byte @Nullable [] info, float @Nullable [] linear) {
 		if (this.startY <= this.limitY) {
 			return;
 		}
@@ -456,11 +557,28 @@ public final class TileBaker {
 				float g = 0;
 				float b = 0;
 				float d = 0;
+				float ur = 0;
+				float ug = 0;
+				float ub = 0;
 				int known = 0;
 				for (int s = 0; s < samples.length; s++) {
 					double u = minU + (px0 + x - border + samples[s][0]) * unitsPerPixel;
 					double v = minV + (py0 + y - border + samples[s][1]) * unitsPerPixel;
+					this.surfaceLight = -1;
 					if (this.trace(u, v, s)) {
+						if (linear != null) {
+							// Samples on faces lit differently are each unlit by their own light; ones
+							// lit by none of it, like the cut face, are kept as they are.
+							float[] lit = this.unlit;
+							if (this.surfaceLight == -1) {
+								java.util.Arrays.fill(lit, 1);
+							} else {
+								TileSurface.caveLightOf(this.surfaceLight, this.surfaceLight & 15, lit);
+							}
+							ur += this.outR / Math.max(1e-3F, lit[0]);
+							ug += this.outG / Math.max(1e-3F, lit[1]);
+							ub += this.outB / Math.max(1e-3F, lit[2]);
+						}
 						if (s == 0 && info != null && this.hitSolid) {
 							int ix = x - border;
 							int iy = y - border;
@@ -477,6 +595,14 @@ public final class TileBaker {
 				}
 				if (known > 0) {
 					pixels[y * w + x] = this.abgr(r / known, g / known, b / known, known * 255 / samples.length);
+					int ix = x - border;
+					int iy = y - border;
+					if (linear != null && ix >= 0 && iy >= 0 && ix < width && iy < height) {
+						int i = (iy * width + ix) * 4;
+						linear[i] = ur / known;
+						linear[i + 1] = ug / known;
+						linear[i + 2] = ub / known;
+					}
 				}
 				if (depth != null) {
 					depth[y * w + x] = known > 0 ? d / known : Float.NaN;
@@ -494,6 +620,9 @@ public final class TileBaker {
 				float here = depth[i];
 				if (pixel != 0 && (nearer(depth[i - 1], here) || nearer(depth[i + 1], here) || nearer(depth[i - w], here) || nearer(depth[i + w], here))) {
 					pixel = darken(pixel, keep);
+					if (linear != null) {
+						linear[(y * width + x) * 4 + 3] = 1;
+					}
 				}
 				out[y * width + x] = pixel;
 			}
@@ -540,7 +669,7 @@ public final class TileBaker {
 		return here - neighbour > OUTLINE_DEPTH;
 	}
 
-	private static int darken(int abgr, float keep) {
+	static int darken(int abgr, float keep) {
 		int r = Math.round((abgr & 0xFF) * keep);
 		int g = Math.round(((abgr >> 8) & 0xFF) * keep);
 		int b = Math.round(((abgr >> 16) & 0xFF) * keep);
@@ -645,6 +774,15 @@ public final class TileBaker {
 						&& !(enteredTop ? this.source.isSeen(x, by + 1, bz) : this.source.isSeen(x, by, bz + 1))) {
 						return false;
 					}
+					if (this.surfaceOnly) {
+						// Water over the block is the ground there.
+						if (waterId >= 0) {
+							this.landedOnWater(waterId, x, waterBy, waterBz, y0 - waterT * sin);
+						} else {
+							this.landed(id, x, by, bz, fx, y0 - t * sin, z0 - t * cos, enteredTop, partial);
+						}
+						return true;
+					}
 					double hitY = y0 - t * sin;
 					double hitZ = z0 - t * cos;
 					this.hitSolid = kind == BlockLooks.SOLID;
@@ -666,6 +804,10 @@ public final class TileBaker {
 					}
 					if (waterId >= 0) {
 						this.mixWater(waterId, x, waterBy, waterBz, u, y0, z0, waterT, t, sample);
+						if (this.cave) {
+							// Lit as water, as a surface trace records it.
+							this.surfaceLight = this.waterLight(x, waterBy, waterBz, y0 - waterT * sin);
+						}
 					}
 					return true;
 				}
@@ -678,6 +820,9 @@ public final class TileBaker {
 					}
 				}
 				case BlockLooks.PLANT, BlockLooks.GLASS -> {
+					if (this.surfaceOnly) {
+						break;
+					}
 					float w = kind == BlockLooks.PLANT ? 0.4F : 0.25F;
 					this.albedo(id, x, bz, true);
 					overR += through * w * this.albedoR;
@@ -705,6 +850,12 @@ public final class TileBaker {
 		if (this.fogOfWar && (skippingRock || waterId < 0 || !this.source.isSeen(x, waterBy, waterBz))) {
 			return false;
 		}
+		if (this.surfaceOnly) {
+			if (waterId >= 0) {
+				this.landedOnWater(waterId, x, waterBy, waterBz, y0 - waterT * sin);
+			}
+			return true;
+		}
 		this.outDepth = (float) (-(sin * (y0 - t * sin) + cos * (z0 - t * cos)) - this.depthOrigin);
 		if (skippingRock) {
 			// Solid rock all the way down the slice: draw the cut face.
@@ -716,6 +867,9 @@ public final class TileBaker {
 			this.outG = 0;
 			this.outB = 0;
 			this.mixWater(waterId, x, waterBy, waterBz, u, y0, z0, waterT, waterT + 64, sample);
+			if (this.cave) {
+				this.surfaceLight = this.waterLight(x, waterBy, waterBz, y0 - waterT * sin);
+			}
 		} else {
 			this.outR = 0.01F;
 			this.outG = 0.01F;
@@ -818,24 +972,17 @@ public final class TileBaker {
 			lg = ambient * LID_FILL_TINT[1] + direct * LID_KEY_TINT[1] + warm * 0.75F * ao;
 			lb = ambient * LID_FILL_TINT[2] + direct * LID_KEY_TINT[2] + warm * 0.5F * ao;
 		} else if (this.lit) {
+			// A cave slice (under a roof the light is lifted, above). Deeper below the cut reads darker.
+			int blockLight = this.reader.blockLight(x, frontY, frontZ);
 			int skyLight = this.reader.skyLight(x, frontY, frontZ);
-			float bl = this.reader.blockLight(x, frontY, frontZ) / 15.0F;
-			float sl = skyLight / 15.0F * 0.8F;
-			float warm = (float) Math.pow(bl, 1.5);
-			float cool = (float) Math.pow(sl, 1.5);
-			// Unlit caves stay readable; torches, lava and daylight make them glow.
-			float base = 0.42F;
-			lr = (base * 0.92F + warm * 0.9F + cool * 0.6F) * ao;
-			lg = (base * 0.96F + warm * 0.75F + cool * 0.65F) * ao;
-			lb = (base * 1.08F + warm * 0.5F + cool * 0.75F) * ao;
-			if (this.cave) {
-				// Deeper below the cut reads darker.
-				float depth = (float) (this.startY - hitY);
-				float fade = 1 - Math.min(0.5F, depth / 60.0F);
-				lr *= fade;
-				lg *= fade;
-				lb *= fade;
-			}
+			float fade = 1 - Math.min(0.5F, (float) (this.startY - hitY) / 60.0F);
+			Lighting.cave(blockLight, skyLight, ao, fade, emission, top ? 1 : SIDE, this.light);
+			this.outR = this.albedoR * this.light[0];
+			this.outG = this.albedoG * this.light[1];
+			this.outB = this.albedoB * this.light[2];
+			// Kept for moving lights: what lit this surface besides a held torch.
+			this.surfaceLight = TileSurface.caveLight(blockLight, skyLight, ao, fade, this.looks.emission[id]);
+			return;
 		} else {
 			double[] j = SUN_JITTER[sample];
 			double sx = this.sunX + j[0];
@@ -843,39 +990,16 @@ public final class TileBaker {
 			double sz = this.sunZ + j[2];
 			// Relative to a top face, so tops stay as bright whatever the sun's height.
 			double lambert = top ? 1 : Math.max(0, sz) / sy;
-			float direct = 0;
-			if (lambert > 0) {
-				double ox = x + fx;
-				// A partial block's face can sit inside its cell; the shadow ray starts on the face.
-				double oy = top ? (partial ? hitY : by + 1) + 1e-4 : hitY;
-				double oz = top ? hitZ : (partial ? hitZ : bz + 1) + 1e-4;
-				direct = this.inShadow(ox, oy, oz, sx, sy, sz) ? 0 : (float) (this.style.sunStrength() * lambert) * aoSun;
-			}
-			// The surface map is a daytime view lit only by the sun and the sky, so it depends on
-			// blocks alone and light updates never make its colours stale.
-			float ambient = this.style.ambient() * aoSky;
-			float occlusion = this.style.skyOcclusion();
-			if (occlusion > 0) {
-				// Less sky overhead, less ambient light: under trees, down in valleys and at the
-				// foot of walls. This is what makes the levels of the world read apart.
-				float sky = top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by);
-				ambient *= 1 - occlusion * (1 - (0.15F + 0.85F * sky));
-			}
-			float[] sky = this.style.shadowTint();
-			float[] sun = this.style.sunTint();
-			lr = ambient * sky[0] + direct * sun[0];
-			lg = ambient * sky[1] + direct * sun[1];
-			lb = ambient * sky[2] + direct * sun[2];
-			float heightShade = this.style.heightShade();
-			if (heightShade != 0) {
-				// High ground a little brighter, low ground darker, so hills and valleys still read
-				// apart when zoomed out too far to see their shadows.
-				float above = (float) Math.max(-1, Math.min(1, (hitY - 64) / 64));
-				float f = 1 + heightShade * above;
-				lr *= f;
-				lg *= f;
-				lb *= f;
-			}
+			// A partial block's face can sit inside its cell; the shadow ray starts on the face.
+			boolean shadowed = lambert > 0 && this.inShadow(
+				x + fx, top ? (partial ? hitY : by + 1) + 1e-4 : hitY, top ? hitZ : (partial ? hitZ : bz + 1) + 1e-4, sx, sy, sz
+			);
+			float sky = this.style.skyOcclusion() > 0 ? (top ? this.skyTop(x, by + 1, bz, fx, hitZ - bz) : this.skySouth(x, by, bz + 1, fx, hitY - by)) : 1;
+			this.lighting.surface(lambert, shadowed, ao, sky, emission, top ? 1 : SIDE, hitY, this.light);
+			this.outR = this.albedoR * this.light[0];
+			this.outG = this.albedoG * this.light[1];
+			this.outB = this.albedoB * this.light[2];
+			return;
 		}
 		if (emission > 0) {
 			// In the fog, small lights like shroomlights and glowstone glow softer, so they don't
@@ -886,10 +1010,9 @@ public final class TileBaker {
 			lb = Math.max(lb, e);
 		}
 		if (!top) {
-			// Faces that aren't up read darker, the way Minecraft shades its own block sides.
-			lr *= 0.82F;
-			lg *= 0.82F;
-			lb *= 0.82F;
+			lr *= SIDE;
+			lg *= SIDE;
+			lb *= SIDE;
 		}
 		this.outR = this.albedoR * lr;
 		this.outG = this.albedoG * lg;
@@ -913,9 +1036,7 @@ public final class TileBaker {
 		float wb = this.albedoB;
 		float light;
 		if (this.lit) {
-			int bl = this.reader.blockLight(x, by + 1, bz);
-			int sl = this.reader.skyLight(x, by + 1, bz);
-			light = 0.42F + (float) Math.pow(Math.max(bl, sl * 0.8F) / 15.0F, 1.5) * 0.8F;
+			light = Lighting.caveWater(this.reader.blockLight(x, by + 1, bz), this.reader.skyLight(x, by + 1, bz));
 		} else {
 			double sy = this.sunY + SUN_JITTER[sample][1];
 			double ox = u;
@@ -1193,8 +1314,13 @@ public final class TileBaker {
 	}
 
 	private int abgr(float r, float g, float b, int alpha) {
-		float saturation = this.style.saturation();
-		float exposure = this.style.exposure();
+		return abgr(this.style, r, g, b, alpha);
+	}
+
+	/** Linear light graded by the style, as an sRGB ABGR pixel. */
+	static int abgr(MapStyle style, float r, float g, float b, int alpha) {
+		float saturation = style.saturation();
+		float exposure = style.exposure();
 		float l = luminance(r, g, b);
 		r = (l + (r - l) * saturation) * exposure;
 		g = (l + (g - l) * saturation) * exposure;
