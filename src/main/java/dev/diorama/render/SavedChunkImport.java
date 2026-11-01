@@ -65,8 +65,9 @@ public final class SavedChunkImport {
 	 */
 	private static final long RETRY_MS = 30_000;
 	private static final long BUSY_WAIT_MS = 250;
-	/** How full the heap may be for a tile to start. */
+	/** How full the heap may be for a tile to start, and the longest a tile waits for it. */
 	private static final double MAX_HEAP_SHARE = 0.9;
+	private static final long MAX_HEAP_WAIT_MS = 2_000;
 	/** Tiles a fill may leave waiting for the disk, at a megabyte or so each. */
 	private static final int MAX_UNWRITTEN = 32;
 	/** A height to turn a map row into a place in the world, for picking the nearest region. */
@@ -103,6 +104,7 @@ public final class SavedChunkImport {
 	/** The save's chunks by {@link SavedChunks#regionKey}, as of the last listing; see {@link SavedChunks#scan}. */
 	private Map<Long, int[]> regions = Map.of();
 	private long lastScan;
+	private long heapFullSince;
 	/** When the last listing started, in seconds: chunk heights are at least this recent. */
 	private int scannedAt;
 	private long lastSave;
@@ -351,6 +353,9 @@ public final class SavedChunkImport {
 			}
 			if (running == 0) {
 				if (!leaving && !plan.order.isEmpty()) {
+					if (heapNearlyFull()) {
+						this.source.clear();
+					}
 					this.pause(BUSY_WAIT_MS);
 				}
 				continue;
@@ -401,10 +406,30 @@ public final class SavedChunkImport {
 		progress.saveIfChanged();
 	}
 
-	/** Whether the heap is nearly full: another tile now could tip the game into a long collection. */
-	private static boolean memoryTight() {
+	private static boolean heapNearlyFull() {
 		Runtime runtime = Runtime.getRuntime();
 		return runtime.totalMemory() - runtime.freeMemory() > runtime.maxMemory() * MAX_HEAP_SHARE;
+	}
+
+	/**
+	 * Whether to hold the next tile because the heap is nearly full, which could tip the game into a
+	 * long collection. Only for a moment: the collector usually frees it, and in a heap that stays
+	 * full, as a big modpack's can, a fill that waits for it would never finish.
+	 */
+	private boolean memoryTight() {
+		if (!heapNearlyFull()) {
+			this.heapFullSince = 0;
+			return false;
+		}
+		long now = System.currentTimeMillis();
+		if (this.heapFullSince == 0) {
+			this.heapFullSince = now;
+		}
+		if (now - this.heapFullSince > MAX_HEAP_WAIT_MS) {
+			this.heapFullSince = now;
+			return false;
+		}
+		return true;
 	}
 
 	/** How many tiles may be drawing right now. */
