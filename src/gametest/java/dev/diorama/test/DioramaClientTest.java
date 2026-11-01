@@ -172,6 +172,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("failing-model")) {
 				FailingModelTest.run(context);
 			}
+			if (tests.contains("failing-shape")) {
+				FailingShapeTest.run(context);
+			}
 			if (tests.contains("fog-of-war")) {
 				fogOfWar(context, world);
 			}
