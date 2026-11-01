@@ -46,12 +46,12 @@ import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 //?}
 import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -161,8 +161,8 @@ public final class MapScreen extends Screen {
 	/** Underground the map opens on the cave the player is in, unless the settings say surface only. */
 	private int layerOnOpening() {
 		MapSession session = MapSession.get();
-		LocalPlayer player = net.minecraft.client.Minecraft.getInstance().player;
-		return session != null && player != null && Settings.get().autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
+		Entity viewer = MapSession.viewer();
+		return session != null && viewer != null && Settings.get().autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
 	}
 
 	@Override
@@ -215,11 +215,11 @@ public final class MapScreen extends Screen {
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.map.recenter")).build());
 		this.sliceUp = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
 			this.menu = null;
-			this.shiftSlice(DepthGauge.STEP, this.minecraft.player);
+			this.shiftSlice(DepthGauge.STEP, MapSession.viewer());
 		}).size(18, 14).createNarration(n -> Component.translatable("diorama.map.slice_up")).build());
 		this.sliceDown = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
 			this.menu = null;
-			this.shiftSlice(-DepthGauge.STEP, this.minecraft.player);
+			this.shiftSlice(-DepthGauge.STEP, MapSession.viewer());
 		}).size(18, 14).createNarration(n -> Component.translatable("diorama.map.slice_down")).build());
 		this.drawButton = this.addRenderableWidget(Button.builder(Component.empty(), b -> {
 			this.menu = null;
@@ -379,13 +379,13 @@ public final class MapScreen extends Screen {
 		// The map can open before a server names its world, and the list of maps is the world's.
 		this.mapsButton.active = Maps.get() != null;
 		MapSession session = MapSession.get();
-		LocalPlayer player = this.minecraft.player;
-		if (session == null || player == null) {
+		Entity viewer = MapSession.viewer();
+		if (session == null || viewer == null) {
 			return;
 		}
 		MapLevel shown = this.shownMap(session);
 		boolean elsewhere = this.otherDimension != null;
-		Vec3 pos = player.getPosition(a);
+		Vec3 pos = viewer.getPosition(a);
 		double scale = this.scaleToShown();
 		double playerU = pos.x * scale;
 		double playerV = Projection.v(pos.y, pos.z * scale);
@@ -417,10 +417,10 @@ public final class MapScreen extends Screen {
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
 		Radar.draw(graphics, view, this.blips, true, true);
-		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), player.getViewYRot(a), 6);
+		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), viewer.getViewYRot(a), 6);
 		this.lastView = view;
 		if (caves) {
-			this.gauge.layout(this.minecraft.level, player.blockPosition(), this.layer, this.width, this.height);
+			this.gauge.layout(this.minecraft.level, viewer.blockPosition(), this.layer, this.width, this.height);
 			this.sliceUp.setPosition(this.gauge.upButtonX(), this.gauge.upButtonY());
 			this.sliceDown.setPosition(this.gauge.upButtonX(), this.gauge.downButtonY());
 			// Its labels slide left of the map's buttons (draw, zoom, recenter) rather than under them.
@@ -459,12 +459,12 @@ public final class MapScreen extends Screen {
 					*///?}
 				}
 			} else if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
-				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
 			} else if (hoveredPin != null) {
-				Component described = elsewhere ? Component.literal(hoveredPin.waypoint().name) : WaypointOverlay.describe(hoveredPin.waypoint(), player);
+				Component described = elsewhere ? Component.literal(hoveredPin.waypoint().name) : WaypointOverlay.describe(hoveredPin.waypoint(), viewer);
 				graphics.setTooltipForNextFrame(this.font, described, mouseX, mouseY);
 			} else if (hovered != null) {
-				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, player), mouseX, mouseY);
+				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
 			} else if (this.pressButton == -1) {
 				List<FormattedCharSequence> lines = this.spotTooltip(mouseX, mouseY);
 				if (lines != null) {
@@ -477,7 +477,7 @@ public final class MapScreen extends Screen {
 		graphics.fill(0, 0, this.width, BAR, 0x90000000);
 		this.drawTabs(graphics, mouseX, mouseY);
 		int statusX = this.tabsEnd + 8;
-		graphics.text(this.font, this.statusText(shown, player, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
+		graphics.text(this.font, this.statusText(shown, viewer, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
 		String help = (this.draw.active() ? this.draw.help() : HELP).getString();
 		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
@@ -523,12 +523,12 @@ public final class MapScreen extends Screen {
 	 * baking, the roof and the export. On another dimension's map, where the player's position
 	 * doesn't belong, it says where they are instead, and there are no chunks or bakes to count.
 	 */
-	private String statusText(MapLevel shown, LocalPlayer player, boolean caves, int room) {
+	private String statusText(MapLevel shown, Entity viewer, boolean caves, int room) {
 		boolean elsewhere = this.otherDimension != null;
 		String roof = !caves && shown.roofless() ? Component.translatable("diorama.map.under_roof").getString() : null;
 		String position = elsewhere
-			? Component.translatable("diorama.map.you_are_in", Waypoints.dimensionName(player.level().dimension().identifier().toString())).getString()
-			: String.format("%d, %d, %d", player.getBlockX(), player.getBlockY(), player.getBlockZ());
+			? Component.translatable("diorama.map.you_are_in", Waypoints.dimensionName(viewer.level().dimension().identifier().toString())).getString()
+			: String.format("%d, %d, %d", viewer.getBlockX(), viewer.getBlockY(), viewer.getBlockZ());
 		String chunks = elsewhere ? null : Component.translatable("diorama.map.chunks", shown.chunkCount()).getString();
 		String baking = !elsewhere && shown.bakingCount() > 0 ? Component.translatable("diorama.map.baking").getString() : null;
 		MapExport export = MapExport.running();
@@ -936,15 +936,15 @@ public final class MapScreen extends Screen {
 		if (this.otherDimension != null) {
 			return Component.translatable("diorama.map.spot", x, y, z);
 		}
-		LocalPlayer player = this.minecraft.player;
-		long distance = player == null ? 0 : Math.round(Math.sqrt(player.distanceToSqr(x + 0.5, y, z + 0.5)));
+		Entity viewer = MapSession.viewer();
+		long distance = viewer == null ? 0 : Math.round(Math.sqrt(viewer.distanceToSqr(x + 0.5, y, z + 0.5)));
 		return Component.translatable("diorama.menu.where", x, y, z, distance);
 	}
 
 	/** "About 120, -340 · 212 m": a point whose height isn't known, and how far the player is from it across the ground. */
 	private Component roughly(int x, int z) {
-		LocalPlayer player = this.minecraft.player;
-		long distance = player == null ? 0 : Math.round(Math.hypot(player.getX() - (x + 0.5), player.getZ() - (z + 0.5)));
+		Entity viewer = MapSession.viewer();
+		long distance = viewer == null ? 0 : Math.round(Math.hypot(viewer.getX() - (x + 0.5), viewer.getZ() - (z + 0.5)));
 		return Component.translatable("diorama.menu.where_rough", x, z, distance);
 	}
 
@@ -1034,7 +1034,7 @@ public final class MapScreen extends Screen {
 		if (this.draw.key(key, this.dimension())) {
 			return true;
 		}
-		LocalPlayer player = this.minecraft.player;
+		Entity viewer = MapSession.viewer();
 		// Each of these changes the view, which an open menu belongs to, so they close it.
 		switch (key) {
 			case InputConstants.KEY_C -> {
@@ -1043,12 +1043,12 @@ public final class MapScreen extends Screen {
 				}
 			case InputConstants.KEY_PAGEUP -> {
 				this.menu = null;
-				this.shiftSlice(4, player);
+				this.shiftSlice(4, viewer);
 				return true;
 				}
 			case InputConstants.KEY_PAGEDOWN -> {
 				this.menu = null;
-				this.shiftSlice(-4, player);
+				this.shiftSlice(-4, viewer);
 				return true;
 				}
 			case InputConstants.KEY_SPACE -> {
@@ -1094,19 +1094,19 @@ public final class MapScreen extends Screen {
 			return;
 		}
 		this.gauge.cancel();
-		LocalPlayer player = this.minecraft.player;
-		this.layer = this.layer == TileKey.SURFACE && player != null ? MapSession.caveLayerFor(player.getY()) : TileKey.SURFACE;
+		Entity viewer = MapSession.viewer();
+		this.layer = this.layer == TileKey.SURFACE && viewer != null ? MapSession.caveLayerFor(viewer.getY()) : TileKey.SURFACE;
 	}
 
-	private void shiftSlice(int delta, @Nullable LocalPlayer player) {
+	private void shiftSlice(int delta, @Nullable Entity viewer) {
 		if (this.otherDimension != null) {
 			return;
 		}
 		if (this.layer == TileKey.SURFACE) {
-			if (player == null) {
+			if (viewer == null) {
 				return;
 			}
-			this.layer = MapSession.caveLayerFor(player.getY());
+			this.layer = MapSession.caveLayerFor(viewer.getY());
 		}
 		this.layer = Math.max(this.minecraft.level.getMinY() + 4, Math.min(this.minecraft.level.getMaxY() + 1, this.layer + delta));
 	}
@@ -1375,8 +1375,8 @@ public final class MapScreen extends Screen {
 	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map. */
 	private @Nullable List<FormattedCharSequence> spotTooltip(int mouseX, int mouseY) {
 		MapViewport.View view = this.lastView;
-		LocalPlayer player = this.minecraft.player;
-		if (view == null || player == null) {
+		Entity viewer = MapSession.viewer();
+		if (view == null || viewer == null) {
 			return null;
 		}
 		// The pick walks a ray through the map's blocks; do it again only for another block.
@@ -1415,7 +1415,7 @@ public final class MapScreen extends Screen {
 		if (this.otherDimension != null) {
 			return List.of(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()).getVisualOrderText());
 		}
-		long distance = Math.round(Math.sqrt(player.distanceToSqr(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5)));
+		long distance = Math.round(Math.sqrt(viewer.distanceToSqr(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5)));
 		Component biome = this.biomeAt(spot);
 		Component detail = biome != null
 			? Component.translatable("diorama.map.spot_detail", biome, distance)

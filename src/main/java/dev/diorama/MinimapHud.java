@@ -30,6 +30,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -159,16 +160,16 @@ public final class MinimapHud implements HudElement {
 	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, boolean right, boolean top, int effects, int wanted) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
-		LocalPlayer player = mc.player;
+		Entity viewer = MapSession.viewer();
 		Settings settings = Settings.get();
-		Vec3 pos = player.getPosition(partialTick);
+		Vec3 pos = viewer.getPosition(partialTick);
 		Font font = mc.font;
-		List<InfoLine> info = this.infoLines(settings, player, mc);
+		List<InfoLine> info = this.infoLines(settings, viewer, mc);
 		int infoHeight = info.size() * 10;
 		int size = this.fit(wanted, graphics.guiWidth(), graphics.guiHeight(), top, effects, infoHeight);
 		int x = right ? graphics.guiWidth() - size - MARGIN : MARGIN;
 		int y = top ? MARGIN + effects : graphics.guiHeight() - size - MARGIN - infoHeight;
-		int wantedLayer = settings.autoCaves ? session.autoLayer(player) : TileKey.SURFACE;
+		int wantedLayer = settings.autoCaves ? session.autoLayer(viewer) : TileKey.SURFACE;
 		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, pos.x, Projection.v(pos.y, pos.z), settings.zoom(), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
 		float opacity = settings.opacity();
@@ -187,11 +188,11 @@ public final class MinimapHud implements HudElement {
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
-			List<Waypoint> near = store.in(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, player)).toList();
+			List<Waypoint> near = store.in(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, viewer)).toList();
 			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, near, false), false, null);
 		}
 		Radar.draw(graphics, view, blips, false, true);
-		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, player.getViewYRot(partialTick), 5);
+		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, viewer.getViewYRot(partialTick), 5);
 		if (settings.compass) {
 			this.compass(graphics, font, x, y, size);
 		}
@@ -266,9 +267,9 @@ public final class MinimapHud implements HudElement {
 		graphics.text(font, letter, cx - w / 2, y, color, false);
 	}
 
-	private List<InfoLine> infoLines(Settings settings, LocalPlayer player, Minecraft mc) {
+	private List<InfoLine> infoLines(Settings settings, Entity viewer, Minecraft mc) {
 		List<InfoLine> lines = new ArrayList<>();
-		BlockPos pos = player.blockPosition();
+		BlockPos pos = viewer.blockPosition();
 		if (settings.coordinates) {
 			lines.add(new InfoLine(pos.getX() + ", " + pos.getY() + ", " + pos.getZ(), INFO_COLOR));
 		}

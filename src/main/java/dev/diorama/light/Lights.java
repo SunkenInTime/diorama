@@ -1,6 +1,7 @@
 package dev.diorama.light;
 
 import dev.diorama.Diorama;
+import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
@@ -30,6 +31,7 @@ import java.util.concurrent.Executors;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
@@ -142,7 +144,8 @@ public final class Lights {
 	 */
 	public void draw(GuiGraphicsExtractor graphics, MapViewport.View view, float partialTick, float opacity, boolean radar) {
 		Player self = Minecraft.getInstance().player;
-		if (view.layer() == TileKey.SURFACE || this.map.roofless() || self == null) {
+		Entity viewer = MapSession.viewer();
+		if (view.layer() == TileKey.SURFACE || this.map.roofless() || self == null || viewer == null) {
 			this.close();
 			return;
 		}
@@ -154,7 +157,7 @@ public final class Lights {
 		List<Held> held = new ArrayList<>();
 		for (Player player : this.level.players()) {
 			int carried = carried(player);
-			if (carried <= 0 || player != self && !(radar && onRadar(player, self, partialTick) && simulated(player, self))) {
+			if (carried <= 0 || player != viewer && !(player != self && radar && onRadar(player, self, viewer, partialTick) && simulated(player, viewer))) {
 				continue;
 			}
 			Vec3 eye = player.getEyePosition(partialTick);
@@ -274,16 +277,16 @@ public final class Lights {
 	}
 
 	/** Whether {@code player} is within the simulation distance of {@code self}: the world past it stands still. */
-	private boolean simulated(Player player, Player self) {
+	private boolean simulated(Player player, Entity viewer) {
 		int reach = this.level.getServerSimulationDistance();
-		return Math.abs((player.getBlockX() >> 4) - (self.getBlockX() >> 4)) <= reach && Math.abs((player.getBlockZ() >> 4) - (self.getBlockZ() >> 4)) <= reach;
+		return Math.abs((player.getBlockX() >> 4) - (viewer.getBlockX() >> 4)) <= reach && Math.abs((player.getBlockZ() >> 4) - (viewer.getBlockZ() >> 4)) <= reach;
 	}
 
-	/** Whether the radar shows {@code player} to {@code self}, as it does other players. */
-	private static boolean onRadar(Player player, Player self, float partialTick) {
+	/** Whether the radar shows {@code player} to {@code self}, watching from {@code viewer}, as it does other players. */
+	private static boolean onRadar(Player player, Player self, Entity viewer, float partialTick) {
 		Settings settings = Settings.get();
 		return settings.radarPlayers && player.isAlive() && !player.isInvisibleTo(self) && (!player.isSpectator() || self.isSpectator())
-			&& Math.abs(player.getPosition(partialTick).y - self.getPosition(partialTick).y) <= settings.radarRange;
+			&& Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= settings.radarRange;
 	}
 
 	/**

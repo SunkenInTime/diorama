@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import com.google.common.collect.Iterables;
+import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.TrackedPlayers;
@@ -82,18 +83,20 @@ public final class Radar {
 		Minecraft mc = Minecraft.getInstance();
 		ClientLevel level = mc.level;
 		LocalPlayer self = mc.player;
+		Entity viewer = MapSession.viewer();
 		List<Blip> blips = new ArrayList<>();
-		if (level == null || self == null) {
+		if (level == null || self == null || viewer == null) {
 			return blips;
 		}
-		double selfY = self.getPosition(partialTick).y;
+		double selfY = viewer.getPosition(partialTick).y;
 		Settings settings = Settings.get();
 		// Entities farther above or below than the range are left off; otherwise cave mobs crowd
 		// the surface view.
 		double range = settings.radarRange;
 		float margin = 12;
 		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
-			if (entity == self || !entity.isAlive() || entity.isInvisibleTo(self)) {
+			// The one the map follows is the arrow in its middle.
+			if (entity == self || entity == viewer || !entity.isAlive() || entity.isInvisibleTo(self)) {
 				continue;
 			}
 			Kind kind = kind(entity);
