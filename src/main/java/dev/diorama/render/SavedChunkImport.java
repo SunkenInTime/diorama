@@ -74,8 +74,9 @@ public final class SavedChunkImport {
 	/** The same while playing: the GPU does most of the work of a tile, and tracing costs frame rate per worker. */
 	private static final int GPU_WORKERS = Math.min(WORKERS, Integer.getInteger("diorama.savedChunkGpuWorkers", 2));
 	/**
-	 * On a machine with few cores even one busy thread costs the game frames, so while playing a
-	 * worker rests as long as its tile took.
+	 * On a machine with few cores even one busy thread costs the game frames, and so does what a
+	 * tile leaves behind for the disk and the collector, so while playing a worker rests three
+	 * times as long as its tile took.
 	 */
 	private static final boolean PACED = MapLevel.BAKER_COUNT == 1;
 
@@ -333,7 +334,7 @@ public final class SavedChunkImport {
 							boolean taken = this.map.bakeFromSave(key, this.source, looks);
 							long nanos = System.nanoTime() - start;
 							if (PACED && !Minecraft.getInstance().isPaused()) {
-								this.pause(nanos / 1_000_000);
+								this.pause(3 * nanos / 1_000_000);
 							}
 							return new Drawn(key, taken, nanos, null);
 						} catch (RuntimeException e) {
