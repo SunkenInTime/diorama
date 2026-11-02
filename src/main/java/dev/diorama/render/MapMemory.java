@@ -116,10 +116,13 @@ public final class MapMemory {
 		return label == null || !Files.isDirectory(folder.resolveSibling(from)) ? null : new MapMemory(folder.resolveSibling(from), label);
 	}
 
-	/** Notes that the map moved away from a folder, for the save's chunks to be checked when it comes back. */
+	/**
+	 * Notes that the map moved away from a folder, for the save's chunks to be checked when it comes
+	 * back. A note nothing has read yet stays: everything since that time is still to be checked.
+	 */
 	static void noteLeft(Path folder) {
 		try {
-			if (Files.isDirectory(folder)) {
+			if (Files.isDirectory(folder) && !Files.exists(folder.resolve(LEFT))) {
 				Files.writeString(folder.resolve(LEFT), Long.toString(System.currentTimeMillis() / 1000), StandardCharsets.UTF_8);
 			}
 		} catch (IOException e) {
