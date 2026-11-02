@@ -345,12 +345,13 @@ public final class SavedChunkImport {
 			return null;
 		}
 		for (TileKey key : this.map.viewTiles()) {
-			if (this.drawn.containsKey(key) || inProgress.contains(key) || !this.viewChecked.add(key)) {
+			if (this.drawn.containsKey(key) || inProgress.contains(key)) {
 				continue;
 			}
 			double u = key.minU() + key.units() / 2;
 			double z = Projection.zAt(key.minV() + key.units() / 2, TYPICAL_Y);
-			if (this.pending.contains(SavedChunks.regionKey((int) Math.floor(u) >> 9, (int) Math.floor(z) >> 9)) && !this.map.pictureWhole(key)) {
+			// Its region can get work later, so it's only looked at, once, when there is some.
+			if (this.pending.contains(SavedChunks.regionKey((int) Math.floor(u) >> 9, (int) Math.floor(z) >> 9)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
 				return key;
 			}
 		}

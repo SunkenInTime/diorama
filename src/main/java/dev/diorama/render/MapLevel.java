@@ -149,7 +149,8 @@ public final class MapLevel implements ChunkSource {
 	private long lastLiveCheckMs;
 	/** A view's priority for a tile just outside it, and past that the further away it is. */
 	public static final double OUTSIDE_VIEW = 100_000;
-	private static final int MAX_VIEW_TILES = 64;
+	/** As many as a 4K screen shows at the zoom overview tiles start from. */
+	private static final int MAX_VIEW_TILES = 256;
 	/** The sky view tiles the views last showed, most wanted first; see {@link #importFocus()}. */
 	private volatile List<TileKey> viewTiles = List.of();
 	/** Where the views last looked, in map space, and when; see {@link #importFocus()}. */

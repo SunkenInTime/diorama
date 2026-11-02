@@ -101,6 +101,9 @@ public final class MapMemory {
 	 */
 	static @Nullable MapMemory open(Path folder, boolean keep) {
 		String from = note(folder);
+		if (from != null && !Files.isDirectory(folder.resolveSibling(from))) {
+			from = null;
+		}
 		if (from == null && !hasTiles(folder)) {
 			from = fullestBeside(folder);
 			if (from != null && keep) {
@@ -380,6 +383,7 @@ public final class MapMemory {
 				entry.texture.close();
 			}
 			it.remove();
+			this.version++;
 		}
 	}
 
