@@ -69,7 +69,7 @@ layout(std140) uniform DynamicTransforms {
 
 // Share of known ground per mask texel, in the red channel. Green is 1 where every texel this
 // shader can read from a pixel in that texel is fully known, blue is 1 where every one is fully
-// unknown.
+// unknown. Alpha is 1 less the share of a remembered map under the fog.
 uniform sampler2D Sampler0;
 // Tileable noise covering NOISE_PERIOD map units, a different scale per channel.
 uniform sampler2D Sampler1;
@@ -100,6 +100,8 @@ const float COS_PITCH = 0.643;
 const int LAYERS = 8;
 // Fast quality, for slower graphics cards: fewer layers, one blur, and no sun shading.
 const int FAST_LAYERS = 2;
+// How much of the fog a remembered map shows through.
+const float MEMORY_SHOWS = 0.62;
 
 // Surface fog banks are tall and soft. Cave fog hugs the ground with a tight edge, so a
 // three-block tunnel you walked down stays readable instead of blurring into the fog.
@@ -292,5 +294,6 @@ void main() {
         discard;
     }
     color += (hash(gl_FragCoord.yx) - 0.5) / 255.0;
-    fragColor = vec4(color / alpha, alpha * fogOpacity) * ColorModulator;
+    float memory = 1.0 - texture(Sampler0, maskUv).a;
+    fragColor = vec4(color / alpha, alpha * fogOpacity * (1.0 - MEMORY_SHOWS * memory)) * ColorModulator;
 }

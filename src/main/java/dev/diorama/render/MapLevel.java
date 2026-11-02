@@ -16,6 +16,7 @@ import dev.diorama.bake.TileSurface;
 import dev.diorama.bake.TileSpots;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.SeenBlocks;
+import dev.diorama.data.TileLabel;
 import dev.diorama.data.TileStore;
 import dev.diorama.data.WorldSavePick;
 import dev.diorama.render.gpu.MapTexture;
@@ -108,6 +109,8 @@ public final class MapLevel implements ChunkSource {
 	private volatile @Nullable TileStore store;
 	/** The folder {@link #store} saves into; see {@link #storeName()}. */
 	private volatile String storeName = "";
+	/** The tiles this map had under another label, until it's redrawn; null if there are none. */
+	private volatile @Nullable MapMemory memory;
 	private volatile boolean fogOfWar;
 	/** What bakes record for the map overlays, or null when no overlay is on. */
 	private volatile @Nullable Overlays overlays;
@@ -144,6 +147,12 @@ public final class MapLevel implements ChunkSource {
 	/** The live chunks are checked this often: they're as many as the player loads. */
 	private static final long LIVE_CHECK_MS = 2000;
 	private long lastLiveCheckMs;
+	/** A view's priority for a tile just outside it, and past that the further away it is. */
+	public static final double OUTSIDE_VIEW = 100_000;
+	/** As many as a 4K screen shows at the zoom overview tiles start from. */
+	private static final int MAX_VIEW_TILES = 256;
+	/** The sky view tiles the views last showed, most wanted first; see {@link #importFocus()}. */
+	private volatile List<TileKey> viewTiles = List.of();
 	/** Where the views last looked, in map space, and when; see {@link #importFocus()}. */
 	private volatile double focusU;
 	private volatile double focusV;
@@ -306,10 +315,7 @@ public final class MapLevel implements ChunkSource {
 		return o != null && o.spawnSpots();
 	}
 
-	/**
-	 * The saved tiles for the current camera angle. Where a tile's pixels land depends on the
-	 * angle, so tiles saved at one angle would merge into the wrong places at another.
-	 */
+	/** The saved tiles for how tiles are baked now, and what they remember from before. */
 	private @Nullable TileStore openStore() {
 		if (this.folder == null) {
 			return null;
@@ -317,30 +323,25 @@ public final class MapLevel implements ChunkSource {
 		this.storeName = this.storeName();
 		TileStore opened = new TileStore(this.folder.resolve(this.storeName));
 		opened.onOverviewChanged(this.overviewChanged::add);
+		this.memory = MapMemory.open(this.folder.resolve(this.storeName), !this.savedOnly);
 		return opened;
 	}
 
-	/**
-	 * Where the sky view's tiles are saved: one folder per kind of view, since their pixels mean
-	 * different things and saved pixels are merged into fresh bakes. The camera angle moves where
-	 * pixels land. Under a roof, the view is a different picture, and with fog of war it may only
-	 * hold what the player has seen. 60 degrees was the only angle before others existed, and its
-	 * sky view tiles are in "surface".
-	 */
+	/** The folder the sky view's tiles are saved in; see {@link TileLabel}. */
 	private String storeName() {
-		long pitch = Math.round(dev.diorama.MapStyle.get().pitchDegrees());
-		if (this.roofless()) {
-			return "under-roof-" + pitch + (this.fogOfWar ? "-fog" : "");
-		}
-		return pitch == 60 ? "surface" : "surface-" + pitch;
+		return new TileLabel(this.roofless(), Math.round(dev.diorama.MapStyle.get().pitchDegrees()), this.roofless() && this.fogOfWar).folder();
 	}
 
-	/** Moves to another folder if the kind of view changed, and queues everything loaded to be saved there. */
+	/** Moves to another folder if how tiles are baked changed, and queues everything loaded to be saved there. */
 	private void switchStoreIfNeeded() {
 		if (this.store == null || this.storeName().equals(this.storeName)) {
 			return;
 		}
 		this.store.close();
+		if (this.memory != null) {
+			this.memory.close();
+		}
+		MapMemory.noteLeft(this.folder.resolve(this.storeName));
 		this.store = this.openStore();
 		this.unsaved.clear();
 		this.emptyTiles.clear();
@@ -729,6 +730,11 @@ public final class MapLevel implements ChunkSource {
 		return this.store;
 	}
 
+	/** What this map remembers from before its tiles' label changed, or null for nothing. */
+	public @Nullable MapMemory memory() {
+		return this.memory;
+	}
+
 	/** Uploads finished bakes and starts new ones. Call regularly on the render thread. */
 	public void update() {
 		this.frame++;
@@ -780,6 +786,13 @@ public final class MapLevel implements ChunkSource {
 				this.focusU = middle.minU() + middle.units() / 2.0;
 				this.focusV = middle.minV() + middle.units() / 2.0;
 				this.focusMs = now;
+				List<TileKey> inView = new ArrayList<>();
+				for (Map.Entry<TileKey, Double> entry : order) {
+					if (entry.getValue() < OUTSIDE_VIEW && entry.getKey().lod() == 0 && !entry.getKey().isCave() && inView.size() < MAX_VIEW_TILES) {
+						inView.add(entry.getKey());
+					}
+				}
+				this.viewTiles = inView;
 			}
 			for (Map.Entry<TileKey, Double> entry : order) {
 				if (this.inFlight.size() >= limit) {
@@ -1366,6 +1379,9 @@ public final class MapLevel implements ChunkSource {
 		if (this.store != null) {
 			this.store.close();
 		}
+		if (this.memory != null) {
+			this.memory.close();
+		}
 		this.saveSeen();
 		for (MapTile tile : this.tiles.values()) {
 			tile.close();
@@ -1429,6 +1445,11 @@ public final class MapLevel implements ChunkSource {
 	/** Where a view looked in the last moments, as map space {u, v}, or null if none did. */
 	double @Nullable [] importFocus() {
 		return System.currentTimeMillis() - this.focusMs > 1000 ? null : new double[] {this.focusU, this.focusV};
+	}
+
+	/** The detailed sky view tiles a view showed in the last moments, most wanted first. */
+	List<TileKey> viewTiles() {
+		return System.currentTimeMillis() - this.focusMs > 1000 ? List.of() : this.viewTiles;
 	}
 
 	/**

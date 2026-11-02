@@ -16,6 +16,13 @@ public final class SavedChunkSource implements ChunkSource {
 
 	private final ChunkSource live;
 	private final SavedChunks save;
+	/** Says which saved chunks a bake may see, given a chunk's x and z and its top. */
+	private volatile Allowed allowed = (chunkX, chunkZ, top) -> true;
+
+	/** Which saved chunks a bake may see. */
+	public interface Allowed {
+		boolean test(int chunkX, int chunkZ, int top);
+	}
 	private final Map<Long, @Nullable ChunkSnapshot> snapshots = new LinkedHashMap<>(CACHED_SNAPSHOTS, 0.75F, true) {
 		@Override
 		protected boolean removeEldestEntry(Map.Entry<Long, @Nullable ChunkSnapshot> eldest) {
@@ -34,6 +41,12 @@ public final class SavedChunkSource implements ChunkSource {
 		return live != null ? live : this.saved(chunkX, chunkZ);
 	}
 
+	/** Limits what bakes see from here on, and forgets what they saw. */
+	public synchronized void allow(Allowed allowed) {
+		this.allowed = allowed;
+		this.snapshots.clear();
+	}
+
 	private synchronized @Nullable ChunkSnapshot saved(int chunkX, int chunkZ) {
 		long key = ChunkSnapshot.key(chunkX, chunkZ);
 		if (this.snapshots.containsKey(key)) {
@@ -41,7 +54,7 @@ public final class SavedChunkSource implements ChunkSource {
 		}
 		SavedChunk chunk = this.save.read(chunkX, chunkZ);
 		ChunkSnapshot snapshot = null;
-		if (chunk != null && chunk.finished()) {
+		if (chunk != null && chunk.finished() && this.allowed.test(chunkX, chunkZ, this.save.top(chunkX, chunkZ))) {
 			SavedChunk[] around = new SavedChunk[9];
 			for (int dx = -1; dx <= 1; dx++) {
 				for (int dz = -1; dz <= 1; dz++) {

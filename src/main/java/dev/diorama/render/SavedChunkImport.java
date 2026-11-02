@@ -43,18 +43,19 @@ import org.jspecify.annotations.Nullable;
 /**
  * Draws the chunks in the world's save onto the saved map, so the map fills in without the player
  * walking there, whether they played before installing the mod or a pre-generation tool (Chunky
- * and the like) made the area. Singleplayer only: on a server the save isn't here (see
+ * and the like) made the area, and redraws a map whose tiles are labelled differently now (see
+ * {@link MapMemory}). Singleplayer only: on a server the save isn't here (see
  * {@link SavedChunks}). Only the sky view: reading cave slices from the save would show caves the
  * player never found, so those keep showing only what the player has been near.
  *
- * <p>Runs on a low-priority thread, a region file at a time, the region nearest what the player
- * is looking at first; a map panned to another region takes over after the tiles in progress. Tiles
- * are drawn on a low-priority worker while playing, more with the game paused, and on the GPU once
- * it has shown it draws them right. Each tile is merged into the saved map like any bake, and pictures that are already whole stay as
- * they are. Progress is kept per chunk in the sky view's folder (a folder for another kind of view
- * starts over), so quitting costs a few tiles, and a later visit only draws what's new. Saves are
- * listed again every so often, so a pre-generation running while the player plays shows up as it
- * goes.
+ * <p>Runs on a low-priority thread, the tiles a view is showing first, then a region file at a
+ * time, the region nearest what the player is looking at first; a map panned to another region
+ * takes over after the tiles in progress. Tiles are drawn on a low-priority worker while playing,
+ * more with the game paused, and on the GPU once it has shown it draws them right. Each tile is
+ * merged into the saved map like any bake, and pictures that are already whole stay as they are.
+ * Progress is kept per chunk in the sky view's folder (a folder for another kind of view starts
+ * over), so quitting costs a few tiles, and a later visit only draws what's new. Saves are listed
+ * again every so often, so a pre-generation running while the player plays shows up as it goes.
  */
 public final class SavedChunkImport {
 	/** Waits this long into a level, so as not to compete with the game getting it ready. */
@@ -100,6 +101,9 @@ public final class SavedChunkImport {
 	private final CountDownLatch stop = new CountDownLatch(1);
 	private volatile boolean idle;
 	private volatile boolean rescanAsked;
+	/** Draw only what the map remembers: it's being redrawn, and isn't to fill in past that. */
+	private volatile boolean onlyRemembered;
+	private final Map<Long, Boolean> remembered = new ConcurrentHashMap<>();
 
 	// The import thread's own from here on.
 	/** The folder progress is kept for; a different one means a different kind of view. */
@@ -109,6 +113,8 @@ public final class SavedChunkImport {
 	private Map<Long, int[]> regions = Map.of();
 	private long lastScan;
 	private long heapFullSince;
+	/** Tiles views asked for, each looked at once unless it couldn't be drawn. */
+	private final Set<TileKey> viewChecked = new HashSet<>();
 	/** When the last listing started, in seconds: chunk heights are at least this recent. */
 	private int scannedAt;
 	private long lastSave;
@@ -152,6 +158,23 @@ public final class SavedChunkImport {
 		this.map.watchLiveChunks(false);
 		this.save.close();
 		this.stop.countDown();
+	}
+
+	/** Sets whether to draw only what the map remembers, or everything in the save. */
+	public void onlyRemembered(boolean only) {
+		if (this.onlyRemembered != only) {
+			this.onlyRemembered = only;
+			this.rescanAsked = true;
+			// A tile spans many chunks: those next to what's remembered mustn't come with it.
+			this.remembered.clear();
+			this.source.allow(only ? this::remembered : (chunkX, chunkZ, top) -> true);
+		}
+	}
+
+	/** Whether the map remembers a saved chunk, each asked once, as a bake reads it many times. */
+	private boolean remembered(int chunkX, int chunkZ, int top) {
+		MapMemory memory = this.map.memory();
+		return memory != null && this.remembered.computeIfAbsent(ChunkSnapshot.key(chunkX, chunkZ), k -> memory.showsChunk(chunkX, chunkZ, top));
 	}
 
 	/** For tests: whether everything in the save as of the last listing is drawn. */
@@ -231,6 +254,8 @@ public final class SavedChunkImport {
 			this.plans.clear();
 			this.heldUntil.clear();
 			this.drawn.clear();
+			this.viewChecked.clear();
+			this.remembered.clear();
 			this.lastScan = 0;
 		}
 		Progress progress = this.progress;
@@ -247,6 +272,10 @@ public final class SavedChunkImport {
 			this.scannedAt = (int) (now / 1000);
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
+			if (progress.back(this.regions)) {
+				// Before anything can leave this folder again: that note has to be the next one.
+				progress.saveIfChanged();
+			}
 			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
 				if (!Arrays.equals(region.getValue(), before.get(region.getKey()))) {
 					this.source.forgetTops(region.getKey());
@@ -254,7 +283,7 @@ public final class SavedChunkImport {
 			}
 			this.pending.clear();
 			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
-				if (progress.hasWork(region.getKey(), region.getValue())) {
+				if (progress.hasWork(region.getKey(), region.getValue(), this.onlyRemembered)) {
 					this.pending.add(region.getKey());
 				}
 			}
@@ -306,6 +335,29 @@ public final class SavedChunkImport {
 		return best;
 	}
 
+	/**
+	 * The next tile a view is showing that this run hasn't drawn, in ground with work to do, or null.
+	 * Not when redrawing only what's remembered: the regions' plans know what that is. A whole picture
+	 * stays, as a plan would leave it.
+	 */
+	private @Nullable TileKey nextViewTile(Set<TileKey> inProgress) {
+		if (this.onlyRemembered) {
+			return null;
+		}
+		for (TileKey key : this.map.viewTiles()) {
+			if (this.drawn.containsKey(key) || inProgress.contains(key)) {
+				continue;
+			}
+			double u = key.minU() + key.units() / 2;
+			double z = Projection.zAt(key.minV() + key.units() / 2, TYPICAL_Y);
+			// Its region can get work later, so it's only looked at, once, when there is some.
+			if (this.pending.contains(SavedChunks.regionKey((int) Math.floor(u) >> 9, (int) Math.floor(z) >> 9)) && this.viewChecked.add(key) && !this.map.pictureWhole(key)) {
+				return key;
+			}
+		}
+		return null;
+	}
+
 	/** Draws a region, or as much of it as it can before something else needs doing. */
 	private void draw(long region, BlockLooks looks, Path folder, Progress progress) {
 		// Everything read from here on, heights too, is at least this recent, which is what makes a
@@ -313,7 +365,7 @@ public final class SavedChunkImport {
 		this.source.clear();
 		int readSince = Math.min(this.scannedAt, (int) (System.currentTimeMillis() / 1000));
 		Plan plan = this.plans.get(region);
-		if (plan == null) {
+		if (plan == null || plan.onlyRemembered != this.onlyRemembered) {
 			plan = this.plan(region, progress);
 			if (plan == null) {
 				return;
@@ -322,34 +374,41 @@ public final class SavedChunkImport {
 		}
 		List<TileKey> retry = new ArrayList<>();
 		CompletionService<Drawn> drawing = new ExecutorCompletionService<>(this.workers);
+		Set<TileKey> inProgress = new HashSet<>();
+		Set<TileKey> forViews = new HashSet<>();
 		int running = 0;
 		boolean leaving = false;
 		RuntimeException failure = null;
 		while (running > 0 || !leaving && !plan.order.isEmpty()) {
-			leaving |= this.stopped() || !folder.equals(this.map.importFolder());
-			while (!leaving && running < this.workersNow() && !plan.order.isEmpty() && !this.save.serverBehind()
+			leaving |= this.stopped() || !folder.equals(this.map.importFolder()) || plan.onlyRemembered != this.onlyRemembered;
+			while (!leaving && running < this.workersNow() && !this.save.serverBehind()
 				&& this.map.unwrittenTiles() < MAX_UNWRITTEN && !memoryTight()) {
+				TileKey viewTile = this.nextViewTile(inProgress);
+				if (viewTile != null) {
+					inProgress.add(viewTile);
+					forViews.add(viewTile);
+					this.submit(drawing, viewTile, looks);
+					running++;
+					continue;
+				}
+				if (plan.order.isEmpty()) {
+					break;
+				}
 				Long nearest = this.nearestPending();
 				if (nearest != null && nearest != region) {
 					// Looking somewhere else now. The plan keeps its place for later.
 					leaving = true;
 					break;
 				}
-				TileKey key = plan.order.remove(plan.order.size() - 1);
+				TileKey key = plan.order.get(plan.order.size() - 1);
+				if (inProgress.contains(key)) {
+					// A view asked for it first. Its answer says whether this comes back.
+					break;
+				}
+				plan.order.remove(plan.order.size() - 1);
 				if (this.needsDrawing(key, plan.tiles.get(key), plan, progress)) {
-					drawing.submit(() -> {
-						long start = System.nanoTime();
-						try {
-							boolean taken = this.map.bakeFromSave(key, this.source, looks);
-							long nanos = System.nanoTime() - start;
-							if (PACED && playing()) {
-								this.pause(3 * nanos / 1_000_000);
-							}
-							return new Drawn(key, taken, nanos, null);
-						} catch (RuntimeException e) {
-							return new Drawn(key, false, 0, e);
-						}
-					});
+					inProgress.add(key);
+					this.submit(drawing, key, looks);
 					running++;
 				} else {
 					this.tileDone(key, plan, progress);
@@ -375,6 +434,7 @@ public final class SavedChunkImport {
 				throw new CompletionException(e.getCause());
 			}
 			running--;
+			inProgress.remove(done.key());
 			if (done.failure() != null && failure == null) {
 				failure = done.failure();
 				leaving = true;
@@ -383,14 +443,22 @@ public final class SavedChunkImport {
 				// Reads were cut short, so its chunks may not be in the tile.
 				continue;
 			}
+			// A tile a view asked for owes the plan nothing: if the plan has it, it finds it drawn.
+			boolean planned = !forViews.remove(done.key());
 			if (!done.taken()) {
-				retry.add(done.key());
+				// One a view asked for stays checked: around a busy farm that could go on forever, and
+				// its region's plan comes to it, with the wait that has.
+				if (planned) {
+					retry.add(done.key());
+				}
 				continue;
 			}
 			this.drawNanos += done.nanos();
 			this.drawnCount++;
 			this.drawn.put(done.key(), readSince);
-			this.tileDone(done.key(), plan, progress);
+			if (planned) {
+				this.tileDone(done.key(), plan, progress);
+			}
 		}
 		if (leaving) {
 			plan.order.addAll(retry);
@@ -434,6 +502,22 @@ public final class SavedChunkImport {
 			return false;
 		}
 		return true;
+	}
+
+	private void submit(CompletionService<Drawn> drawing, TileKey key, BlockLooks looks) {
+		drawing.submit(() -> {
+			long start = System.nanoTime();
+			try {
+				boolean taken = this.map.bakeFromSave(key, this.source, looks);
+				long nanos = System.nanoTime() - start;
+				if (PACED && playing()) {
+					this.pause(3 * nanos / 1_000_000);
+				}
+				return new Drawn(key, taken, nanos, null);
+			} catch (RuntimeException e) {
+				return new Drawn(key, false, 0, e);
+			}
+		});
 	}
 
 	/** How many tiles may be drawing right now. */
@@ -492,10 +576,11 @@ public final class SavedChunkImport {
 		int regionX = (int) (region >> 32);
 		int regionZ = (int) region;
 		int[] times = this.regions.get(region);
-		Plan plan = new Plan();
+		Plan plan = new Plan(this.onlyRemembered);
+		MapMemory memory = plan.onlyRemembered ? this.map.memory() : null;
 		for (int i = 0; i < 1024; i++) {
 			int time = times[i];
-			if (!progress.isWork(regionX, regionZ, i, time)) {
+			if (!progress.isWork(regionX, regionZ, i, time, plan.onlyRemembered)) {
 				continue;
 			}
 			while (!this.stopped() && this.save.serverBehind()) {
@@ -514,6 +599,10 @@ public final class SavedChunkImport {
 			if (summary == null || !summary.finished()) {
 				// Nothing to draw yet. Once it's finished, the save writes it again.
 				progress.mark(regionX, regionZ, i, time);
+				continue;
+			}
+			if (plan.onlyRemembered && (memory == null || !memory.showsChunk(cx, cz, summary.maxY()))) {
+				progress.mark(regionX, regionZ, i, Progress.NOT_REMEMBERED);
 				continue;
 			}
 			long chunk = ChunkSnapshot.key(cx, cz);
@@ -566,6 +655,8 @@ public final class SavedChunkImport {
 
 	/** The tiles a region still has to draw. */
 	private static final class Plan {
+		/** Made for redrawing only what's remembered; a change of mind makes a new plan. */
+		final boolean onlyRemembered;
 		/** Tiles left to draw; taken from the end. */
 		final List<TileKey> order = new ArrayList<>();
 		/** The region's new or changed chunks each tile shows. */
@@ -574,12 +665,16 @@ public final class SavedChunkImport {
 		final Map<Long, Integer> waiting = new HashMap<>();
 		/** When the save last wrote each of those chunks. */
 		final Map<Long, Integer> times = new HashMap<>();
+
+		Plan(boolean onlyRemembered) {
+			this.onlyRemembered = onlyRemembered;
+		}
 	}
 
 	/**
 	 * Which saved chunks need no drawing: for each, when the save had last written it at the time,
-	 * or {@link #LIVE}. Kept in {@code saved-chunks.bin}: {@code DSC1}, then deflated, the region
-	 * count and, per region, its x, z and 1024 values.
+	 * {@link #LIVE}, {@link #NOT_REMEMBERED} or {@link #CHANGED}. Kept in {@code saved-chunks.bin}:
+	 * {@code DSC1}, then deflated, the region count and, per region, its x, z and 1024 values.
 	 */
 	private static final class Progress {
 		private static final int MAGIC = 0x44534331;
@@ -588,9 +683,16 @@ public final class SavedChunkImport {
 		 * a little later: not news. Without this, every place the player walks would be drawn twice.
 		 */
 		static final int LIVE = -1;
+		/** Not on the map that's being redrawn, so it isn't drawn, unless the map starts filling in. */
+		static final int NOT_REMEMBERED = -2;
+		/** Drawn once, and changed since: no save time, so it's work, and not a first drawing either. */
+		static final int CHANGED = 1;
 		private final Path file;
 		private final Map<Long, int[]> times = new HashMap<>();
 		private boolean changed;
+		/** When the map last moved away from this folder, in seconds, or 0 if it's been here since. */
+		private int leftAt;
+		private boolean leftChecked;
 
 		private Progress(Path file) {
 			this.file = file;
@@ -598,6 +700,14 @@ public final class SavedChunkImport {
 
 		static Progress load(Path file) {
 			Progress progress = new Progress(file);
+			Path left = file.resolveSibling(MapMemory.LEFT);
+			try {
+				if (Files.isRegularFile(left)) {
+					progress.leftAt = Integer.parseInt(Files.readString(left).trim());
+				}
+			} catch (IOException | NumberFormatException e) {
+				Diorama.LOGGER.warn("Couldn't read when the map left {}", left, e);
+			}
 			if (!Files.exists(file)) {
 				return progress;
 			}
@@ -628,23 +738,45 @@ public final class SavedChunkImport {
 			return times == null ? 0 : times[index];
 		}
 
-		boolean isWork(int regionX, int regionZ, int index, int savedTime) {
+		boolean isWork(int regionX, int regionZ, int index, int savedTime, boolean onlyRemembered) {
 			if (savedTime == 0) {
 				return false;
 			}
 			int time = this.time(regionX, regionZ, index);
-			return time != LIVE && time != savedTime;
+			return time != LIVE && time != savedTime && !(onlyRemembered && time == NOT_REMEMBERED);
 		}
 
-		boolean hasWork(long region, int[] savedTimes) {
+		boolean hasWork(long region, int[] savedTimes, boolean onlyRemembered) {
 			int regionX = (int) (region >> 32);
 			int regionZ = (int) region;
 			for (int i = 0; i < 1024; i++) {
-				if (this.isWork(regionX, regionZ, i, savedTimes[i])) {
+				if (this.isWork(regionX, regionZ, i, savedTimes[i], onlyRemembered)) {
 					return true;
 				}
 			}
 			return false;
+		}
+
+		/**
+		 * The map came back to this folder. A chunk it saw live is only known to be drawn as it was when
+		 * the map left, so one the save has written since is work again.
+		 */
+		boolean back(Map<Long, int[]> regions) {
+			if (this.leftAt == 0) {
+				return false;
+			}
+			for (Map.Entry<Long, int[]> region : regions.entrySet()) {
+				int[] times = this.times.get(region.getKey());
+				for (int i = 0; times != null && i < 1024; i++) {
+					if (times[i] == LIVE && region.getValue()[i] >= this.leftAt) {
+						times[i] = CHANGED;
+					}
+				}
+			}
+			this.leftAt = 0;
+			this.leftChecked = true;
+			this.changed = true;
+			return true;
 		}
 
 		void mark(int regionX, int regionZ, int index, int time) {
@@ -679,6 +811,10 @@ public final class SavedChunkImport {
 				}
 				Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 				this.changed = false;
+				if (this.leftChecked) {
+					Files.deleteIfExists(this.file.resolveSibling(MapMemory.LEFT));
+					this.leftChecked = false;
+				}
 			} catch (IOException e) {
 				Diorama.LOGGER.warn("Couldn't save which saved chunks are drawn to {}", this.file, e);
 			}

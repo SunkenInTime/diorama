@@ -31,7 +31,7 @@ public final class MapViewport {
 	/** The map the mask was built from. Weak, so a minimap left over after leaving a world doesn't keep its map. */
 	private WeakReference<MapLevel> maskLevel = new WeakReference<>(null);
 
-	private record MaskInputs(long coverageVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
+	private record MaskInputs(long coverageVersion, long memoryVersion, int layer, int lod, double originU, double originV, double texel, boolean rounded, int scaleSteps, boolean fast, int nearU, int nearV) {
 	}
 
 	/**
@@ -112,6 +112,10 @@ public final class MapViewport {
 			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
 		}
 
+		MapMemory memory = cave ? null : level.memory();
+		if (memory != null) {
+			memory.draw(MapCanvas.of(graphics), view, Math.round(this.opacity * 255) << 24 | 0xFFFFFF);
+		}
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit);
 		this.drawFog(graphics, level, view);
 		graphics.disableScissor();
@@ -216,7 +220,7 @@ public final class MapViewport {
 				double dv = (tv + 0.5) * units - view.centerV();
 				boolean visible = tu >= tu0 && tu <= tu1 && tv >= tv0 && tv <= tv1;
 				// Tiles just outside the view bake too, so panning finds them ready.
-				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : 100_000));
+				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : MapLevel.OUTSIDE_VIEW));
 				if (!visible || tile == null || tile.texture() == null) {
 					continue;
 				}
@@ -356,10 +360,11 @@ public final class MapViewport {
 		// Once a texel spans a chunk there are no chunk steps left to smooth, and rounding would
 		// only eat small explored areas that are a few texels across.
 		boolean rounded = MapStyle.get().roundedFog() && view.layer() == TileKey.SURFACE && texel < 16;
+		MapMemory memory = view.layer() == TileKey.SURFACE ? level.memory() : null;
 		boolean drawsNear = this.drawsNear(view, lod);
 		int nearU = drawsNear ? (int) Math.floor(view.centerU() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
 		int nearV = drawsNear ? (int) Math.floor(view.centerV() / Projection.TILE_UNITS) : Integer.MIN_VALUE;
-		MaskInputs inputs = new MaskInputs(level.coverageVersion(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
+		MaskInputs inputs = new MaskInputs(level.coverageVersion(), memory == null ? 0 : memory.version(), view.layer(), lod, originU, originV, texel, rounded, scaleSteps, fast, nearU, nearV);
 		if (this.maskLevel.get() == level && inputs.equals(this.maskInputs)) {
 			return;
 		}
@@ -415,6 +420,16 @@ public final class MapViewport {
 			this.roundOff(Math.max(1, (int) Math.round(10 / texel)));
 		}
 		this.markReach(fogReach(texel, view.layer() != TileKey.SURFACE, fast, scaleSteps));
+		if (memory != null) {
+			// Alpha is 255 less the share of a remembered map under the fog, which thins it there.
+			for (int j = 0; j < MASK; j++) {
+				double v = originV + (j + 0.5) * texel;
+				for (int i = 0; i < MASK; i++) {
+					int remembered = Math.round(memory.known(view, originU + (i + 0.5) * texel, v) * 255);
+					this.maskPixels[j * MASK + i] = this.maskPixels[j * MASK + i] & 0xFFFFFF | (255 - remembered) << 24;
+				}
+			}
+		}
 		this.maskTexture.write(0, 0, 0, MASK, this.maskPixels);
 	}
 
