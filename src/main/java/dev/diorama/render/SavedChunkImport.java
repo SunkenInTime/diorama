@@ -103,6 +103,7 @@ public final class SavedChunkImport {
 	private volatile boolean rescanAsked;
 	/** Draw only what the map remembers: it's being redrawn, and isn't to fill in past that. */
 	private volatile boolean onlyRemembered;
+	private final Map<Long, Boolean> remembered = new ConcurrentHashMap<>();
 
 	// The import thread's own from here on.
 	/** The folder progress is kept for; a different one means a different kind of view. */
@@ -164,7 +165,16 @@ public final class SavedChunkImport {
 		if (this.onlyRemembered != only) {
 			this.onlyRemembered = only;
 			this.rescanAsked = true;
+			// A tile spans many chunks: those next to what's remembered mustn't come with it.
+			this.remembered.clear();
+			this.source.allow(only ? this::remembered : (chunkX, chunkZ, top) -> true);
 		}
+	}
+
+	/** Whether the map remembers a saved chunk, each asked once, as a bake reads it many times. */
+	private boolean remembered(int chunkX, int chunkZ, int top) {
+		MapMemory memory = this.map.memory();
+		return memory != null && this.remembered.computeIfAbsent(ChunkSnapshot.key(chunkX, chunkZ), k -> memory.showsChunk(chunkX, chunkZ, top));
 	}
 
 	/** For tests: whether everything in the save as of the last listing is drawn. */
@@ -245,6 +255,7 @@ public final class SavedChunkImport {
 			this.heldUntil.clear();
 			this.drawn.clear();
 			this.viewChecked.clear();
+			this.remembered.clear();
 			this.lastScan = 0;
 		}
 		Progress progress = this.progress;
@@ -261,7 +272,10 @@ public final class SavedChunkImport {
 			this.scannedAt = (int) (now / 1000);
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
-			progress.back(this.regions);
+			if (progress.back(this.regions)) {
+				// Before anything can leave this folder again: that note has to be the next one.
+				progress.saveIfChanged();
+			}
 			for (Map.Entry<Long, int[]> region : this.regions.entrySet()) {
 				if (!Arrays.equals(region.getValue(), before.get(region.getKey()))) {
 					this.source.forgetTops(region.getKey());
@@ -746,9 +760,9 @@ public final class SavedChunkImport {
 		 * The map came back to this folder. A chunk it saw live is only known to be drawn as it was when
 		 * the map left, so one the save has written since is work again.
 		 */
-		void back(Map<Long, int[]> regions) {
+		boolean back(Map<Long, int[]> regions) {
 			if (this.leftAt == 0) {
-				return;
+				return false;
 			}
 			for (Map.Entry<Long, int[]> region : regions.entrySet()) {
 				int[] times = this.times.get(region.getKey());
@@ -761,6 +775,7 @@ public final class SavedChunkImport {
 			this.leftAt = 0;
 			this.leftChecked = true;
 			this.changed = true;
+			return true;
 		}
 
 		void mark(int regionX, int regionZ, int index, int time) {
