@@ -117,7 +117,8 @@ final class RedrawTest {
 	static void underRoof(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 64 0");
 		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().roofless() && MapSession.get().map().chunkCount() > 100, 2400);
-		context.waitFor(mc -> !MapSession.get().map().savedMap().saved(0).isEmpty(), 2400);
+		// Near the player: the first to be saved can be a leftover from where the player came through.
+		context.waitFor(mc -> MapSession.get().map().savedMap().saved(0).stream().anyMatch(key -> Math.abs(key.tileU()) < 3 && Math.abs(key.tileV()) < 3), 2400);
 		setPitch(context, 35);
 		if (context.computeOnClient(mc -> MapSession.get().map().memory() == null)) {
 			throw new AssertionError("The map under the roof remembers nothing after its tiles' label changed");
