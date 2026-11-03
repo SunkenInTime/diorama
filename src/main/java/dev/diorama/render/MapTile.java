@@ -87,12 +87,16 @@ public final class MapTile {
 		}
 		int cellsPerBlock = TileImage.BLOCK / (Projection.TILE_PIXELS / Projection.COVERAGE_CELLS);
 		for (TileImage.Patch patch : image.patches()) {
+			// The higher of the two: a re-bake of an edge knows less of the cells there, and
+			// shouldn't put the fog back over ground that was mapped before.
 			for (int y = 0; y < cellsPerBlock; y++) {
-				System.arraycopy(
-					patch.coverage(), y * cellsPerBlock,
-					this.coverage, (patch.blockY() * cellsPerBlock + y) * Projection.COVERAGE_CELLS + patch.blockX() * cellsPerBlock,
-					cellsPerBlock
-				);
+				int row = (patch.blockY() * cellsPerBlock + y) * Projection.COVERAGE_CELLS + patch.blockX() * cellsPerBlock;
+				for (int x = 0; x < cellsPerBlock; x++) {
+					byte fresh = patch.coverage()[y * cellsPerBlock + x];
+					if ((fresh & 0xFF) > (this.coverage[row + x] & 0xFF)) {
+						this.coverage[row + x] = fresh;
+					}
+				}
 			}
 		}
 		this.empty = isEmpty(this.coverage);

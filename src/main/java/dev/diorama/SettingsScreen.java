@@ -82,6 +82,7 @@ public final class SettingsScreen extends Screen {
 		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
 		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
+		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
 		Settings.Corner[] corners = Settings.Corner.values();
 		minimap.cycle("corner", () -> s.minimapCorner.ordinal(), corners.length, i -> s.minimapCorner = corners[i],
 			i -> Component.translatable("diorama.settings.corner." + corners[i].name().toLowerCase(Locale.ROOT)));
@@ -167,6 +168,7 @@ public final class SettingsScreen extends Screen {
 		look.toggle("rounded_fog", () -> s.roundedFog, v -> s.roundedFog = v);
 		look.toggle("fog_of_war", () -> s.alwaysFogOfWar, v -> s.alwaysFogOfWar = v);
 		look.toggle("saved_chunks", () -> s.mapSavedChunks, v -> s.mapSavedChunks = v);
+		look.toggle("quick_render", () -> s.quickRender, v -> s.quickRender = v);
 		Settings.Quality[] qualities = Settings.Quality.values();
 		look.cycle("quality", () -> s.quality.ordinal(), qualities.length, i -> s.quality = qualities[i],
 			i -> Component.translatable("diorama.settings.quality." + qualities[i].name().toLowerCase(Locale.ROOT)));

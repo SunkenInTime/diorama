@@ -100,6 +100,8 @@ public final class MapScreen extends Screen {
 	private double centerV;
 	private double zoom = 2.0;
 	private int layer;
+	/** Set once the player picks a layer with the map open: auto caves stops following them then. */
+	private boolean layerPicked;
 	private boolean following = true;
 	private List<Radar.Blip> blips = List.of();
 	private List<WaypointOverlay.Pin> pins = List.of();
@@ -266,6 +268,7 @@ public final class MapScreen extends Screen {
 		this.menu = null;
 		this.gauge.cancel();
 		this.following = true;
+		this.layerPicked = false;
 		this.layer = this.otherDimension == null ? this.layerOnOpening() : TileKey.SURFACE;
 		this.spotU = Integer.MIN_VALUE;
 		this.spot = null;
@@ -382,6 +385,14 @@ public final class MapScreen extends Screen {
 		Entity viewer = MapSession.viewer();
 		if (session == null || viewer == null) {
 			return;
+		}
+		// Follow the player between the surface and caves, until they pick a layer themselves. Not
+		// while looking at another dimension, which the player isn't standing in.
+		if (!this.layerPicked && this.otherDimension == null && Settings.get().autoCaves) {
+			int auto = session.autoLayer(viewer);
+			if (auto != this.layer) {
+				this.layer = auto;
+			}
 		}
 		MapLevel shown = this.shownMap(session);
 		boolean elsewhere = this.otherDimension != null;
@@ -706,6 +717,7 @@ public final class MapScreen extends Screen {
 			int slice = this.gauge.release();
 			if (this.layer != TileKey.SURFACE) {
 				this.layer = slice;
+				this.layerPicked = true;
 			}
 		}
 		// Only the release of the latest press counts: letting go of a button held since before
@@ -1096,6 +1108,7 @@ public final class MapScreen extends Screen {
 		this.gauge.cancel();
 		Entity viewer = MapSession.viewer();
 		this.layer = this.layer == TileKey.SURFACE && viewer != null ? MapSession.caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		this.layerPicked = true;
 	}
 
 	private void shiftSlice(int delta, @Nullable Entity viewer) {
@@ -1109,6 +1122,7 @@ public final class MapScreen extends Screen {
 			this.layer = MapSession.caveLayerFor(viewer.getY());
 		}
 		this.layer = Math.max(this.minecraft.level.getMinY() + 4, Math.min(this.minecraft.level.getMaxY() + 1, this.layer + delta));
+		this.layerPicked = true;
 	}
 
 	/**
@@ -1568,6 +1582,7 @@ public final class MapScreen extends Screen {
 		this.centerV = v;
 		this.zoom = zoom;
 		this.layer = layer;
+		this.layerPicked = true;
 		this.following = false;
 	}
 }

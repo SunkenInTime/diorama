@@ -3,6 +3,7 @@ package dev.diorama.data;
 import dev.diorama.Diorama;
 import dev.diorama.Projection;
 import dev.diorama.bake.Mipmaps;
+import dev.diorama.bake.TileBaker;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileKey;
 import dev.diorama.bake.TileChunks;
@@ -64,6 +65,8 @@ public final class TileStore {
 	private static final int MAGIC = 0x4F4D5431;
 	private static final int SPOTS_MAGIC = 0x53505431;
 	private static final int CHUNKS_MAGIC = 0x43484B31;
+	private static final int COVERAGE_MAGIC = 0x434F5631;
+	private static final int COVERAGE_BYTES = Projection.COVERAGE_CELLS * Projection.COVERAGE_CELLS;
 	private static final int CACHED_TILES = 24;
 	private static final long WRITE_DELAY_SECONDS = 3;
 	/** After a failed write (a full disk, say), try again this much later. */
@@ -96,18 +99,26 @@ public final class TileStore {
 	/** Tiles with a merge waiting on the writer thread, so a run of bakes queues one. Guarded by {@code this}. */
 	private final Set<TileKey> mergeQueued = new HashSet<>();
 	/**
-	 * A saved tile: its pixels, and its spots (level 0) or chunks (overviews) where it has any.
-	 * Never modified.
+	 * A saved tile: its pixels, how much of each cell was known when it was baked, and its spots
+	 * (level 0) or chunks (overviews) where it has any. Never modified.
 	 */
-	private record Tile(int[] pixels, int @Nullable [] spots, byte @Nullable [] chunks) {
+	private record Tile(int[] pixels, byte @Nullable [] coverage, int @Nullable [] spots, byte @Nullable [] chunks) {
+		Tile(int[] pixels, int @Nullable [] spots, byte @Nullable [] chunks) {
+			this(pixels, null, spots, chunks);
+		}
+
 		Tile(int[] pixels, int @Nullable [] spots) {
-			this(pixels, spots, null);
+			this(pixels, null, spots, null);
 		}
 
 		boolean same(Tile other) {
-			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.spots, other.spots)
-				&& java.util.Arrays.equals(this.chunks, other.chunks);
+			return java.util.Arrays.equals(this.pixels, other.pixels) && java.util.Arrays.equals(this.coverage, other.coverage)
+				&& java.util.Arrays.equals(this.spots, other.spots) && java.util.Arrays.equals(this.chunks, other.chunks);
 		}
+	}
+
+	/** What a tile is drawn from: its pixels, and how much of each cell is known. */
+	public record Saved(int[] pixels, byte[] coverage) {
 	}
 
 	/** Recently used tiles, decompressed. Guarded by {@code this}. */
@@ -175,7 +186,44 @@ public final class TileStore {
 		return out;
 	}
 
-	/** A tile was written: the overview tiles above it are now out of date. */
+	/**
+	 * One level up from four children's coverage, each cell as known as its most known child. A
+	 * child with none contributes nothing, so a cell stays as known as anything saved under it.
+	 */
+	private byte @Nullable [] shrinkCoverage(TileKey key) {
+		byte[] out = null;
+		int half = Projection.COVERAGE_CELLS / 2;
+		for (int dy = 0; dy < 2; dy++) {
+			for (int dx = 0; dx < 2; dx++) {
+				TileKey child = new TileKey(key.layer(), key.tileU() * 2 + dx, key.tileV() * 2 + dy, key.lod() - 1);
+				byte[] c;
+				synchronized (this.io) {
+					this.merge(child);
+					Tile tile = this.saved(child);
+					c = tile == null ? null : tile.coverage != null ? tile.coverage : TileBaker.coverageOf(tile.pixels);
+				}
+				if (c == null) {
+					continue;
+				}
+				if (out == null) {
+					out = new byte[COVERAGE_BYTES];
+				}
+				for (int y = 0; y < half; y++) {
+					int row = (dy * half + y) * Projection.COVERAGE_CELLS + dx * half;
+					int childRow = (2 * y) * Projection.COVERAGE_CELLS;
+					for (int x = 0; x < half; x++) {
+						byte v = c[childRow + 2 * x];
+						int i = row + x;
+						if ((v & 0xFF) > (out[i] & 0xFF)) {
+							out[i] = v;
+						}
+					}
+				}
+			}
+		}
+		return out;
+	}
+
 	private synchronized void overviewsStale(TileKey key) {
 		if (key.lod() >= TileKey.MAX_LOD) {
 			return;
@@ -208,7 +256,7 @@ public final class TileStore {
 				if (pixels == null) {
 					continue;
 				}
-				Tile tile = new Tile(pixels, null, this.shrinkChunks(key));
+				Tile tile = new Tile(pixels, this.shrinkCoverage(key), null, this.shrinkChunks(key));
 				// Under io too, so a read loading this tile from disk can't cache the old pixels over these.
 				synchronized (this.io) {
 					synchronized (this) {
@@ -251,6 +299,24 @@ public final class TileStore {
 			Tile tile = this.saved(key);
 			return tile == null ? null : tile.pixels;
 		}
+	}
+
+	/**
+	 * The saved pixels of a tile, and how much of each cell was known when it was baked. Null if
+	 * there are none. Tiles written before coverage was kept have it worked out from the pixels,
+	 * as a pixel counts as known when anything was drawn in it. Not on the render thread.
+	 */
+	public @Nullable Saved readSaved(TileKey key) {
+		Tile tile;
+		synchronized (this.io) {
+			this.merge(key);
+			tile = this.saved(key);
+		}
+		if (tile == null) {
+			return null;
+		}
+		byte[] coverage = tile.coverage != null ? tile.coverage : TileBaker.coverageOf(tile.pixels);
+		return new Saved(tile.pixels, coverage);
 	}
 
 	/**
@@ -418,7 +484,8 @@ public final class TileStore {
 						}
 					}
 				}
-				Tile merged = new Tile(pixels, mergeSpots(saved == null ? null : saved.spots, image));
+				Tile merged = new Tile(pixels, mergeCoverage(saved == null ? null : saved.coverage, image),
+					mergeSpots(saved == null ? null : saved.spots, image), null);
 				if (saved != null ? saved.same(merged) : nothingKnown(pixels)) {
 					count(true);
 					continue;
@@ -446,6 +513,45 @@ public final class TileStore {
 				}
 			}
 		}
+	}
+
+	/**
+	 * The coverage after a bake: its own where the bake recorded it, the saved value elsewhere, and
+	 * the higher of the two, so a re-bake of an edge can't make a mapped cell unknown again.
+	 */
+	private static byte[] mergeCoverage(byte @Nullable [] saved, TileImage image) {
+		byte[] out = saved == null ? new byte[COVERAGE_BYTES] : saved.clone();
+		if (image.isFull()) {
+			byte[] fresh = image.coverage();
+			if (fresh != null) {
+				for (int i = 0; i < out.length && i < fresh.length; i++) {
+					if ((fresh[i] & 0xFF) > (out[i] & 0xFF)) {
+						out[i] = fresh[i];
+					}
+				}
+			}
+			return out;
+		}
+		int cellsPerBlock = TileImage.BLOCK / (Projection.TILE_PIXELS / Projection.COVERAGE_CELLS);
+		int cells = Projection.COVERAGE_CELLS;
+		for (TileImage.Patch patch : image.patches()) {
+			byte[] fresh = patch.coverage();
+			if (fresh == null) {
+				continue;
+			}
+			int left = patch.blockX() * cellsPerBlock;
+			int top = patch.blockY() * cellsPerBlock;
+			for (int y = 0; y < cellsPerBlock; y++) {
+				int row = (top + y) * cells + left;
+				for (int x = 0; x < cellsPerBlock; x++) {
+					byte v = fresh[y * cellsPerBlock + x];
+					if ((v & 0xFF) > (out[row + x] & 0xFF)) {
+						out[row + x] = v;
+					}
+				}
+			}
+		}
+		return out;
 	}
 
 	/** The spots after a bake: its own where it has them, the saved ones elsewhere. */
@@ -476,7 +582,7 @@ public final class TileStore {
 			if (tile == null || key.lod() == 0) {
 				return;
 			}
-			old = new Tile(tile.pixels, null, null);
+			old = new Tile(tile.pixels, tile.coverage, null, null);
 			synchronized (this) {
 				this.cache.put(key, old);
 				this.chunksAsked.remove(key);
@@ -494,7 +600,7 @@ public final class TileStore {
 			if (tile == null || key.lod() != 0) {
 				return;
 			}
-			old = new Tile(tile.pixels, null, null);
+			old = new Tile(tile.pixels, tile.coverage, null, null);
 			synchronized (this) {
 				this.cache.put(key, old);
 				// A write still waiting would put the spots back.
@@ -719,22 +825,35 @@ public final class TileStore {
 			}
 			int[] pixels = new int[size * size];
 			ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(pixels);
-			// Tiles saved before spots, and overview tiles saved before chunks, end here.
-			if (key.lod() > 0) {
-				byte[] more = inflated.readNBytes(4 + size * size);
-				if (more.length == 4 + size * size && ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN).getInt() == CHUNKS_MAGIC) {
-					return new Tile(pixels, null, java.util.Arrays.copyOfRange(more, 4, more.length));
+			// Tiles saved before coverage, spots or chunks end early; each block names itself.
+			byte[] coverage = null;
+			int next = 0;
+			byte[] magic = inflated.readNBytes(4);
+			if (magic.length == 4) {
+				next = ByteBuffer.wrap(magic).order(ByteOrder.LITTLE_ENDIAN).getInt();
+			}
+			if (next == COVERAGE_MAGIC) {
+				byte[] cells = inflated.readNBytes(COVERAGE_BYTES);
+				if (cells.length == COVERAGE_BYTES) {
+					coverage = cells;
 				}
-				return new Tile(pixels, null);
+				magic = inflated.readNBytes(4);
+				next = magic.length == 4 ? ByteBuffer.wrap(magic).order(ByteOrder.LITTLE_ENDIAN).getInt() : 0;
 			}
-			int[] spots = null;
-			byte[] more = inflated.readNBytes(4 + TileSpots.COLUMNS * TileSpots.ROWS * 4);
-			ByteBuffer rest = ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN);
-			if (more.length == 4 + TileSpots.COLUMNS * TileSpots.ROWS * 4 && rest.getInt() == SPOTS_MAGIC) {
-				spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
-				rest.asIntBuffer().get(spots);
+			if (next == SPOTS_MAGIC) {
+				byte[] more = inflated.readNBytes(TileSpots.COLUMNS * TileSpots.ROWS * 4);
+				if (more.length == TileSpots.COLUMNS * TileSpots.ROWS * 4) {
+					int[] spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
+					ByteBuffer.wrap(more).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().get(spots);
+					return new Tile(pixels, coverage, spots, null);
+				}
+			} else if (next == CHUNKS_MAGIC) {
+				byte[] chunks = inflated.readNBytes(size * size);
+				if (chunks.length == size * size) {
+					return new Tile(pixels, coverage, null, chunks);
+				}
 			}
-			return new Tile(pixels, spots);
+			return new Tile(pixels, coverage, null, null);
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read saved tile {}", file, e);
 			return null;
@@ -748,19 +867,24 @@ public final class TileStore {
 	private boolean store(TileKey key, Tile tile) {
 		Path file = this.file(key);
 		int[] pixels = tile.pixels;
+		byte[] coverage = tile.coverage;
 		int[] spots = tile.spots;
 		byte[] chunks = tile.chunks;
 		try {
 			Files.createDirectories(file.getParent());
-			int extra = spots != null ? 4 + spots.length * 4 : chunks != null ? 4 + chunks.length : 0;
+			int extra = (coverage != null ? 4 + COVERAGE_BYTES : 0)
+				+ (spots != null ? 4 + spots.length * 4 : chunks != null ? 4 + chunks.length : 0);
 			ByteBuffer buffer = ByteBuffer.allocate(pixels.length * 4 + extra).order(ByteOrder.LITTLE_ENDIAN);
 			buffer.asIntBuffer().put(pixels);
+			buffer.position(pixels.length * 4);
+			if (coverage != null) {
+				buffer.putInt(COVERAGE_MAGIC);
+				buffer.put(coverage);
+			}
 			if (spots != null) {
-				buffer.position(pixels.length * 4);
 				buffer.putInt(SPOTS_MAGIC);
 				buffer.asIntBuffer().put(spots);
 			} else if (chunks != null) {
-				buffer.position(pixels.length * 4);
 				buffer.putInt(CHUNKS_MAGIC);
 				buffer.put(chunks);
 			}

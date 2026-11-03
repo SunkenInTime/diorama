@@ -134,6 +134,8 @@ public final class MapLevel implements ChunkSource {
 	private final Map<TileKey, Dirty> dirty = new HashMap<>();
 	private final Map<TileKey, Double> wanted = new HashMap<>();
 	private final Set<TileKey> inFlight = new HashSet<>();
+	/** Tiles being baked at one sample per pixel for a quick first look; see {@link #bakeFinished}. */
+	private final Set<TileKey> quickBakes = new HashSet<>();
 	private final ConcurrentLinkedQueue<TileImage> finished = new ConcurrentLinkedQueue<>();
 	/** Tiles drawn from the world's save, waiting for the render thread to take them. */
 	private final ConcurrentLinkedQueue<SavedTile> fromSave = new ConcurrentLinkedQueue<>();
@@ -781,7 +783,9 @@ public final class MapLevel implements ChunkSource {
 		BlockLooks looks = BlockLooks.get();
 		if (this.savedOnly || looks != null && this.topY != Integer.MIN_VALUE) {
 			long now = System.currentTimeMillis();
-			int limit = 6;
+			boolean quickRender = dev.diorama.Settings.get().quickRender;
+			// Quick bakes hold their slot for less time, so more of them can be in the air at once.
+			int limit = quickRender ? 10 : 6;
 			List<Map.Entry<TileKey, Double>> order = new ArrayList<>(this.wanted.entrySet());
 			order.sort(Map.Entry.comparingByValue());
 			if (!order.isEmpty()) {
@@ -822,7 +826,7 @@ public final class MapLevel implements ChunkSource {
 				if (missing || ready) {
 					this.dirty.remove(key);
 					this.unsaved.remove(key);
-					this.bake(key, looks, missing || d.blocks.cardinality() > 160 ? null : d.blocks);
+					this.bake(key, looks, missing || d.blocks.cardinality() > 160 ? null : d.blocks, missing && quickRender);
 				}
 			}
 			this.bakeUnsaved(looks, now);
@@ -834,6 +838,7 @@ public final class MapLevel implements ChunkSource {
 	/** Takes a finished bake: shows it if a map still wants it, and saves it. */
 	private void bakeFinished(TileImage image) {
 		this.inFlight.remove(image.key());
+		boolean quickBaked = this.quickBakes.remove(image.key());
 		if (SLOT_STATS) {
 			this.slotReleased(image.key());
 		}
@@ -878,6 +883,13 @@ public final class MapLevel implements ChunkSource {
 		tile.upload(image);
 		this.pixelsMoved(image.key());
 		this.coverageVersion++;
+		if (quickBaked) {
+			// A first look only: bake it again in full quality, and keep these pixels out of the save.
+			Dirty again = this.dirty.computeIfAbsent(image.key(), k -> new Dirty(0));
+			again.blocks.set(0, (Projection.TILE_PIXELS / TileImage.BLOCK) * (Projection.TILE_PIXELS / TileImage.BLOCK));
+			again.last = 0L;
+			return;
+		}
 		if (this.store != null && !this.savedOnly && !image.key().isCave() && image.key().lod() == 0) {
 			this.store.baked(image);
 		}
@@ -938,8 +950,12 @@ public final class MapLevel implements ChunkSource {
 		}
 	}
 
-	/** Bakes one tile on a baker thread: all of it if {@code blocks} is null, else those blocks. */
-	private void bake(TileKey key, BlockLooks looks, @Nullable BitSet blocks) {
+	/**
+	 * Bakes one tile on a baker thread: all of it if {@code blocks} is null, else those blocks.
+	 * {@code quick} takes one sample per pixel, for a tile a map has nothing to show yet: it is
+	 * shown at once and baked again in full quality, so it never reaches the save.
+	 */
+	private void bake(TileKey key, BlockLooks looks, @Nullable BitSet blocks, boolean quick) {
 		this.inFlight.add(key);
 		if (SLOT_STATS) {
 			this.slotTaken.put(key, System.nanoTime());
@@ -962,12 +978,17 @@ public final class MapLevel implements ChunkSource {
 			// Traced for the map below, and checked on the side.
 			this.checkOnGpu(key, looks, generation, fog, overlays, view);
 		}
+		// The GPU draws a whole tile in one go and is fast at it, so there's no rough pass to make.
+		boolean firstLook = quick && gpu != dev.diorama.render.gpu.GpuBakeCheck.Mode.GPU;
+		if (firstLook) {
+			this.quickBakes.add(key);
+		}
 		BAKERS.execute(() -> {
 			try {
 				long start = System.nanoTime();
 				int[] saved = store == null ? null : store.read(key);
 				ChunkSource source = this.sourceFor(store);
-				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, saved, overlays);
+				TileImage image = TileBaker.bake(key, source, looks, blocks, fog, saved, overlays, firstLook);
 				long spots = System.nanoTime();
 				this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 				logBakeTime(System.nanoTime() - start, System.nanoTime() - spots, blocks == null);
@@ -1275,13 +1296,13 @@ public final class MapLevel implements ChunkSource {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
 		BAKERS.execute(() -> {
-			int[] pixels = null;
+			TileStore.Saved saved = null;
 			try {
-				pixels = store.read(key);
+				saved = store.readSaved(key);
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to load saved tile {}", key, t);
 			}
-			this.finished.add((pixels == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, pixels)).withGeneration(generation));
+			this.finished.add((saved == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, saved.pixels(), saved.coverage())).withGeneration(generation));
 		});
 	}
 
@@ -1305,7 +1326,7 @@ public final class MapLevel implements ChunkSource {
 			if (!this.tiles.containsKey(key)) {
 				this.backgroundBakes.add(key);
 			}
-			this.bake(key, looks, null);
+			this.bake(key, looks, null, false);
 			return;
 		}
 	}

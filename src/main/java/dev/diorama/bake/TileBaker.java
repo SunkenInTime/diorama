@@ -180,6 +180,8 @@ public final class TileBaker {
 
 	/** Four samples per pixel even when the Quality setting asks for one: see {@link #reference}. */
 	private boolean fourSamples;
+	/** One sample per pixel, for a quick first look at a tile a map has nothing for yet. */
+	private boolean quick;
 
 	/** Finds where rays land without lighting them, for {@link #surface}. */
 	private boolean surfaceOnly;
@@ -456,7 +458,19 @@ public final class TileBaker {
 	public static TileImage bake(
 		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved, @Nullable Overlays overlays
 	) {
+		return bake(key, source, looks, blocks, fogOfWar, saved, overlays, false);
+	}
+
+	/**
+	 * Same, with {@code quick} taking one sample per pixel instead of four: for a first look at a
+	 * tile a map has nothing for yet, which is baked again properly once it's on screen.
+	 */
+	public static TileImage bake(
+		TileKey key, ChunkSource source, BlockLooks looks, @Nullable BitSet blocks, boolean fogOfWar, int @Nullable [] saved,
+		@Nullable Overlays overlays, boolean quick
+	) {
 		TileBaker baker = new TileBaker(key, source, looks, fogOfWar, overlays);
+		baker.quick = quick;
 		int size = Projection.TILE_PIXELS;
 		if (blocks == null) {
 			int[] pixels = new int[size * size];
@@ -515,6 +529,11 @@ public final class TileBaker {
 		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size));
 	}
 
+	/** A full tile image from a saved tile, with the coverage it was saved with. */
+	public static TileImage image(TileKey key, int[] pixels, byte[] savedCoverage) {
+		return TileImage.full(key, Mipmaps.build(pixels, Projection.TILE_PIXELS), savedCoverage);
+	}
+
 	/** Keeps the saved pixel wherever the fresh one is less known; square areas only. */
 	private static void merge(int[] pixels, int @Nullable [] saved, int px0, int py0, int edge) {
 		if (saved == null) {
@@ -550,7 +569,7 @@ public final class TileBaker {
 		double minU = this.key.minU();
 		double minV = this.key.minV();
 		double unitsPerPixel = 1.0 / Projection.PIXELS_PER_UNIT;
-		double[][] samples = fast && !this.fourSamples ? FAST_SAMPLES : SAMPLES;
+		double[][] samples = this.quick || fast && !this.fourSamples ? FAST_SAMPLES : SAMPLES;
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				float r = 0;
@@ -1329,6 +1348,11 @@ public final class TileBaker {
 		int gi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (g * 4095)))];
 		int bi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (b * 4095)))];
 		return (alpha << 24) | (bi << 16) | (gi << 8) | ri;
+	}
+
+	/** How much of each cell a saved picture knows, for tiles written before stores kept it. */
+	public static byte[] coverageOf(int[] pixels) {
+		return coverage(pixels, Projection.TILE_PIXELS, Projection.TILE_PIXELS);
 	}
 
 	private static byte[] coverage(int[] pixels, int width, int height) {
