@@ -1275,13 +1275,13 @@ public final class MapLevel implements ChunkSource {
 		this.inFlight.add(key);
 		int generation = this.generation(key);
 		BAKERS.execute(() -> {
-			int[] pixels = null;
+			TileStore.Saved saved = null;
 			try {
-				pixels = store.read(key);
+				saved = store.readSaved(key);
 			} catch (Throwable t) {
 				Diorama.LOGGER.error("Failed to load saved tile {}", key, t);
 			}
-			this.finished.add((pixels == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, pixels)).withGeneration(generation));
+			this.finished.add((saved == null ? TileImage.partial(key, List.of()) : TileBaker.image(key, saved.pixels(), saved.coverage())).withGeneration(generation));
 		});
 	}
 

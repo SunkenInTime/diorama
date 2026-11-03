@@ -515,6 +515,11 @@ public final class TileBaker {
 		return TileImage.full(key, Mipmaps.build(pixels, size), coverage(pixels, size, size));
 	}
 
+	/** A full tile image from a saved tile, with the coverage it was saved with. */
+	public static TileImage image(TileKey key, int[] pixels, byte[] savedCoverage) {
+		return TileImage.full(key, Mipmaps.build(pixels, Projection.TILE_PIXELS), savedCoverage);
+	}
+
 	/** Keeps the saved pixel wherever the fresh one is less known; square areas only. */
 	private static void merge(int[] pixels, int @Nullable [] saved, int px0, int py0, int edge) {
 		if (saved == null) {
@@ -1329,6 +1334,11 @@ public final class TileBaker {
 		int gi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (g * 4095)))];
 		int bi = LINEAR_TO_SRGB[Math.min(4095, Math.max(0, (int) (b * 4095)))];
 		return (alpha << 24) | (bi << 16) | (gi << 8) | ri;
+	}
+
+	/** How much of each cell a saved picture knows, for tiles written before stores kept it. */
+	public static byte[] coverageOf(int[] pixels) {
+		return coverage(pixels, Projection.TILE_PIXELS, Projection.TILE_PIXELS);
 	}
 
 	private static byte[] coverage(int[] pixels, int width, int height) {

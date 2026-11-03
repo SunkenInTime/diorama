@@ -76,6 +76,8 @@ public final class Settings {
 	public boolean biome = true;
 	public GameTime gameTime = GameTime.OFF;
 	public boolean autoCaves = true;
+	/** Keep the surface view while only a roof is overhead; see {@link MapSession#autoLayer}. */
+	public boolean preferSurface = true;
 	public Frame minimapFrame = Frame.CLASSIC;
 	public Shape minimapShape = Shape.SQUARE;
 

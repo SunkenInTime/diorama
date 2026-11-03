@@ -45,6 +45,10 @@ public final class MapSession {
 	private static final long LOAD_DELAY_MS = 750;
 	private static final long CHANGE_DELAY_MS = 250;
 	private static final int SNAPSHOTS_PER_TICK = 24;
+	/** How many blocks of rock above the player count as underground. A house roof is thinner. */
+	private static final int MIN_CAVE_DEPTH = 8;
+	/** How far up to look for open sky. */
+	private static final int MAX_SKY_DEPTH = 32;
 
 	private static @Nullable MapSession current;
 	private static int started;
@@ -563,6 +567,26 @@ public final class MapSession {
 
 	/** The layer the minimap should show right now. */
 	public int autoLayer(Entity viewer) {
-		return this.underground ? caveLayerFor(viewer.getY()) : TileKey.SURFACE;
+		if (!this.underground) {
+			return TileKey.SURFACE;
+		}
+		// A roof overhead isn't the same as being in a cave. Unless the player asks for caves
+		// anyway, keep the surface view until there's real rock above them.
+		if (Settings.get().preferSurface && this.depthToSky(BlockPos.containing(viewer.getEyePosition())) < MIN_CAVE_DEPTH) {
+			return TileKey.SURFACE;
+		}
+		return caveLayerFor(viewer.getY());
+	}
+
+	/** Blocks between the eye and the first place open to the sky, or more than {@link #MAX_SKY_DEPTH}. */
+	private int depthToSky(BlockPos eye) {
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		int top = Math.min(this.level.getMaxY(), eye.getY() + MAX_SKY_DEPTH);
+		for (int y = eye.getY(); y <= top; y++) {
+			if (this.level.getBrightness(LightLayer.SKY, pos.set(eye.getX(), y, eye.getZ())) >= 15) {
+				return y - eye.getY();
+			}
+		}
+		return MAX_SKY_DEPTH + 1;
 	}
 }
