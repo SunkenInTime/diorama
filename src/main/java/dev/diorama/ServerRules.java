@@ -7,7 +7,8 @@ import net.minecraft.network.chat.Component;
  * which players and server owners already know, sent in a system message:
  * <ul>
  *   <li>{@link #FAIR_PLAY}: no cave maps of unseen caves and no entity radar. Diorama turns cave
- *       slices into fog of war instead of switching them off, and hides the radar.</li>
+ *       slices into fog of war instead of switching them off, and hides the radar and the
+ *       structures found from a seed, which show places the player hasn't seen.</li>
  *   <li>{@link #NETHER_ALLOWED}: cave maps are fine in the Nether despite fair play.</li>
  *   <li>{@link #NO_MINIMAP}: no minimap at all.</li>
  *   <li>{@link #RESET}: clears all of the above.</li>
@@ -61,6 +62,11 @@ public final class ServerRules {
 
 	/** Whether the map may show other players and mobs. */
 	public static boolean radarAllowed() {
+		return !fairPlay;
+	}
+
+	/** Whether the map may show structures worked out from the seed: places the player hasn't been to. */
+	public static boolean structuresAllowed() {
 		return !fairPlay;
 	}
 

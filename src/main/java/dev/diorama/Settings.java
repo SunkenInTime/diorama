@@ -146,6 +146,20 @@ public final class Settings {
 	 */
 	public boolean mapSavedChunks = true;
 	/**
+	 * Each world's seed as the player pasted it, by {@link WorldKey}: a server doesn't tell it, and
+	 * the structures on the map are found from it. Kept as text, so what's pasted comes back as it was.
+	 */
+	public java.util.Map<String, String> worldSeeds = new java.util.LinkedHashMap<>();
+	/** Whether the structures found from the world's seed show on the fullscreen map. */
+	public boolean structuresOnMap = true;
+	/** Whether they show on the minimap too (they also need {@link #structuresOnMap}). */
+	public boolean structuresOnMinimap = true;
+	/**
+	 * The kinds of structure left off the map, by {@code StructureKinds} id. The ones that are
+	 * everywhere (mineshafts, buried treasure, nether fossils, abandoned camps) start hidden.
+	 */
+	public java.util.List<String> hiddenStructures = new java.util.ArrayList<>(java.util.List.of("mineshaft", "buried_treasure", "nether_fossil", "abandoned_camp"));
+	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
 	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
 	 * lighting them from the sun.
@@ -392,6 +406,12 @@ public final class Settings {
 			settings.waypointLabels = WaypointLabels.AUTO;
 		}
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
+		if (settings.worldSeeds == null) {
+			settings.worldSeeds = new java.util.LinkedHashMap<>();
+		}
+		if (settings.hiddenStructures == null) {
+			settings.hiddenStructures = new java.util.ArrayList<>();
+		}
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		// Hand-edited numbers: snap to a value the settings screen can show.
 		if (settings.minimapZoom != null) {

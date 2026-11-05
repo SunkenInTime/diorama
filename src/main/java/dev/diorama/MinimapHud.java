@@ -10,6 +10,9 @@ import dev.diorama.drawing.DrawingOverlay;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
+import dev.diorama.structure.StructureMap;
+import dev.diorama.structure.StructureOverlay;
+import dev.diorama.structure.StructureSeed;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointOverlay;
@@ -186,6 +189,7 @@ public final class MinimapHud implements HudElement {
 		// Over the map, since a resource pack's frame can reach in over its edge, and under what's marked on it.
 		MinimapFrames.draw(graphics, settings.minimapFrame, round, x, y, size);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() && settings.radarOnMinimap ? Radar.collect(view, partialTick, false) : List.of();
+		this.drawStructures(graphics, view, mc.level.dimension().identifier().toString(), pos);
 		Radar.draw(graphics, view, blips, false, false);
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
@@ -209,6 +213,20 @@ public final class MinimapHud implements HudElement {
 			textY += 10;
 		}
 		return new int[] {left, y - 2, textRight, info.isEmpty() ? y + size + 2 : textY, x, y, size};
+	}
+
+	/**
+	 * The structures found from the world's seed, as small squares, under the radar and waypoints,
+	 * when they are on, the server allows them and there is a seed.
+	 */
+	private void drawStructures(GuiGraphicsExtractor graphics, MapViewport.View view, String dimension, Vec3 pos) {
+		Settings settings = Settings.get();
+		Long seed = StructureSeed.current();
+		if (!settings.structuresOnMinimap || !settings.structuresOnMap || !ServerRules.structuresAllowed() || seed == null || StructureMap.dimensionKey(dimension) == null) {
+			return;
+		}
+		StructureMap.get().update(dimension, seed, view, pos.x, pos.z);
+		StructureOverlay.drawCompact(graphics, view, StructureOverlay.layout(view, true));
 	}
 
 	/**

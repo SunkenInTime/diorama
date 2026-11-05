@@ -74,7 +74,15 @@ public final class MapSession {
 	private boolean underground;
 	private MapStyle style = MapStyle.get();
 
+	private final @Nullable String key;
+
+	/** Which world this is, as {@link WorldKey} names it, or null outside one. */
+	public @Nullable String worldKey() {
+		return this.key;
+	}
+
 	private MapSession(ClientLevel level, @Nullable String key) {
+		this.key = key;
 		this.level = level;
 		// The Nether's roof: its sky view looks down from just under it.
 		int roof = level.dimensionType().hasCeiling() ? level.getMinY() + level.dimensionType().logicalHeight() : MapLevel.NO_ROOF;
