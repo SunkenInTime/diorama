@@ -83,6 +83,7 @@ public final class SettingsScreen extends Screen {
 		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v);
 		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
+		minimap.toggle("structures_minimap", () -> s.structuresOnMinimap, v -> s.structuresOnMinimap = v);
 		Settings.Corner[] corners = Settings.Corner.values();
 		minimap.cycle("corner", () -> s.minimapCorner.ordinal(), corners.length, i -> s.minimapCorner = corners[i],
 			i -> Component.translatable("diorama.settings.corner." + corners[i].name().toLowerCase(Locale.ROOT)));

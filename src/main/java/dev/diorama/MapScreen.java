@@ -13,6 +13,9 @@ import dev.diorama.render.Markers;
 import dev.diorama.render.Pins;
 import dev.diorama.render.Radar;
 import dev.diorama.render.SavedChunkImport;
+import dev.diorama.structure.StructureMap;
+import dev.diorama.structure.StructureOverlay;
+import dev.diorama.structure.StructureSeed;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
 import dev.diorama.waypoint.WaypointListScreen;
@@ -137,6 +140,8 @@ public final class MapScreen extends Screen {
 	/** Whether there's a dimension to switch to, worked out when the screen is built. */
 	private boolean severalDimensions;
 	private Button mapsButton;
+	private Button structuresButton;
+	private List<StructureOverlay.Icon> structureIcons = List.of();
 	private Button waypointsButton;
 	private Button settingsButton;
 	/** Turns draw mode on and off; it sits above the zoom buttons. */
@@ -199,13 +204,16 @@ public final class MapScreen extends Screen {
 		}).size(64, BAR).build());
 		this.mapsButton.visible = settings.mapMapsButton;
 		this.mapsButton.active = Maps.get() != null;
+		this.structuresButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.structures"), b ->
+			this.minecraft.gui.setScreen(new StructuresScreen(this, this.dimension()))).size(64, BAR).build());
+		this.structuresButton.visible = ServerRules.structuresAllowed();
 		this.waypointsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.map.waypoints"), b -> this.openWaypoints()).size(64, BAR).build());
 		this.waypointsButton.visible = settings.mapWaypointsButton;
 		this.settingsButton = this.addRenderableWidget(Button.builder(Component.translatable("diorama.settings.button"), b ->
 			this.minecraft.gui.setScreen(new SettingsScreen(this))).size(64, BAR).build());
 		this.settingsButton.visible = settings.mapSettingsButton;
 		int right = this.width;
-		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton)) {
+		for (Button button : List.of(this.settingsButton, this.waypointsButton, this.mapsButton, this.structuresButton)) {
 			if (button.visible) {
 				right -= button.getWidth();
 				button.setPosition(right, 0);
@@ -461,6 +469,7 @@ public final class MapScreen extends Screen {
 		}
 		boolean caves = this.layer != TileKey.SURFACE;
 		this.placeControls();
+		StructureOverlay.Icon hoveredStructure = this.drawStructures(graphics, view, mouseX, mouseY);
 		Radar.Blip hovered = null;
 		this.blips = List.of();
 		if (!elsewhere && ServerRules.radarAllowed() && Settings.get().radarOnMap) {
@@ -521,6 +530,9 @@ public final class MapScreen extends Screen {
 				graphics.setTooltipForNextFrame(this.font, described, mouseX, mouseY);
 			} else if (hovered != null) {
 				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
+			} else if (hoveredStructure != null) {
+				List<Component> described = StructureOverlay.describe(hoveredStructure);
+				graphics.setTooltipForNextFrame(this.font, lines(described.get(0), described.get(1)), mouseX, mouseY);
 			} else if (this.pressButton == -1) {
 				List<FormattedCharSequence> lines = this.spotTooltip(mouseX, mouseY);
 				if (lines != null) {
@@ -570,6 +582,28 @@ public final class MapScreen extends Screen {
 			pose.popPose();
 			*///?}
 		}
+	}
+
+	/**
+	 * The structures found from the world's seed, as icons over the map and under the waypoints,
+	 * when they are on, allowed and there is a seed. Returns the one under the mouse.
+	 */
+	private StructureOverlay.@Nullable Icon drawStructures(GuiGraphicsExtractor graphics, MapViewport.View view, int mouseX, int mouseY) {
+		StructureMap structures = StructureMap.get();
+		Long seed = StructureSeed.current();
+		if (!Settings.get().structuresOnMap || !ServerRules.structuresAllowed() || seed == null || StructureMap.dimensionKey(this.dimension()) == null) {
+			structures.clear();
+			this.structureIcons = List.of();
+			return null;
+		}
+		// Measured from the player, in the blocks of the dimension shown.
+		Entity viewer = MapSession.viewer();
+		double scale = this.scaleToShown();
+		structures.update(this.dimension(), seed, view, viewer == null ? this.centerU : viewer.getX() * scale, viewer == null ? 0 : viewer.getZ() * scale);
+		this.structureIcons = StructureOverlay.layout(view);
+		StructureOverlay.Icon hovered = this.menu != null || this.draw.active() || this.overControls(mouseX, mouseY) ? null : StructureOverlay.under(this.structureIcons, mouseX, mouseY);
+		StructureOverlay.draw(graphics, view, this.structureIcons, hovered);
+		return hovered;
 	}
 
 	/**
@@ -635,7 +669,7 @@ public final class MapScreen extends Screen {
 	/** Where the buttons at the top right start: the status line has to end before them. */
 	private int buttonsStart() {
 		int start = this.width;
-		for (Button button : List.of(this.mapsButton, this.waypointsButton, this.settingsButton)) {
+		for (Button button : List.of(this.structuresButton, this.mapsButton, this.waypointsButton, this.settingsButton)) {
 			if (button.visible) {
 				start = Math.min(start, button.getX());
 			}
@@ -1380,7 +1414,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.structuresButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}
