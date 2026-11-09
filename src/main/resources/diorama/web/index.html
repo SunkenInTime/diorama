@@ -239,7 +239,6 @@ function paint() {
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
 	ctx.clearRect(0, 0, canvas.width, canvas.height);
 	if (!map || !dim) return;
-	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	const z = zoomFor(view.scale);
 	const left = view.u - w / 2 / view.scale, top = view.v - h / 2 / view.scale;
 	// Two levels coarser first: a handful of pictures fill the screen at once, blurred, while the
@@ -260,9 +259,11 @@ function paint() {
 	// Where each picture goes on screen, and which are in, finest level first: a coarser picture is
 	// drawn only where no finer one is, or its land would show through the finer one's unexplored
 	// (see-through) parts as a blurred rim.
+	const k = view.scale * dpr;
+	const sx = m => Math.round((m - left) * k), sy = m => Math.round((m - top) * k);
 	const rect = (level, u, v) => {
-		const units = tileUnits(level), x = (u * units - left) * view.scale, y = (v * units - top) * view.scale, size = units * view.scale;
-		return [Math.floor(x), Math.floor(y), Math.ceil(size + (x - Math.floor(x))), Math.ceil(size + (y - Math.floor(y)))];
+		const units = tileUnits(level), x0 = sx(u * units), y0 = sy(v * units);
+		return [x0, y0, sx((u + 1) * units) - x0, sy((v + 1) * units) - y0];
 	};
 	const drawn = [];
 	for (let level = z; level <= coarse; level++) {
@@ -276,7 +277,7 @@ function paint() {
 	let loaded = drawn[0].length, any = 0;
 	for (let i = drawn.length - 1; i >= 0; i--) {
 		// Sharp pixels once a block takes more screen than the picture has for it.
-		ctx.imageSmoothingEnabled = view.scale * dpr < map.tilePixels / map.tileUnits / (1 << (z + i));
+		ctx.imageSmoothingEnabled = k < map.tilePixels / map.tileUnits / (1 << (z + i));
 		for (const [img, r] of drawn[i]) {
 			any++;
 			const finer = [];
