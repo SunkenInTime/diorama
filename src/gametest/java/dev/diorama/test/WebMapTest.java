@@ -40,6 +40,10 @@ import net.fabricmc.loader.api.FabricLoader;
  * leaves land nobody visited undrawn. Each picture is compared with the player's own map of the
  * same tile, drawn in the client's colours: they may differ only as much as a JPEG of the player's
  * own tile does. Writes both side by side to {@code screenshots/web-map/}.
+ *
+ * <p>{@code DIORAMA_WEB_MAP_FORMAT=webp} runs it with lossless WebP pictures: then they may differ
+ * from the player's tile only as much as the colours do, and each zoomed-out tile over the land
+ * must be exactly the average of the four under it.
  */
 final class WebMapTest {
 	/**
@@ -52,12 +56,16 @@ final class WebMapTest {
 	/** The web map waits up to 5 minutes between passes; the test waits for the one after the server saved what was explored. */
 	private static final int PASS_WAIT_TICKS = 20 * 60 * 10;
 
+	/** The picture format under test: {@code jpeg} unless DIORAMA_WEB_MAP_FORMAT says otherwise. */
+	private static final boolean WEBP = "webp".equalsIgnoreCase(System.getenv("DIORAMA_WEB_MAP_FORMAT"));
+	private static final String EXT = WEBP ? ".webp" : ".jpg";
+
 	private WebMapTest() {
 	}
 
 	static void run(ClientGameTestContext context) {
 		int port = freePort();
-		String settings = "web-map=true\nweb-map-port=" + port + "\nweb-map-address=127.0.0.1\nshare-land=visited\n";
+		String settings = "web-map=true\nweb-map-port=" + port + "\nweb-map-address=127.0.0.1\nshare-land=visited\nweb-map-format=" + (WEBP ? "webp" : "jpeg") + "\n";
 		if (System.getenv("DIORAMA_REAL_SERVER") != null) {
 			Path config = Path.of(System.getProperty("user.home"), "real-servers", System.getenv("DIORAMA_NODE"), "config", "diorama-server.properties");
 			// DIORAMA_WEB_MAP_OFF: the control, the same exploring and saving with the web map off.
@@ -172,7 +180,7 @@ final class WebMapTest {
 		// test VM for close to a minute, web map or not, and the player times out.)
 		long started = System.currentTimeMillis();
 		for (String name : want) {
-			String path = "/minecraft_overworld/0/" + name + ".jpg";
+			String path = "/minecraft_overworld/0/" + name + EXT;
 			try {
 				context.waitFor(mc -> status(http, port, path) == 200, PASS_WAIT_TICKS);
 			} catch (AssertionError e) {
@@ -190,6 +198,15 @@ final class WebMapTest {
 		if (!json.contains("\"minecraft:overworld\"")) {
 			throw new AssertionError("map.json has no overworld: " + json);
 		}
+		if (!json.contains("\"ext\":\"" + EXT.substring(1) + "\"")) {
+			throw new AssertionError("map.json doesn't name the pictures' format " + EXT + ": " + json.substring(0, Math.min(300, json.length())));
+		}
+		String served = getBytes(http, port, "/minecraft_overworld/0/" + want[0] + EXT + "?v=1").headers().firstValue("Content-Type").orElse("none");
+		String cache = getBytes(http, port, "/minecraft_overworld/0/" + want[0] + EXT + "?v=1").headers().firstValue("Cache-Control").orElse("none");
+		if (!served.equals(WEBP ? "image/webp" : "image/jpeg") || !cache.contains("immutable")) {
+			throw new AssertionError("A picture is served as " + served + ", cached " + cache);
+		}
+		Diorama.LOGGER.info("Web map pictures: {} served as {}, {}", EXT, served, cache);
 		List<String> lines = new ArrayList<>();
 		int compared = 0;
 		for (int i = 0; i < want.length; i++) {
@@ -199,27 +216,43 @@ final class WebMapTest {
 			int v = Integer.parseInt(name.substring(sep + 1));
 			BufferedImage web;
 			try {
-				web = ImageIO.read(new ByteArrayInputStream(getBytes(http, port, "/minecraft_overworld/0/" + name + ".jpg").body()));
+				web = picture(getBytes(http, port, "/minecraft_overworld/0/" + name + EXT).body());
 			} catch (IOException e) {
 				throw new UncheckedIOException(e);
 			}
 			int[] client = clients.get(i);
 			double[] diff = compare(client, web);
 			// The same tile of the player's map put through the same JPEG: what the format costs alone.
-			double[] jpeg = compare(client, jpeg(client), web);
+			// Lossless costs nothing: the player's tile as it is.
+			double[] jpeg = compare(client, WEBP ? opaque(client) : jpeg(client), web);
 			lines.add(String.format(Locale.ROOT, "tile %d,%d: %d pixels compared, mean difference %.2f/255 (95th percentile %.0f), JPEG alone %.2f/255 (%.0f)",
 				u, v, (int) diff[0], diff[1], diff[2], jpeg[1], jpeg[2]));
 			sideBySide(out.resolve("tile-" + name + ".png"), client, web);
 			if (diff[0] > 10_000) {
 				compared++;
 				if (diff[1] > jpeg[1] + 2) {
-					throw new AssertionError("The web map's tile " + name + " differs from the player's map more than JPEG explains: " + lines.get(lines.size() - 1));
+					throw new AssertionError("The web map's tile " + name + " differs from the player's map more than " + (WEBP ? "the colours" : "JPEG") + " explain: " + lines.get(lines.size() - 1));
 				}
 			}
 		}
 		Diorama.LOGGER.info("Web map against the player's map: {}", lines);
 		if (compared == 0) {
 			throw new AssertionError("No tile had enough pixels drawn on both maps to compare: " + lines);
+		}
+		if (WEBP) {
+			// The zoomed-out tiles are made at the end of the pass, after the tiles: tried until they are, up to 5 minutes.
+			for (int attempt = 0; ; attempt++) {
+				try {
+					zoomedOutExact(http, port, want);
+					break;
+				} catch (AssertionError e) {
+					if (attempt >= 30) {
+						throw e;
+					}
+					Diorama.LOGGER.info("Web map zoomed-out check, try {}: {}", attempt + 1, e.getMessage());
+					context.waitTicks(200);
+				}
+			}
 		}
 		// The land the server made but nobody visited: saved, and not drawn.
 		if (serverFolder != null) {
@@ -230,7 +263,7 @@ final class WebMapTest {
 		}
 		int u = Math.floorDiv(UNVISITED, Projection.TILE_UNITS);
 		for (int y = -64; y <= 320; y += 32) {
-			String path = "/minecraft_overworld/0/" + u + "_" + (int) Math.floor(Projection.v(y, UNVISITED) / Projection.TILE_UNITS) + ".jpg";
+			String path = "/minecraft_overworld/0/" + u + "_" + (int) Math.floor(Projection.v(y, UNVISITED) / Projection.TILE_UNITS) + EXT;
 			int far = status(http, port, path);
 			if (far != 404) {
 				throw new AssertionError("Land nobody visited is on the web map: " + path + " (" + far + ")");
@@ -244,6 +277,90 @@ final class WebMapTest {
 		if (outside != 404) {
 			throw new AssertionError("The web server serves outside its folder (" + outside + ")");
 		}
+	}
+
+	/** A served picture, JPEG or WebP. */
+	private static BufferedImage picture(byte[] bytes) throws IOException {
+		if (!WEBP) {
+			return ImageIO.read(new ByteArrayInputStream(bytes));
+		}
+		dev.diorama.web.webp.Vp8lDecoder.Picture picture = dev.diorama.web.webp.Vp8lDecoder.decode(bytes);
+		BufferedImage image = new BufferedImage(picture.width(), picture.height(), BufferedImage.TYPE_INT_RGB);
+		image.setRGB(0, 0, picture.width(), picture.height(), picture.argb(), 0, picture.width());
+		return image;
+	}
+
+	/**
+	 * Lossless means the zoomed-out tiles are exact: each one over the explored land, as served,
+	 * is the rounded average of the four under it, as served (the background where one is missing).
+	 */
+	private static void zoomedOutExact(HttpClient http, int port, String[] want) {
+		int size = Projection.TILE_PIXELS;
+		int checked = 0;
+		java.util.Set<String> parents = new java.util.TreeSet<>();
+		for (String name : want) {
+			int sep = name.indexOf('_');
+			parents.add(Math.floorDiv(Integer.parseInt(name.substring(0, sep)), 2) + "_" + Math.floorDiv(Integer.parseInt(name.substring(sep + 1)), 2));
+		}
+		try {
+			for (String parent : parents) {
+				String path = "/minecraft_overworld/1/" + parent + EXT;
+				if (status(http, port, path) != 200) {
+					continue;
+				}
+				BufferedImage out = picture(getBytes(http, port, path).body());
+				int sep = parent.indexOf('_');
+				int pu = Integer.parseInt(parent.substring(0, sep));
+				int pv = Integer.parseInt(parent.substring(sep + 1));
+				int wrong = 0;
+				for (int i = 0; i < 4; i++) {
+					String child = "/minecraft_overworld/0/" + (pu * 2 + (i & 1)) + "_" + (pv * 2 + (i >> 1)) + EXT;
+					BufferedImage in = status(http, port, child) == 200 ? picture(getBytes(http, port, child).body()) : null;
+					for (int y = 0; y < size / 2; y++) {
+						for (int x = 0; x < size / 2; x++) {
+							int expected = 0x15171C;
+							if (in != null) {
+								int a = in.getRGB(2 * x, 2 * y);
+								int b = in.getRGB(2 * x + 1, 2 * y);
+								int c = in.getRGB(2 * x, 2 * y + 1);
+								int d = in.getRGB(2 * x + 1, 2 * y + 1);
+								expected = 0;
+								for (int shift = 0; shift <= 16; shift += 8) {
+									int sum = (a >> shift & 0xFF) + (b >> shift & 0xFF) + (c >> shift & 0xFF) + (d >> shift & 0xFF);
+									expected |= ((sum + 2) >> 2) << shift;
+								}
+							}
+							if ((out.getRGB((i & 1) * size / 2 + x, (i >> 1) * size / 2 + y) & 0xFFFFFF) != expected) {
+								wrong++;
+							}
+						}
+					}
+				}
+				if (wrong > 0) {
+					throw new AssertionError("Zoomed-out tile " + parent + " differs from the average of the four under it at " + wrong + " pixels");
+				}
+				checked++;
+			}
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		Diorama.LOGGER.info("Web map: {} zoomed-out tiles over the explored land are exactly the average of the tiles under them", checked);
+		if (checked == 0) {
+			throw new AssertionError("No zoomed-out tile over the explored land to check");
+		}
+	}
+
+	/** The tracer's pixels over the background, as they are. */
+	private static BufferedImage opaque(int[] client) {
+		int size = Projection.TILE_PIXELS;
+		BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
+		for (int i = 0; i < client.length; i++) {
+			int p = client[i];
+			int a = p >>> 24;
+			img.setRGB(i % size, i / size, ((p & 0xFF) * a / 255 + 0x15 * (255 - a) / 255) << 16 | ((p >> 8 & 0xFF) * a / 255 + 0x17 * (255 - a) / 255) << 8
+				| (p >> 16 & 0xFF) * a / 255 + 0x1C * (255 - a) / 255);
+		}
+		return img;
 	}
 
 	/** The HTTP status of a path, or -1 while nothing answers. */
