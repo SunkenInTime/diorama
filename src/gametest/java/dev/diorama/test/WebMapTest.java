@@ -225,7 +225,7 @@ final class WebMapTest {
 			// The same tile of the player's map put through the same JPEG: what the format costs alone.
 			// Lossless costs nothing: the player's tile as it is.
 			double[] jpeg = compare(client, WEBP ? opaque(client) : jpeg(client), web);
-			lines.add(String.format(Locale.ROOT, "tile %d,%d: %d pixels compared, mean difference %.2f/255 (95th percentile %.0f), JPEG alone %.2f/255 (%.0f)",
+			lines.add(String.format(Locale.ROOT, "tile %d,%d: %d pixels compared, mean difference %.2f/255 (95th percentile %.0f), the format alone %.2f/255 (%.0f)",
 				u, v, (int) diff[0], diff[1], diff[2], jpeg[1], jpeg[2]));
 			sideBySide(out.resolve("tile-" + name + ".png"), client, web);
 			if (diff[0] > 10_000) {
