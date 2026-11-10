@@ -1,6 +1,8 @@
 package dev.diorama.web;
 
 import dev.diorama.Projection;
+import dev.diorama.web.webp.Vp8lDecoder;
+import dev.diorama.web.webp.Vp8lEncoder;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -21,9 +23,10 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 
 /**
- * The web map's pictures on disk: one folder per dimension, one per zoom level, a JPEG per tile.
- * Zoom 0 is the map's own tiles, 512 pixels for 128 blocks across; each level out halves that,
- * one tile made from the four under it. A tile with nothing drawn has no file.
+ * The web map's pictures on disk: one folder per dimension, one per zoom level, a picture per tile
+ * in the {@link TileFormat} the settings pick. Zoom 0 is the map's own tiles, 512 pixels for 128
+ * blocks across; each level out halves that, one tile made from the four under it. A tile with
+ * nothing drawn has no file.
  */
 final class WebTiles {
 	/** JPEG quality: about 59 KB a full tile with colour at full resolution (Hermitcraft's average). */
@@ -32,31 +35,33 @@ final class WebTiles {
 	static final int BACKGROUND = 0x15171C;
 	static final int SIZE = Projection.TILE_PIXELS;
 
+	/** Time spent writing and reading pictures, and how many, since the server started; for the passes' log lines. Web map thread only. */
+	static long encodeNanos;
+	static long encodes;
+	static long decodeNanos;
+	static long decodes;
+
 	private WebTiles() {
 	}
 
-	static Path file(Path dimension, int zoom, int u, int v) {
-		return dimension.resolve(Integer.toString(zoom)).resolve(u + "_" + v + ".jpg");
+	static Path file(Path dimension, TileFormat format, int zoom, int u, int v) {
+		return dimension.resolve(Integer.toString(zoom)).resolve(u + "_" + v + "." + format.extension);
 	}
 
 	/**
 	 * Writes a tile from the tracer's pixels (0xAABBGGRR, alpha how much of the pixel is known),
 	 * or deletes it if none are known. Returns the bytes written, 0 for none.
 	 */
-	static long write(Path file, int[] abgr) throws IOException {
-		BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
+	static long write(Path file, TileFormat format, int[] abgr) throws IOException {
+		int[] rgb = new int[SIZE * SIZE];
 		boolean any = false;
-		int[] row = new int[SIZE];
-		for (int y = 0; y < SIZE; y++) {
-			for (int x = 0; x < SIZE; x++) {
-				int p = abgr[y * SIZE + x];
-				int a = p >>> 24;
-				any |= a != 0;
-				row[x] = over(p & 0xFF, p >> 8 & 0xFF, p >> 16 & 0xFF, a);
-			}
-			image.setRGB(0, y, SIZE, 1, row, 0, SIZE);
+		for (int i = 0; i < rgb.length; i++) {
+			int p = abgr[i];
+			int a = p >>> 24;
+			any |= a != 0;
+			rgb[i] = over(p & 0xFF, p >> 8 & 0xFF, p >> 16 & 0xFF, a);
 		}
-		return any ? writeJpeg(file, image) : delete(file);
+		return any ? save(file, format, rgb) : delete(file);
 	}
 
 	/** A pixel's colour over the background, as 0xRRGGBB. */
@@ -71,46 +76,73 @@ final class WebTiles {
 	 * Makes a zoomed-out tile from the four under it, (0, 0), (1, 0), (0, 1), (1, 1), each pixel
 	 * the average of four; deletes it when none of them exists. Returns the bytes written.
 	 */
-	static long shrink(Path out, Path @Nullable [] children) throws IOException {
-		BufferedImage image = null;
+	static long shrink(Path out, TileFormat format, Path @Nullable [] children) throws IOException {
+		int[] image = null;
 		int half = SIZE / 2;
-		int[] row = new int[SIZE * 2];
-		int[] shrunk = new int[half];
 		for (int i = 0; i < 4; i++) {
 			Path child = children[i];
 			if (child == null || !Files.exists(child)) {
 				continue;
 			}
-			BufferedImage read = ImageIO.read(child.toFile());
+			int[] read = read(child, format);
 			if (read == null) {
 				continue;
 			}
 			if (image == null) {
-				image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
-				int[] fill = new int[SIZE];
-				java.util.Arrays.fill(fill, BACKGROUND);
-				for (int y = 0; y < SIZE; y++) {
-					image.setRGB(0, y, SIZE, 1, fill, 0, SIZE);
-				}
+				image = new int[SIZE * SIZE];
+				java.util.Arrays.fill(image, BACKGROUND);
 			}
 			int ox = (i & 1) * half;
 			int oy = (i >> 1) * half;
 			for (int y = 0; y < half; y++) {
-				read.getRGB(0, 2 * y, SIZE, 2, row, 0, SIZE);
+				int top = 2 * y * SIZE;
+				int bottom = top + SIZE;
+				int to = (oy + y) * SIZE + ox;
 				for (int x = 0; x < half; x++) {
-					int a = row[2 * x];
-					int b = row[2 * x + 1];
-					int c = row[SIZE + 2 * x];
-					int d = row[SIZE + 2 * x + 1];
+					int a = read[top + 2 * x];
+					int b = read[top + 2 * x + 1];
+					int c = read[bottom + 2 * x];
+					int d = read[bottom + 2 * x + 1];
 					int r = ((a >> 16 & 0xFF) + (b >> 16 & 0xFF) + (c >> 16 & 0xFF) + (d >> 16 & 0xFF) + 2) >> 2;
 					int g = ((a >> 8 & 0xFF) + (b >> 8 & 0xFF) + (c >> 8 & 0xFF) + (d >> 8 & 0xFF) + 2) >> 2;
 					int bl = ((a & 0xFF) + (b & 0xFF) + (c & 0xFF) + (d & 0xFF) + 2) >> 2;
-					shrunk[x] = r << 16 | g << 8 | bl;
+					image[to + x] = r << 16 | g << 8 | bl;
 				}
-				image.setRGB(ox, oy + y, half, 1, shrunk, 0, half);
 			}
 		}
-		return image == null ? delete(out) : writeJpeg(out, image);
+		return image == null ? delete(out) : save(out, format, image);
+	}
+
+	/** A tile's pixels as 0xRRGGBB, or null if it isn't one of the map's tiles (damaged, another size). */
+	static int @Nullable [] read(Path file, TileFormat format) throws IOException {
+		long started = System.nanoTime();
+		int[] rgb;
+		if (format == TileFormat.WEBP) {
+			byte[] bytes = Files.readAllBytes(file);
+			Vp8lDecoder.Picture picture;
+			try {
+				picture = Vp8lDecoder.decode(bytes);
+			} catch (IOException e) {
+				// Damaged: the tile's land is drawn again when it's next saved, or on a redraw.
+				return null;
+			}
+			if (picture.width() != SIZE || picture.height() != SIZE) {
+				return null;
+			}
+			rgb = picture.argb();
+		} else {
+			BufferedImage image = ImageIO.read(file.toFile());
+			if (image == null || image.getWidth() != SIZE || image.getHeight() != SIZE) {
+				return null;
+			}
+			rgb = image.getRGB(0, 0, SIZE, SIZE, null, 0, SIZE);
+		}
+		for (int i = 0; i < rgb.length; i++) {
+			rgb[i] &= 0xFFFFFF;
+		}
+		decodeNanos += System.nanoTime() - started;
+		decodes++;
+		return rgb;
 	}
 
 	private static long delete(Path file) throws IOException {
@@ -118,10 +150,30 @@ final class WebTiles {
 		return 0;
 	}
 
-	/** Writes beside the file, then moves it in, so a browser never gets half a picture. */
-	private static long writeJpeg(Path file, BufferedImage image) throws IOException {
+	/** Writes the pixels (0xRRGGBB) beside the file, then moves them in, so a browser never gets half a picture. */
+	private static long save(Path file, TileFormat format, int[] rgb) throws IOException {
+		long started = System.nanoTime();
 		Files.createDirectories(file.getParent());
 		Path part = file.resolveSibling(file.getFileName() + ".part");
+		if (format == TileFormat.WEBP) {
+			int[] argb = new int[rgb.length];
+			for (int i = 0; i < rgb.length; i++) {
+				argb[i] = 0xFF000000 | rgb[i];
+			}
+			Files.write(part, Vp8lEncoder.encode(argb, SIZE, SIZE));
+		} else {
+			BufferedImage image = new BufferedImage(SIZE, SIZE, BufferedImage.TYPE_INT_RGB);
+			image.setRGB(0, 0, SIZE, SIZE, rgb, 0, SIZE);
+			writeJpeg(part, image);
+		}
+		long size = Files.size(part);
+		Files.move(part, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+		encodeNanos += System.nanoTime() - started;
+		encodes++;
+		return size;
+	}
+
+	private static void writeJpeg(Path part, BufferedImage image) throws IOException {
 		Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
 		if (!writers.hasNext()) {
 			throw new IOException("this Java has no JPEG writer");
@@ -147,8 +199,5 @@ final class WebTiles {
 		} finally {
 			writer.dispose();
 		}
-		long size = Files.size(part);
-		Files.move(part, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-		return size;
 	}
 }

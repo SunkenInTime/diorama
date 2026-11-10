@@ -175,7 +175,7 @@ function startLoads() {
 			setTimeout(draw, Math.min(30000, 500 * Math.pow(2, t.tries)) + 10);
 			draw();
 		};
-		img.src = key + ".jpg?v=" + ver;
+		img.src = key + "." + (map.ext || "jpg") + "?v=" + ver;
 	}
 	// Keep memory in hand: forget ready pictures far from anything wanted once there are many.
 	if (tiles.size > 600) {

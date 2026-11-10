@@ -41,7 +41,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The server's web map: Diorama's tracer drawing the world from its save, in vanilla colours, on
- * one background thread, into JPEG tiles a browser can pan, as BlueMap and Dynmap draw theirs.
+ * one background thread, into tiles (JPEG, or lossless WebP) a browser can pan, as BlueMap and Dynmap draw theirs.
  * Off unless the owner turns it on ({@link WebSettings}); dedicated servers only.
  *
  * <p>The first pass draws every tile with land the shared map shows (by default, land players
@@ -206,6 +206,14 @@ public final class WebMap {
 			} else {
 				progress.setProperty("share-land", land);
 			}
+			// Drawn in another format: the old pictures go first, so the map is never half one
+			// format and half the other; then everything again, as on a first pass.
+			String format = this.settings.format().setting;
+			this.removeOtherFormats();
+			if (!format.equals(progress.getProperty("format", TileFormat.JPEG.setting))) {
+				Diorama.LOGGER.info("web-map-format changed to {}: drawing the whole web map again", format);
+				this.redrawAll.set(true);
+			}
 			while (!this.stopping) {
 				boolean all = this.redrawAll.getAndSet(false) || this.redrawOwed;
 				this.redrawOwed = false;
@@ -227,8 +235,9 @@ public final class WebMap {
 					}
 				}
 				if (all && complete && !this.stopping) {
-					// Only now is the map drawn under this share-land: a redraw cut short starts over.
+					// Only now is the map drawn under this share-land and format: a redraw cut short starts over.
 					progress.setProperty("share-land", land);
+					progress.setProperty("format", format);
 					this.saveProgress(progress);
 				} else if (all && !this.stopping) {
 					// Out of disk, say: again, but not at once.
@@ -330,6 +339,38 @@ public final class WebMap {
 		this.status = status;
 	}
 
+	TileFormat format() {
+		return this.settings.format();
+	}
+
+	/** Deletes the pictures in formats other than the settings', in every dimension and zoom level. */
+	private void removeOtherFormats() {
+		int removed = 0;
+		try (DirectoryStream<Path> dimensions = Files.newDirectoryStream(this.folder, Files::isDirectory)) {
+			for (Path dimension : dimensions) {
+				try (DirectoryStream<Path> zooms = Files.newDirectoryStream(dimension, path -> Files.isDirectory(path) && path.getFileName().toString().matches("\\d+"))) {
+					for (Path zoom : zooms) {
+						try (DirectoryStream<Path> files = Files.newDirectoryStream(zoom)) {
+							for (Path file : files) {
+								String name = file.getFileName().toString();
+								TileFormat other = TileFormat.ofFile(name.endsWith(".part") ? name.substring(0, name.length() - 5) : name);
+								if (other != null && other != this.settings.format() && name.matches("-?\\d+_-?\\d+\\..*")) {
+									Files.deleteIfExists(file);
+									removed++;
+								}
+							}
+						}
+					}
+				}
+			}
+		} catch (IOException e) {
+			Diorama.LOGGER.warn("Couldn't remove the web map's pictures of another format in {}", this.folder, e);
+		}
+		if (removed > 0) {
+			Diorama.LOGGER.info("Removed {} web map pictures of another format than {}", removed, this.settings.format().setting);
+		}
+	}
+
 	private Properties loadProgress() {
 		Properties progress = new Properties();
 		Path file = this.folder.resolve("progress.properties");
@@ -368,6 +409,7 @@ public final class WebMap {
 			.append(",\"sin\":").append(String.format(Locale.ROOT, "%.6f", Projection.sin()))
 			.append(",\"cos\":").append(String.format(Locale.ROOT, "%.6f", Projection.cos()))
 			.append(",\"background\":\"#").append(String.format(Locale.ROOT, "%06x", WebTiles.BACKGROUND)).append('"')
+			.append(",\"ext\":\"").append(this.settings.format().extension).append('"')
 			.append(",\"updated\":").append(System.currentTimeMillis())
 			.append(",\"dimensions\":[");
 		List<Dimension> list = new ArrayList<>(this.dimensions.values());
@@ -461,13 +503,14 @@ public final class WebMap {
 				if (!Files.isDirectory(zoom)) {
 					continue;
 				}
-				try (DirectoryStream<Path> files = Files.newDirectoryStream(zoom, "*.jpg")) {
+				String extension = "." + map.format().extension;
+				try (DirectoryStream<Path> files = Files.newDirectoryStream(zoom, "*" + extension)) {
 					for (Path file : files) {
 						String name = file.getFileName().toString();
 						int sep = name.indexOf('_');
 						try {
 							if (sep > 0) {
-								this.tiles[z].add(key(Integer.parseInt(name.substring(0, sep)), Integer.parseInt(name.substring(sep + 1, name.length() - 4))));
+								this.tiles[z].add(key(Integer.parseInt(name.substring(0, sep)), Integer.parseInt(name.substring(sep + 1, name.length() - extension.length()))));
 							}
 						} catch (NumberFormatException e) {
 							// Not one of the map's tiles: someone else's file.
@@ -615,6 +658,10 @@ public final class WebMap {
 			}));
 			ThreadMXBean threads = ManagementFactory.getThreadMXBean();
 			long cpuStart = threads.isCurrentThreadCpuTimeSupported() ? threads.getCurrentThreadCpuTime() : -1;
+			long encodeNanos = WebTiles.encodeNanos;
+			long encodes = WebTiles.encodes;
+			long decodeNanos = WebTiles.decodeNanos;
+			long decodes = WebTiles.decodes;
 			long bytes = 0;
 			int drawn = 0;
 			int empty = 0;
@@ -644,7 +691,7 @@ public final class WebMap {
 					continue;
 				}
 				try {
-					long size = WebTiles.write(WebTiles.file(this.folder, 0, u, v), pixels);
+					long size = WebTiles.write(WebTiles.file(this.folder, this.map.format(), 0, u, v), this.map.format(), pixels);
 					bytes += size;
 					if (size > 0) {
 						drawn++;
@@ -671,9 +718,13 @@ public final class WebMap {
 			double seconds = (System.nanoTime() - wallStart) / 1e9;
 			Diorama.LOGGER.info(String.format(Locale.ROOT,
 				"Web map pass of %s: %d chunks saved since the last, %d with new blocks on the map; %d tiles drawn, %d empty, %d zoom levels; %.1f s (%.2f s of CPU a tile); "
-					+ "%.1f MB written (%.0f KB a tile, %.1f MB zoomed out); server tick %.1f ms average, %.1f ms worst while drawing",
+					+ "%.1f MB written (%.0f KB a tile, %.1f MB zoomed out); %s: %.1f ms writing a picture (%d), %.1f ms reading one back (%d); "
+					+ "server tick %.1f ms average, %.1f ms worst while drawing",
 				this.id, changed, counted, drawn, empty, this.zoomLevels, seconds, cpu < 0 ? -1 : cpu / 1e9 / Math.max(1, drawn + empty),
-				(bytes + overviewBytes) / 1e6, drawn == 0 ? 0 : bytes / 1e3 / drawn, overviewBytes / 1e6, tickSum / Math.max(1, drawn + empty), tickMax));
+				(bytes + overviewBytes) / 1e6, drawn == 0 ? 0 : bytes / 1e3 / drawn, overviewBytes / 1e6,
+				this.map.format().setting, (WebTiles.encodeNanos - encodeNanos) / 1e6 / Math.max(1, WebTiles.encodes - encodes), WebTiles.encodes - encodes,
+				(WebTiles.decodeNanos - decodeNanos) / 1e6 / Math.max(1, WebTiles.decodes - decodes), WebTiles.decodes - decodes,
+				tickSum / Math.max(1, drawn + empty), tickMax));
 			this.source.clear();
 			// A chunk that couldn't be read, being written each time it was tried, say: read again.
 			failed |= this.save.failedReads() != failedReads;
@@ -744,10 +795,10 @@ public final class WebMap {
 					int v = (int) key;
 					Path[] children = new Path[4];
 					for (int i = 0; i < 4; i++) {
-						children[i] = WebTiles.file(this.folder, zoom - 1, u * 2 + (i & 1), v * 2 + (i >> 1));
+						children[i] = WebTiles.file(this.folder, this.map.format(), zoom - 1, u * 2 + (i & 1), v * 2 + (i >> 1));
 					}
 					try {
-						long size = WebTiles.shrink(WebTiles.file(this.folder, zoom, u, v), children);
+						long size = WebTiles.shrink(WebTiles.file(this.folder, this.map.format(), zoom, u, v), this.map.format(), children);
 						bytes += size;
 						if (size > 0) {
 							this.tiles[zoom].add(key);
@@ -768,7 +819,7 @@ public final class WebMap {
 				for (java.util.Iterator<Long> it = this.tiles[zoom].iterator(); it.hasNext();) {
 					long key = it.next();
 					try {
-						Files.deleteIfExists(WebTiles.file(this.folder, zoom, (int) (key >> 32), (int) key));
+						Files.deleteIfExists(WebTiles.file(this.folder, this.map.format(), zoom, (int) (key >> 32), (int) key));
 						it.remove();
 					} catch (IOException e) {
 						failed = true;
@@ -802,7 +853,7 @@ public final class WebMap {
 					// picture until it changes rather than asking again each visit.
 					long version;
 					try {
-						version = Files.getLastModifiedTime(WebTiles.file(this.folder, z, u, v)).toMillis() / 1000;
+						version = Files.getLastModifiedTime(WebTiles.file(this.folder, this.map.format(), z, u, v)).toMillis() / 1000;
 					} catch (IOException e) {
 						version = 0;
 					}

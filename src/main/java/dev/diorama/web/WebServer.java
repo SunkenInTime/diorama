@@ -72,7 +72,8 @@ final class WebServer {
 			Path file = root.resolve(path.substring(1)).normalize();
 			// Only what's in the folder, and only the page, its map file and the pictures.
 			String name = file.getFileName() == null ? "" : file.getFileName().toString();
-			String type = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".json") ? "application/json" : name.endsWith(".html") ? "text/html; charset=utf-8" : null;
+			TileFormat picture = TileFormat.ofFile(name);
+			String type = picture != null ? picture.mediaType : name.endsWith(".json") ? "application/json" : name.endsWith(".html") ? "text/html; charset=utf-8" : null;
 			if (!file.startsWith(root) || type == null || !Files.isRegularFile(file) || !file.toRealPath().startsWith(root.toRealPath())) {
 				// Outside the folder, also through a link inside it.
 				send(exchange, 404, "text/plain", null);
@@ -84,7 +85,7 @@ final class WebServer {
 			// A picture asked for with its version (the page's way) never changes under that address: the
 			// browser keeps it. Anything else may change, and is checked each time (a 304 if not).
 			String query = exchange.getRequestURI().getRawQuery();
-			exchange.getResponseHeaders().set("Cache-Control", type.equals("image/jpeg") && query != null && query.startsWith("v=")
+			exchange.getResponseHeaders().set("Cache-Control", picture != null && query != null && query.startsWith("v=")
 				? "public, max-age=31536000, immutable" : "no-cache");
 			String since = exchange.getRequestHeaders().getFirst("If-Modified-Since");
 			if (since != null) {

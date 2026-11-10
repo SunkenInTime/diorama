@@ -18,11 +18,12 @@ import org.jspecify.annotations.Nullable;
  * @param address the address the built-in web server listens on; empty for every address
  * @param folder where the tiles go; null for {@code diorama-web} in the world folder
  * @param everyChunk whether every finished chunk is drawn, rather than only land players spent time near
+ * @param format the pictures' format: JPEG, or lossless WebP (experimental)
  */
-public record WebSettings(boolean enabled, int port, String address, @Nullable Path folder, boolean everyChunk) {
+public record WebSettings(boolean enabled, int port, String address, @Nullable Path folder, boolean everyChunk, TileFormat format) {
 	public static final String FILE = "diorama-server.properties";
 	public static final int DEFAULT_PORT = 8100;
-	public static final WebSettings DEFAULTS = new WebSettings(false, DEFAULT_PORT, "", null, false);
+	public static final WebSettings DEFAULTS = new WebSettings(false, DEFAULT_PORT, "", null, false, TileFormat.JPEG);
 
 	/** Reads the settings from {@code configFolder}, adding the web map's to the file if it lacks them. */
 	public static WebSettings load(Path configFolder) {
@@ -70,7 +71,13 @@ public record WebSettings(boolean enabled, int port, String address, @Nullable P
 		String folderText = properties.getProperty("web-map-folder", "").trim();
 		Path folder = folderText.isEmpty() ? null : Path.of(folderText);
 		boolean everyChunk = properties.getProperty("share-land", "visited").trim().toLowerCase(Locale.ROOT).equals("generated");
-		return new WebSettings(enabled, port, address, folder, everyChunk);
+		String formatText = properties.getProperty("web-map-format", TileFormat.JPEG.setting);
+		TileFormat format = TileFormat.named(formatText);
+		if (format == null) {
+			Diorama.LOGGER.warn("web-map-format in {} is {}, which is neither jpeg nor webp; using jpeg", file, formatText.trim());
+			format = TileFormat.JPEG;
+		}
+		return new WebSettings(enabled, port, address, folder, everyChunk, format);
 	}
 
 	/** Each of the web map's settings: its key, what it means, its default. */
@@ -90,5 +97,9 @@ public record WebSettings(boolean enabled, int port, String address, @Nullable P
 		{"web-map-folder", """
 			# Where the web map's files go. Empty: diorama-web in the world folder.
 			""", ""},
+		{"web-map-format", """
+			# The pictures' format: jpeg, or webp (experimental) for every pixel exactly as drawn, at
+			# more than twice the disk. Changing it draws the whole map again in the new format.
+			""", "jpeg"},
 	};
 }
