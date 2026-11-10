@@ -7,7 +7,7 @@ import org.jspecify.annotations.Nullable;
 public enum TileFormat {
 	/** JPEG at quality 85, colour at every pixel: the smallest files, with a little blur at block edges. */
 	JPEG("jpeg", "jpg", "image/jpeg"),
-	/** Lossless WebP: every pixel exactly as drawn, about twice JPEG's disk. Experimental. */
+	/** Lossless WebP: every pixel exactly as drawn, at 2.3 times JPEG's disk (Hermitcraft: 390 MB to 173). Experimental. */
 	WEBP("webp", "webp", "image/webp");
 
 	/** As written in the settings. */

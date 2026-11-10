@@ -25,11 +25,12 @@ All in `config/diorama-server.properties`:
 | `web-map-port` | The port of Diorama's own small web server. `0` turns it off, for when you serve the files yourself. Default 8100. |
 | `web-map-address` | The address it listens on. Empty for every address; `127.0.0.1` to only reach it through a web server of your own on the same machine. |
 | `web-map-folder` | Where the map's files go. Empty: `diorama-web` in the world folder. |
+| `web-map-format` | The pictures' format: `jpeg` (the default), or `webp`, experimental: lossless WebP, every pixel exactly as the server drew it, for more than twice the disk. Changing it deletes the pictures in the old format when the server starts and draws the whole map again. |
 | `share-land` | Which land the map shows, the same as the shared map: `visited` (land players have spent time near, as the game counts it in every chunk) or `generated` (every finished chunk, for worlds pre-generated with Chunky). |
 
 ## Serving it yourself
 
-The folder is a plain static site: `index.html`, `map.json` and the pictures, one JPEG per tile in `<dimension>/<zoom>/<x>_<y>.jpg`. Point nginx, Caddy or any web server at it and set `web-map-port=0`. For example with nginx:
+The folder is a plain static site: `index.html`, `map.json` and the pictures, one picture per tile in `<dimension>/<zoom>/<x>_<y>.jpg` (`.webp` with `web-map-format=webp`; serve it as `image/webp`). Point nginx, Caddy or any web server at it and set `web-map-port=0`. For example with nginx:
 
 ```nginx
 location /map/ {
@@ -50,7 +51,7 @@ Land taken out of the world stays on the web map until `/diorama-web redraw`: a 
 
 ## Disk
 
-About 59 KB a tile of land, plus half as much again for the zoomed-out views. Hermitcraft Season 10's world took 173 MB: 125 MB for the overworld, 30 MB for the Nether, 19 MB for the End.
+About 59 KB a tile of land, plus half as much again for the zoomed-out views. Hermitcraft Season 10's world took 173 MB: 125 MB for the overworld, 30 MB for the Nether, 19 MB for the End. With `web-map-format=webp` it took 390 MB (293, 69 and 29 MB).
 
 ## Modded blocks
 
