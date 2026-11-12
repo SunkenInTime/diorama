@@ -213,7 +213,7 @@
 	"diorama.settings.game_time.tooltip": "在小地图下方显示当天时间，可选择是否显示天数。天黑到可以睡觉时会变成蓝色。在下界和末地显示主世界的时间。",
 	"diorama.settings.auto_caves.tooltip": "当你在地下时，小地图和地图会显示你所在的洞穴，而非上方的地表。",
 	"diorama.settings.prefer_surface.tooltip": "头顶只有屋顶遮挡时（比如在房子里）仍显示地表，真正进入地下后才切换到洞穴。",
-	"diorama.settings.legible_caves.tooltip": "按深度为洞穴加深阴影：你下方越深的地面越接近深灰色，地图只显示你所在的洞穴，而不会透过岩石看到别处。关闭时，会显示你下方岩石中的洞穴、矿井和熔岩。",
+	"diorama.settings.legible_caves.tooltip": "按深度为洞穴加深阴影：你下方越深的地面越接近深灰色，地图只显示你所在的洞穴，而不会透过岩石看到别处。关闭时，会显示你下方岩石中的洞穴、废弃矿井和熔岩。",
 	"diorama.settings.position.tooltip": "小地图在屏幕上的位置。可拖到任意位置，或放到某个角落。",
 	"diorama.settings.corner.tooltip": "将小地图移到屏幕的下一个角落。",
 	"diorama.settings.size.tooltip": "小地图的宽度。在较小的屏幕上会自动缩小以适应。",

@@ -390,7 +390,7 @@
 	"diorama.settings.icon_size.tooltip": "マップ／ミニマップ上のプレイヤーやモブのアイコンの大きさ。",
 	"diorama.folder.rename": "改名",
 	"diorama.folder.show_here": "ここに表示",
-	"diorama.folder.show_here.tooltip": "%2$sにいる間、%1$sのウェイポイントも、対応する%2$sの座標に薄くマップとワールド上に表示されます。ワールドを出るまで有効です。",
+	"diorama.folder.show_here.tooltip": "%2$sにいる間、%1$sのウェイポイントも、対応する%2$sの座標で、マップとワールド上に薄く表示されます。ワールドを出るまで有効です。",
 	"diorama.folder.rename_title": "フォルダーを改名",
 	"diorama.settings.frame": "枠",
 	"diorama.settings.frame.classic": "クラシック",
