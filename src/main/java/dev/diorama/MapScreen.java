@@ -117,6 +117,8 @@ public final class MapScreen extends Screen {
 	private long followHoldStart = -1;
 	private boolean following = true;
 	private List<Radar.Blip> blips = List.of();
+	/** The map's own tooltip at the mouse this frame: a mob, player, waypoint or spot. Null with none, or over a control. */
+	private @Nullable List<FormattedCharSequence> tooltipLines;
 	private List<WaypointOverlay.Pin> pins = List.of();
 	private MapViewport.@Nullable View lastView;
 	/** Where the current mouse press started, to tell a click from a drag. */
@@ -536,6 +538,7 @@ public final class MapScreen extends Screen {
 		}
 		// The tooltip is for a control under the mouse, else whatever is drawn on top: a player,
 		// then a waypoint, then a mob, then the spot itself. The menu covers them while it's open.
+		this.tooltipLines = null;
 		if (this.menu == null) {
 			if (this.draw.active() && !this.overControls(mouseX, mouseY)) {
 				// Drawing: the map's own tooltips would sit on what's being drawn.
@@ -557,17 +560,19 @@ public final class MapScreen extends Screen {
 					*///?}
 				}
 			} else if (hovered != null && hovered.kind() == Radar.Kind.PLAYER) {
-				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
+				this.tooltipLines = withClaim(Radar.describe(hovered, viewer), hovered.entity().getBlockX(), hovered.entity().getBlockZ());
 			} else if (hoveredPin != null) {
-				Component described = elsewhere ? Component.literal(hoveredPin.waypoint().shownName()) : WaypointOverlay.describe(hoveredPin.waypoint(), viewer);
-				graphics.setTooltipForNextFrame(this.font, described, mouseX, mouseY);
+				Waypoint waypoint = hoveredPin.waypoint();
+				// Another dimension's map: the claims known are those of the dimension the player is in.
+				this.tooltipLines = elsewhere ? List.of(Component.literal(waypoint.shownName()).getVisualOrderText())
+					: withClaim(WaypointOverlay.describe(waypoint, viewer), waypoint.x, waypoint.z);
 			} else if (hovered != null) {
-				graphics.setTooltipForNextFrame(this.font, Radar.describe(hovered, viewer), mouseX, mouseY);
+				this.tooltipLines = withClaim(Radar.describe(hovered, viewer), hovered.entity().getBlockX(), hovered.entity().getBlockZ());
 			} else if (this.pressButton == -1) {
-				List<FormattedCharSequence> lines = this.spotTooltip(mouseX, mouseY);
-				if (lines != null) {
-					graphics.setTooltipForNextFrame(this.font, lines, mouseX, mouseY);
-				}
+				this.tooltipLines = this.spotTooltip(mouseX, mouseY);
+			}
+			if (this.tooltipLines != null) {
+				graphics.setTooltipForNextFrame(this.font, this.tooltipLines, mouseX, mouseY);
 			}
 		}
 
@@ -1565,13 +1570,39 @@ public final class MapScreen extends Screen {
 		Component detail = biome != null
 			? Component.translatable("diorama.map.spot_detail", biome, distance)
 			: Component.translatable("diorama.map.distance", distance);
-		List<FormattedCharSequence> lines = lines(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()), detail);
-		Claims.Claim claim = Settings.get().claims == Settings.ClaimsShown.OFF ? null : Claims.get().at(spot.getX() >> 4, spot.getZ() >> 4);
-		if (claim != null) {
-			lines = new ArrayList<>(lines);
-			lines.add(claimLine(claim).getVisualOrderText());
+		return withClaim(lines(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()), detail), spot.getX(), spot.getZ());
+	}
+
+	/**
+	 * A mob's, player's or waypoint's tooltip, with the claim it stands in on a line underneath, as
+	 * an empty spot's tooltip has: the claim would be unreadable wherever something stands on it.
+	 */
+	private static List<FormattedCharSequence> withClaim(Component described, int x, int z) {
+		return withClaim(List.of(described.getVisualOrderText()), x, z);
+	}
+
+	private static List<FormattedCharSequence> withClaim(List<FormattedCharSequence> lines, int x, int z) {
+		Claims.Claim claim = Settings.get().claims == Settings.ClaimsShown.OFF ? null : Claims.get().at(x >> 4, z >> 4);
+		if (claim == null) {
+			return lines;
 		}
-		return lines;
+		List<FormattedCharSequence> both = new ArrayList<>(lines);
+		both.add(claimLine(claim).getVisualOrderText());
+		return both;
+	}
+
+	/** The text of the tooltip the map itself showed at the mouse last frame, a line each; empty with none. Public for tests. */
+	public List<String> tooltipText() {
+		List<String> text = new ArrayList<>();
+		for (FormattedCharSequence line : this.tooltipLines == null ? List.<FormattedCharSequence>of() : this.tooltipLines) {
+			StringBuilder builder = new StringBuilder();
+			line.accept((index, style, codePoint) -> {
+				builder.appendCodePoint(codePoint);
+				return true;
+			});
+			text.add(builder.toString());
+		}
+		return text;
 	}
 
 	/** Who owns the chunk under the mouse: a square of their colour, then their name, or the claim's own title. */
