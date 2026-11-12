@@ -65,6 +65,7 @@ final class CobblemonPortraits {
 		if (!WAITING.contains(subject)) {
 			WAITING.add(subject);
 		}
+		// Once a frame at most: the task runs before the next frame is drawn.
 		if (!scheduled) {
 			scheduled = true;
 			// Between frames: the portrait is drawn through the game's own buffers, which hold the
@@ -118,11 +119,8 @@ final class CobblemonPortraits {
 			}
 			PORTRAITS.put(subject, Optional.ofNullable(sprite));
 		}
-		if (!WAITING.isEmpty()) {
-			scheduled = true;
-			Minecraft mc = Minecraft.getInstance();
-			mc.schedule(CobblemonPortraits::drawWaiting);
-		}
+		// The rest wait for the radar to ask again next frame. Asking for another turn from here
+		// wouldn't wait: the game runs its tasks until none are left, so all would be drawn now.
 	}
 
 	/** The picture's name in logs and tests: {@code cobblemon:gengar/male.shiny}. */

@@ -101,7 +101,7 @@ if [ -e ~/mods.tgz ]; then
 			# A mod that can't run on the VM's JDK 25 (Cobblemon on Fabric: its battle engine stops
 			# at start) gets the Java it asks for: DIORAMA_TEST_JAVA=21, from Ubuntu's packages.
 			# mods.init.gradle.kts hands it to the production run.
-			if [ -n "$DIORAMA_TEST_JAVA" ] && [ ! -x "/usr/lib/jvm/java-$DIORAMA_TEST_JAVA-openjdk-amd64/bin/java" ]; then
+			if [ -n "${DIORAMA_TEST_JAVA:-}" ] && [ ! -x "/usr/lib/jvm/java-$DIORAMA_TEST_JAVA-openjdk-amd64/bin/java" ]; then
 				(sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "openjdk-$DIORAMA_TEST_JAVA-jdk") > ~/apt-java.log 2>&1 || { tail -20 ~/apt-java.log; exit 1; }
 				mark "installed Java $DIORAMA_TEST_JAVA for the game"
 			fi
