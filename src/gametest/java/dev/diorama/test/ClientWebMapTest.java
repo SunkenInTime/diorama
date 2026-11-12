@@ -280,11 +280,38 @@ final class ClientWebMapTest {
 	}
 
 	/**
-	 * Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. Each
-	 * time as a browser that has never seen the page: one with pictures kept from an earlier visit
-	 * can photograph it, on the clock Chromium runs these on, before the new pictures are in.
+	 * Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. On a
+	 * boat VM through the game test skill's page_photo.py, which waits until the page says its
+	 * pictures are in. Elsewhere on Chromium's own made-up clock, which can run out while a picture
+	 * is still being decoded and leave the map blank.
 	 */
 	static boolean photograph(String address, Path file) {
+		Path log = file.resolveSibling(file.getFileName() + ".log");
+		Path helper = Path.of(System.getProperty("user.home"), "diorama", ".claude", "skills", "boat-game-test", "page_photo.py");
+		if (Files.isRegularFile(helper)) {
+			try {
+				Process process = new ProcessBuilder("python3", helper.toString(), address, file.toAbsolutePath().toString())
+					.redirectErrorStream(true).redirectOutput(log.toFile()).start();
+				if (!process.waitFor(180, TimeUnit.SECONDS)) {
+					process.destroyForcibly();
+					throw new AssertionError("page_photo.py didn't finish photographing " + address);
+				}
+				String said = Files.readString(log).strip();
+				Diorama.LOGGER.info("web map: {} into {}: exit {}, {}", address, file, process.exitValue(), said);
+				if (process.exitValue() == 3) {
+					Diorama.LOGGER.warn("web map: no Chromium on this machine, so no picture of the page");
+					return false;
+				}
+				if (process.exitValue() != 0) {
+					throw new AssertionError("page_photo.py failed for " + address + ": " + said);
+				}
+				return true;
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			} catch (InterruptedException e) {
+				throw new AssertionError(e);
+			}
+		}
 		Path profile;
 		try {
 			profile = Files.createTempDirectory("diorama-web-map-browser");
@@ -295,7 +322,7 @@ final class ClientWebMapTest {
 			try {
 				Process process = new ProcessBuilder(name, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,800",
 					"--virtual-time-budget=20000", "--user-data-dir=" + profile, "--screenshot=" + file.toAbsolutePath(), address)
-					.redirectErrorStream(true).redirectOutput(file.resolveSibling(file.getFileName() + ".log").toFile()).start();
+					.redirectErrorStream(true).redirectOutput(log.toFile()).start();
 				if (!process.waitFor(180, TimeUnit.SECONDS)) {
 					process.destroyForcibly();
 					throw new AssertionError(name + " didn't finish photographing the page");
