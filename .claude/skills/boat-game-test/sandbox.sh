@@ -98,24 +98,13 @@ if [ -e ~/mods.tgz ]; then
 			run=versions/$node/build/run-production
 			# The development run gets this from stonecutter.gradle.kts.
 			export DIORAMA_GPU_BAKE=${DIORAMA_GPU_BAKE:-0}
-			# A mod that asks for one Java exactly (Cobblemon 1.8 on Fabric: 21) stops Fabric Loader
-			# on the VM's JDK 25, which runs every node. This run's copy of its jar loses that line.
-			python3 - "$mods" <<'PY' || exit 1
-import glob, json, os, sys, zipfile
-for jar in glob.glob(sys.argv[1] + '/*.jar'):
-    try:
-        with zipfile.ZipFile(jar) as z:
-            meta = json.loads(z.read('fabric.mod.json'), strict=False)
-    except (KeyError, ValueError):
-        continue
-    if 'java' not in meta.get('depends', {}):
-        continue
-    del meta['depends']['java']
-    with zipfile.ZipFile(jar) as old, zipfile.ZipFile(jar + '.part', 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as new:
-        for item in old.infolist():
-            new.writestr(item, json.dumps(meta) if item.filename == 'fabric.mod.json' else old.read(item.filename))
-    os.replace(jar + '.part', jar)
-PY
+			# A mod that can't run on the VM's JDK 25 (Cobblemon on Fabric: its battle engine stops
+			# at start) gets the Java it asks for: DIORAMA_TEST_JAVA=21, from Ubuntu's packages.
+			# mods.init.gradle.kts hands it to the production run.
+			if [ -n "$DIORAMA_TEST_JAVA" ] && [ ! -x "/usr/lib/jvm/java-$DIORAMA_TEST_JAVA-openjdk-amd64/bin/java" ]; then
+				(sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "openjdk-$DIORAMA_TEST_JAVA-jdk") > ~/apt-java.log 2>&1 || { tail -20 ~/apt-java.log; exit 1; }
+				mark "installed Java $DIORAMA_TEST_JAVA for the game"
+			fi
 			;;
 		*) with_mods=(-I .claude/skills/boat-game-test/mods.init.gradle.kts) ;;
 	esac

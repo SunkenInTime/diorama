@@ -175,6 +175,9 @@ final class CobblemonPortraits {
 				return XaeroRadarIcons.Sprite.cropped(name(subject), image, true, false);
 			}
 		} finally {
+			// Cobblemon lights the portrait its own way and puts the lights back at the end; a
+			// portrait that failed partway wouldn't have.
+			com.mojang.blaze3d.platform.Lighting.setupFor3DItems();
 			RenderSystem.setShaderFogStart(fogStart);
 			RenderSystem.setProjectionMatrix(projection, sorting);
 			target.destroyBuffers();

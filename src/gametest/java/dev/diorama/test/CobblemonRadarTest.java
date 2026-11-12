@@ -44,7 +44,7 @@ final class CobblemonRadarTest {
 		int x = at.getX();
 		int y = at.getY();
 		int z = at.getZ();
-		world.getServer().runCommand("fill " + (x - 12) + " " + y + " " + (z - 12) + " " + (x + 12) + " " + (y + 4) + " " + (z + 12) + " air");
+		world.getServer().runCommand("fill " + (x - 12) + " " + y + " " + (z - 12) + " " + (x + 12) + " " + (y + 24) + " " + (z + 12) + " air");
 		world.getServer().runCommand("fill " + (x - 12) + " " + (y - 1) + " " + (z - 12) + " " + (x + 12) + " " + (y - 1) + " " + (z + 12) + " grass_block");
 		for (int i = 0; i < POKEMON.length; i++) {
 			int px = x + (i % 3 - 1) * 6;
