@@ -1055,7 +1055,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * Every language on the screens with the newest text, for reading it in the game (opt-in:
 	 * {@code languages}): the game time, the dimension button and its map, the menu of a place not
-	 * yet mapped, and each settings tab with a tooltip showing.
+	 * yet mapped, each settings tab bare and with a tooltip showing, the waypoint list, and the
+	 * minimap position and map-off screens.
 	 */
 	private static void languages(ClientGameTestContext context) {
 		try (TestSingleplayerContext world = context.worldBuilder()
@@ -1104,11 +1105,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 				context.setScreen(() -> new SettingsScreen(null));
 				context.waitTicks(5);
-				String[][] tooltips = {{"game_time"}, {"items"}, {"map_dimension_button"}, {"waypoint_size_minimap"}, {"saved_chunks"}};
+				// Each tab bare, so every label shows, then with one of its newest tooltips.
+				String[][] tooltips = {{"legible_caves"}, {"items"}, {"web_map"}, {"waypoint_beams"}, {"day_night"}};
 				for (int tab = 0; tab < tooltips.length; tab++) {
 					int index = tab;
 					context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(index));
+					context.getInput().setCursorPos(2, 2);
 					context.waitTicks(3);
+					context.takeScreenshot("languages-" + language + "-4-settings-tab-" + (tab + 1));
 					String label = net.minecraft.network.chat.Component.translatable("diorama.settings." + tooltips[tab][0]).getString();
 					double[] at = context.computeOnClient(mc -> {
 						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
@@ -1123,8 +1127,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 					});
 					context.getInput().setCursorPos(at[0], at[1]);
 					context.waitTicks(14);
-					context.takeScreenshot("languages-" + language + "-4-settings-" + tooltips[tab][0]);
+					context.takeScreenshot("languages-" + language + "-5-tooltip-" + tooltips[tab][0]);
 				}
+				context.setScreen(() -> null);
+				context.getInput().setCursorPos(2, 2);
+
+				context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-6-waypoint-list");
+				context.setScreen(() -> new dev.diorama.MinimapPositionScreen(new SettingsScreen(null)));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-7-position");
+				context.setScreen(() -> new dev.diorama.DimensionsScreen(new SettingsScreen(null)));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-8-map-off");
 				context.setScreen(() -> null);
 			}
 			switchLanguage(context, "en_us");
