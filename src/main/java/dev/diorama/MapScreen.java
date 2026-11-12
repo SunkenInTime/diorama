@@ -456,6 +456,7 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		this.tooltipLines = null;
 		if (!ServerRules.minimapAllowed()) {
 			// The server can switch maps off while this screen is open.
 			this.onClose();
@@ -538,7 +539,6 @@ public final class MapScreen extends Screen {
 		}
 		// The tooltip is for a control under the mouse, else whatever is drawn on top: a player,
 		// then a waypoint, then a mob, then the spot itself. The menu covers them while it's open.
-		this.tooltipLines = null;
 		if (this.menu == null) {
 			if (this.draw.active() && !this.overControls(mouseX, mouseY)) {
 				// Drawing: the map's own tooltips would sit on what's being drawn.
