@@ -282,7 +282,7 @@ public final class RadarCategories {
 	}
 
 	/** Whether an ID fits a list entry, where {@code *} in the entry stands for any run of characters. */
-	static boolean matches(String pattern, String id) {
+	public static boolean matches(String pattern, String id) {
 		int star = pattern.indexOf('*');
 		if (star < 0) {
 			return pattern.equals(id);

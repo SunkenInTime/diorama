@@ -173,7 +173,8 @@ public final class Radar {
 				}
 			}
 			icon(icons, blip, alpha, settings);
-			if (blip.named()) {
+			// On a round view, only a name wholly inside the circle, like the icons.
+			if (blip.named() && (circle == null || nameInside(circle, blip))) {
 				if (players) {
 					nameTag(graphics, blip, alpha);
 				} else {
@@ -402,14 +403,26 @@ public final class Radar {
 		}
 	}
 
+	/** How far under a blip's centre its name starts. A mob's head is drawn 1.6 times its size. */
+	private static float nameOffset(Blip blip) {
+		return blip.size() * (blip.kind() == Kind.PLAYER ? 0.75F : 0.8F) + 3;
+	}
+
+	/** Whether the plate {@link #nameTag} draws would be wholly inside the circle. */
+	private static boolean nameInside(Circle circle, Blip blip) {
+		float half = Minecraft.getInstance().font.width(blip.entity().getName().getString()) / 2.0F;
+		float top = blip.y() + nameOffset(blip) - 1;
+		return circle.contains(blip.x() - half - 1, top) && circle.contains(blip.x() + half, top)
+			&& circle.contains(blip.x() - half - 1, top + 9) && circle.contains(blip.x() + half, top + 9);
+	}
+
 	/** The player's or mob's name under its head, on the translucent dark plate vanilla puts name tags on. */
 	private static void nameTag(GuiGraphicsExtractor graphics, Blip blip, int alpha) {
 		Font font = Minecraft.getInstance().font;
 		String name = blip.entity().getName().getString();
 		int w = font.width(name);
 		graphics.pose().pushMatrix();
-		// A mob's head is drawn 1.6 times its size.
-		graphics.pose().translate(blip.x() - w / 2.0F, blip.y() + blip.size() * (blip.kind() == Kind.PLAYER ? 0.75F : 0.8F) + 3);
+		graphics.pose().translate(blip.x() - w / 2.0F, blip.y() + nameOffset(blip));
 		graphics.fill(-1, -1, w, 8, withAlpha(0x40000000, alpha));
 		graphics.text(font, name, 0, 0, withAlpha(0xFFFFFFFF, alpha), false);
 		graphics.pose().popMatrix();

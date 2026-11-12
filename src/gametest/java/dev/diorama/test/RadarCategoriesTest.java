@@ -117,6 +117,11 @@ final class RadarCategoriesTest {
 		context.setScreen(() -> null);
 		context.waitTicks(10);
 		context.takeScreenshot("radar-categories-08-minimap-own-kept");
+		// Round: a name shows only where its plate fits inside the circle.
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+		context.waitTicks(5);
+		context.takeScreenshot("radar-categories-08b-round-minimap");
+		context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.SQUARE);
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
 			if (mc.gui.screen() instanceof MapScreen screen) {
@@ -139,6 +144,23 @@ final class RadarCategoriesTest {
 		});
 		if (!shown.equals(Set.of("cow+name", "husk"))) {
 			throw new AssertionError("With passive mobs off and cows in their own category the map's radar shows " + shown + ", not the cows and the husk");
+		}
+		// The cows are drawn at their category's 200%, twice the husk's size at the radar's 100%.
+		float[] sizes = context.computeOnClient(mc -> {
+			float cow = 0;
+			float husk = 0;
+			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
+				String type = EntityType.getKey(blip.entity().getType()).getPath();
+				if (type.equals("cow")) {
+					cow = blip.size();
+				} else if (type.equals("husk")) {
+					husk = blip.size();
+				}
+			}
+			return new float[] {cow, husk};
+		});
+		if (Math.abs(sizes[0] - 2 * sizes[1]) > 0.01F) {
+			throw new AssertionError("A cow in a 200% category is drawn at " + sizes[0] + " beside a husk at " + sizes[1]);
 		}
 		// The category switched off hides its mobs though their kind is on.
 		context.runOnClient(mc -> {

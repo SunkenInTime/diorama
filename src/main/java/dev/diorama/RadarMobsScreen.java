@@ -102,8 +102,12 @@ public final class RadarMobsScreen extends Screen {
 		for (int i = this.page * perPage; i < Math.min(found.size(), (this.page + 1) * perPage); i++) {
 			Row row = found.get(i);
 			boolean own = this.category.mobs.contains(row.entry());
-			// A mob that one of the category's patterns already takes in is ticked, and unticked by unticking the pattern.
-			boolean byPattern = !own && this.category.has(row.entry());
+			// A mob that another entry already takes in, as a ticked mod does, is ticked whether or not
+			// it's listed itself, and unticked by unticking that entry.
+			boolean byPattern = false;
+			for (String mob : this.category.mobs) {
+				byPattern |= !mob.equals(row.entry()) && RadarCategories.matches(mob, row.entry());
+			}
 			Checkbox checkbox = SettingsScreen.checkbox(row.label(), this.font, own || byPattern, column, ticked -> {
 				this.category.mobs.remove(row.entry());
 				if (ticked) {
