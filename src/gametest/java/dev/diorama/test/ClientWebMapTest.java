@@ -279,12 +279,22 @@ final class ClientWebMapTest {
 		return photograph("http://127.0.0.1:" + port + "/", file) ? arrow(file) : null;
 	}
 
-	/** Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. */
+	/**
+	 * Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. Each
+	 * time as a browser that has never seen the page: one with pictures kept from an earlier visit
+	 * can photograph it, on the clock Chromium runs these on, before the new pictures are in.
+	 */
 	static boolean photograph(String address, Path file) {
+		Path profile;
+		try {
+			profile = Files.createTempDirectory("diorama-web-map-browser");
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 		for (String name : new String[] {"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "/snap/bin/chromium"}) {
 			try {
 				Process process = new ProcessBuilder(name, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,800",
-					"--virtual-time-budget=20000", "--screenshot=" + file.toAbsolutePath(), address)
+					"--virtual-time-budget=20000", "--user-data-dir=" + profile, "--screenshot=" + file.toAbsolutePath(), address)
 					.redirectErrorStream(true).redirectOutput(file.resolveSibling(file.getFileName() + ".log").toFile()).start();
 				if (!process.waitFor(180, TimeUnit.SECONDS)) {
 					process.destroyForcibly();

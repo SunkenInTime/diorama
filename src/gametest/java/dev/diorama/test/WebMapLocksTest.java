@@ -151,6 +151,33 @@ final class WebMapLocksTest {
 			expect(wrong, status(http, port, netherTile) == 404, "with cave-maps-allowed=false, the Nether's picture " + netherTile + " is still served (" + status(http, port, netherTile) + ")");
 			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-4-cave-maps-not-allowed.png"));
 			ClientWebMapTest.photograph(page + "#dim=" + END, out.resolve("server-5-end-on-again.png"));
+
+			// The player's own web map of the Nether has their own map's pictures, which under this
+			// setting hold only what they've seen: photographed beside the map in the game.
+			server.join(context);
+			int own = freePort();
+			context.runOnClient(mc -> {
+				Settings.get().webMapPort = own;
+				Settings.get().webMap = Settings.WebMap.THIS_COMPUTER;
+			});
+			context.waitFor(mc -> ClientWebMap.servingPort() != 0, 200);
+			int ownPort = ClientWebMap.servingPort();
+			visit(context, server, NETHER, Level.NETHER, "0 70 0");
+			DioramaClientTest.settle(context, 100);
+			String ownJson = "";
+			for (int i = 0; i < 200 && tile(ownJson, NETHER) == null; i++) {
+				context.waitTicks(10);
+				ownJson = get(http, ownPort, "/map.json");
+			}
+			ClientWebMapTest.photograph("http://127.0.0.1:" + ownPort + "/", out.resolve("client-4-nether-cave-maps-not-allowed.png"));
+			DioramaClientTest.openMapOnPlayer(context);
+			context.takeScreenshot("web-map-locks-nether-in-game-cave-maps-not-allowed");
+			context.setScreen(() -> null);
+			context.runOnClient(mc -> {
+				Settings.get().webMap = Settings.WebMap.OFF;
+				Settings.get().webMapPort = Settings.DEFAULT_WEB_MAP_PORT;
+			});
+			RealServer.leave(context);
 		}
 
 		// Cave fog of war: the same.
