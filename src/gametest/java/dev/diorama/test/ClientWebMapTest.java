@@ -276,25 +276,30 @@ final class ClientWebMapTest {
 	 * how wide and how tall the arrow's blue is, in pixels, or null on a machine with no Chromium.
 	 */
 	private static int @org.jspecify.annotations.Nullable [] browser(int port, Path file) {
+		return photograph("http://127.0.0.1:" + port + "/", file) ? arrow(file) : null;
+	}
+
+	/** Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. */
+	static boolean photograph(String address, Path file) {
 		for (String name : new String[] {"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "/snap/bin/chromium"}) {
 			try {
 				Process process = new ProcessBuilder(name, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,800",
-					"--virtual-time-budget=20000", "--screenshot=" + file.toAbsolutePath(), "http://127.0.0.1:" + port + "/")
+					"--virtual-time-budget=20000", "--screenshot=" + file.toAbsolutePath(), address)
 					.redirectErrorStream(true).redirectOutput(file.resolveSibling(file.getFileName() + ".log").toFile()).start();
 				if (!process.waitFor(180, TimeUnit.SECONDS)) {
 					process.destroyForcibly();
 					throw new AssertionError(name + " didn't finish photographing the page");
 				}
-				Diorama.LOGGER.info("web-map-client: {} photographed the page into {} (exit {})", name, file, process.exitValue());
-				return arrow(file);
+				Diorama.LOGGER.info("web map: {} photographed {} into {} (exit {})", name, address, file, process.exitValue());
+				return true;
 			} catch (IOException e) {
 				// Not this one.
 			} catch (InterruptedException e) {
 				throw new AssertionError(e);
 			}
 		}
-		Diorama.LOGGER.warn("web-map-client: no Chromium on this machine, so no picture of the page");
-		return null;
+		Diorama.LOGGER.warn("web map: no Chromium on this machine, so no picture of the page");
+		return false;
 	}
 
 	/** Checks a picture of the page, and returns how wide and how tall the arrow's blue is. */
