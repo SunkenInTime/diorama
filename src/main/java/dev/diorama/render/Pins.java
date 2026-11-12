@@ -25,6 +25,8 @@ public final class Pins {
 	private static final int CARET_STEPS = 32;
 	/** How far a standing pin's shadow reaches below the spot it marks, before any scale. */
 	public static final int SHADOW = 3;
+	/** The size setting in percent up to which the text under a pin in the world grows with the pin. */
+	public static final int TEXT_GROWS_TO = 100;
 	private static final Map<String, Sprite> SPRITES = new HashMap<>();
 	/** Sprites showing an icon start with this, so a resource reload can drop them. */
 	private static final String ICON = "icon ";
@@ -46,14 +48,15 @@ public final class Pins {
 	/**
 	 * What the text under a pin in the world is drawn at for the pin's size setting: the game's own
 	 * text size when the pin is drawn as the default size draws it, and as many times bigger or
-	 * smaller as the pin is drawn. It goes by the pin as drawn, not by the percentage, so the step the
-	 * settings show for the default looks like the default. A whole number of screen pixels to a font
-	 * pixel, so the letters stay sharp.
+	 * smaller as the pin is drawn, up to the pin at {@link #TEXT_GROWS_TO} percent: past that the pin
+	 * keeps growing and the text stays, or the name would dwarf the pin and cover the view. It goes by
+	 * the pin as drawn, not by the percentage, so the step the settings show for the default looks
+	 * like the default. A whole number of screen pixels to a font pixel, so the letters stay sharp.
 	 */
 	public static float textScale(int percent) {
 		int gui = Radar.pixelsPerGuiPixel();
 		// In whole screen pixels, so a half rounds up whatever the floats would make of it.
-		int pin = Math.round(scale(percent) * gui);
+		int pin = Math.round(scale(Math.min(percent, TEXT_GROWS_TO)) * gui);
 		int usual = Math.round(scale(Settings.DEFAULT_WAYPOINT_SIZE) * gui);
 		return Math.max(1, (2 * gui * pin + usual) / (2 * usual)) / (float) gui;
 	}

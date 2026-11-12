@@ -19,7 +19,7 @@ import net.minecraft.world.phys.Vec3;
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
  * a pin standing on its spot, with the distance under it, so it shows through terrain at any range. The name appears when it
  * is near the crosshair or close by, which keeps a screen full of waypoints readable. The World size
- * setting sizes the pin and the text together. Under the pins go the beams ({@link WaypointBeams})
+ * setting sizes the pin and the text together, the text only up to 100%. Under the pins go the beams ({@link WaypointBeams})
  * of the waypoints the beam setting picks.
  */
 public final class WaypointHud implements HudElement {
