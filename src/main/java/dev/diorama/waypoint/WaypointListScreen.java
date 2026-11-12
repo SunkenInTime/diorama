@@ -144,6 +144,8 @@ public final class WaypointListScreen extends Screen {
 	private @Nullable Button confirm;
 	private int scroll;
 	private int listBottom;
+	/** Where the line about selecting several rows goes: midway between the list's bottom edge and the buttons. */
+	private int hintY;
 	private int visibleRows;
 	private boolean draggingScrollbar;
 	private long lastClick;
@@ -435,12 +437,17 @@ public final class WaypointListScreen extends Screen {
 			above -= 12;
 			this.importedY = above;
 		}
-		this.listBottom = above - 12;
+		// The hint line under the list wants 18 between the list and what's below it, to sit clear of
+		// both. The list gives up the strip under its last whole row for that, never a row: where the
+		// rows fill the list, it ends right at the last one and the hint gets 14, or 12 in the least room.
+		this.visibleRows = Math.max(1, (above - 12 - LIST_TOP - 2) / PITCH);
+		this.listBottom = Math.min(above - 12, Math.max(above - 18, LIST_TOP + 2 + this.visibleRows * PITCH - (PITCH - ROW)));
+		this.hintY = this.listBottom + 2 + (above - this.listBottom - 2 - 7) / 2;
 
 		if (this.empty) {
 			// The empty list: the piece of map, the headline and hints, then New waypoint under them.
 			int newY = 186;
-			this.emptyTop = Math.min(0, this.listBottom + 6 - (newY + 20 + 4));
+			this.emptyTop = Math.min(0, above - 6 - (newY + 20 + 4));
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.new"), b -> this.newWaypoint())
 				.bounds(cx - 75, newY + this.emptyTop, 150, 20).build());
 			this.search = null;
@@ -554,7 +561,6 @@ public final class WaypointListScreen extends Screen {
 				this.delete(this.selected);
 			}
 		}).size(20, 20).build());
-		this.visibleRows = Math.max(1, (this.listBottom - LIST_TOP - 2) / PITCH);
 		this.filter();
 		this.setInitialFocus(box);
 	}
@@ -1035,7 +1041,7 @@ public final class WaypointListScreen extends Screen {
 		}
 		// Under the list, like the line under the map: nothing else says several rows can be selected.
 		String hint = Component.translatable("diorama.waypoints.select_hint", MAC ? "Cmd" : "Ctrl").getString();
-		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.listBottom + 2, HINT);
+		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.hintY, HINT);
 	}
 
 	/** The scrollbar: its x, the handle's height and how far down the track it sits. */

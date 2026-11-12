@@ -65,13 +65,25 @@ final class WaypointSelectTest {
 			wrong.add("one selected row had the buttons " + rowButtons(context));
 		}
 		context.takeScreenshot("select-01-one");
-		// The same screen in the smallest window and at 1280 x 720: the hint line clear of the list and Done.
-		for (int[] size : new int[][] {{640, 480}, {1280, 720}}) {
-			context.getInput().resizeWindow(size[0], size[1]);
-			context.waitTicks(5);
-			context.takeScreenshot("select-01-hint-" + size[0] + "x" + size[1]);
+		// The same screen in the smallest window, at 1280 x 720 and on a full 1080p screen at GUI
+		// scales 3 and 4: the hint line clear of the list and Done. At scale 4 the rows fill the list
+		// to its end, so the hint has the least room it ever gets. Then in Belarusian, the longest.
+		int guiScale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		for (String language : new String[] {"en_us", "be_by"}) {
+			if (!language.equals("en_us")) {
+				DioramaClientTest.switchLanguage(context, language);
+			}
+			for (int[] size : new int[][] {{640, 480, 2}, {1280, 720, 3}, {1920, 1080, 3}, {1920, 1080, 4}}) {
+				context.getInput().resizeWindow(size[0], size[1]);
+				DioramaClientTest.setGuiScale(context, size[2]);
+				context.waitTicks(5);
+				String name = "select-01-hint-" + size[0] + "x" + size[1] + (size[1] == 1080 ? "-scale-" + size[2] : "") + (language.equals("en_us") ? "" : "-" + language);
+				context.takeScreenshot(name);
+			}
 		}
+		DioramaClientTest.switchLanguage(context, "en_us");
 		context.getInput().resizeWindow(1600, 900);
+		DioramaClientTest.setGuiScale(context, guiScale);
 		context.waitTicks(5);
 
 		// Shift click: the rows from the one clicked before to this one.
