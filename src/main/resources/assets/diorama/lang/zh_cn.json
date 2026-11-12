@@ -260,6 +260,8 @@
 	"diorama.waypoint.random": "随机",
 	"diorama.settings.type_outline": "按生物类型着色",
 	"diorama.settings.type_outline.tooltip": "用红色、黄色或绿色轮廓分别表示敌对、中立或被动生物。关闭时使用黑色轮廓。",
+	"diorama.settings.height_arrows": "高度箭头",
+	"diorama.settings.height_arrows.tooltip": "在明显高于或低于你的玩家和生物旁显示小箭头。关闭时它们只会变淡。",
 	"diorama.settings.player_names": "玩家名称",
 	"diorama.settings.player_names.never": "从不",
 	"diorama.settings.player_names.fullscreen": "全屏地图",

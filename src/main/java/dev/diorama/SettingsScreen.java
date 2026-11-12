@@ -122,6 +122,7 @@ public final class SettingsScreen extends Screen {
 		radar.toggle("passive", () -> s.radarPassive, v -> s.radarPassive = v);
 		radar.toggle("items", () -> s.radarItems, v -> s.radarItems = v);
 		radar.toggle("type_outline", () -> s.radarTypeOutline, v -> s.radarTypeOutline = v);
+		radar.toggle("height_arrows", () -> s.radarHeightArrows, v -> s.radarHeightArrows = v);
 		radar.choice("radar_style", Settings.RadarStyle.values(), () -> s.radarStyle, v -> s.radarStyle = v);
 		int scales = (Settings.MAX_SCALE - Settings.MIN_SCALE) / Settings.SCALE_STEP + 1;
 		radar.slider("icon_size", (s.radarIconScale - Settings.MIN_SCALE) / Settings.SCALE_STEP, scales,

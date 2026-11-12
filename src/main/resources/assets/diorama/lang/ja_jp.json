@@ -313,6 +313,8 @@
 	"diorama.waypoint.random": "ランダム",
 	"diorama.settings.type_outline": "モブの種類ごとに色分け",
 	"diorama.settings.type_outline.tooltip": "モブの頭アイコンが敵対なら赤、中立なら黄、友好なら緑の枠で囲われます。オフにすると枠は黒色になります。",
+	"diorama.settings.height_arrows": "高さの矢印",
+	"diorama.settings.height_arrows.tooltip": "自分よりかなり上または下にいるプレイヤーやモブの横に小さな矢印を表示します。オフにすると、薄く表示されるだけになります。",
 	"diorama.settings.player_names": "プレイヤー名",
 	"diorama.settings.player_names.never": "無し",
 	"diorama.settings.player_names.fullscreen": "フルスクリーンマップ",
