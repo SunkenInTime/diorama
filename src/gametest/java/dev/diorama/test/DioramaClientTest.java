@@ -4766,7 +4766,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Far out the map shows overview tiles, which carry their own chunks once rebuilt. Back
 		// over spawn, which has more mapped round it.
 		context.waitTicks(200);
-		double[] far = {0.35, 0.12};
+		// The map draws one overview level finer than the zoom asks for where the view's tiles fit
+		// in memory (#250): at 0.35 those are the detailed tiles.
+		double[] far = {0.25, 0.12};
 		for (int i = 0; i < far.length; i++) {
 			double zoom = far[i];
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(spawnX, Projection.v(spawnY, spawnZ), zoom, TileKey.SURFACE));
