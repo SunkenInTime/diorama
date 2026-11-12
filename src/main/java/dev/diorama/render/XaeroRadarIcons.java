@@ -110,10 +110,16 @@ public final class XaeroRadarIcons {
 		return icon == null || icon == Basic.OWN_FACE ? pokemon(entity) : icon;
 	}
 
-	/** A Pixelmon Pokémon's sprite, outlined to stand out from the map like a face. A pack's file for the mob comes first. */
+	/**
+	 * A Pokémon's picture, outlined to stand out from the map like a face: Pixelmon's own sprite, or
+	 * Cobblemon's portrait of a Pokémon or NPC. A pack's file for the mob comes first.
+	 */
 	private static @Nullable Icon pokemon(Entity entity) {
 		Identifier location = Pixelmon.sprite(entity);
-		if (location == null || unreadable.contains(location)) {
+		if (location == null) {
+			return CobblemonPortraits.of(entity);
+		}
+		if (unreadable.contains(location)) {
 			return null;
 		}
 		ResourceManager manager = Minecraft.getInstance().getResourceManager();
@@ -160,6 +166,7 @@ public final class XaeroRadarIcons {
 		}
 		sprites.clear();
 		unreadable.clear();
+		CobblemonPortraits.clear();
 		Map<EntityType<?>, Definition> loaded = new HashMap<>();
 		// Like Xaero's, one file per mob in the game: the top pack's file wins, and files for mobs
 		// that aren't installed (Xaero's own example_mod, a modpack's leftovers) are never read.
@@ -541,7 +548,7 @@ public final class XaeroRadarIcons {
 			return 0xFF000000 | (int) Math.round(r / a) << 16 | (int) Math.round(g / a) << 8 | (int) Math.round(b / a);
 		}
 
-		private void close() {
+		void close() {
 			for (Baked b : this.baked.values()) {
 				b.texture().close();
 			}

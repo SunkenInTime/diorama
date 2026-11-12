@@ -17,6 +17,15 @@ if (dir != null) {
 			// Loom's ClientProductionRunTask, which this script can't name: Loom isn't on its classpath.
 			val mods = javaClass.getMethod("getMods").invoke(this) as ConfigurableFileCollection
 			mods.from(jars)
+			// The game on another Java than the VM's own, for a mod that needs it (sandbox.sh installs it).
+			val java = System.getenv("DIORAMA_TEST_JAVA")
+			if (!java.isNullOrEmpty()) {
+				@Suppress("UNCHECKED_CAST")
+				val launcher = javaClass.getMethod("getJavaLauncher").invoke(this) as Property<JavaLauncher>
+				launcher.set(project.extensions.getByType(JavaToolchainService::class.java).launcherFor {
+					languageVersion.set(JavaLanguageVersion.of(java))
+				})
+			}
 		}
 		if (!name.endsWith("forge")) {
 			tasks.matching { it.name == "runClientGameTest" }.configureEach {
