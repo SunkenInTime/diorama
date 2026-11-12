@@ -323,6 +323,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("cobblemon")) {
 				cobblemonBattle(context, world);
 			}
+			if (tests.contains("cobblemon-radar")) {
+				CobblemonRadarTest.run(context, world);
+			}
 			if (tests.contains("pixelmon")) {
 				PixelmonTest.run(context, world);
 			}

@@ -97,7 +97,26 @@ if [ -e ~/mods.tgz ]; then
 			task=runProductionClientGameTest
 			run=versions/$node/build/run-production
 			# The development run gets this from stonecutter.gradle.kts.
-			export DIORAMA_GPU_BAKE=${DIORAMA_GPU_BAKE:-0} ;;
+			export DIORAMA_GPU_BAKE=${DIORAMA_GPU_BAKE:-0}
+			# A mod that asks for one Java exactly (Cobblemon 1.8 on Fabric: 21) stops Fabric Loader
+			# on the VM's JDK 25, which runs every node. This run's copy of its jar loses that line.
+			python3 - "$mods" <<'PY' || exit 1
+import glob, json, os, sys, zipfile
+for jar in glob.glob(sys.argv[1] + '/*.jar'):
+    try:
+        with zipfile.ZipFile(jar) as z:
+            meta = json.loads(z.read('fabric.mod.json'), strict=False)
+    except (KeyError, ValueError):
+        continue
+    if 'java' not in meta.get('depends', {}):
+        continue
+    del meta['depends']['java']
+    with zipfile.ZipFile(jar) as old, zipfile.ZipFile(jar + '.part', 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as new:
+        for item in old.infolist():
+            new.writestr(item, json.dumps(meta) if item.filename == 'fabric.mod.json' else old.read(item.filename))
+    os.replace(jar + '.part', jar)
+PY
+			;;
 		*) with_mods=(-I .claude/skills/boat-game-test/mods.init.gradle.kts) ;;
 	esac
 	export DIORAMA_TEST_MODS=$mods
