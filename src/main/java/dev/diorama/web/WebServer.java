@@ -29,11 +29,14 @@ final class WebServer {
 		this.workers = workers;
 	}
 
-	/** Starts serving {@code folder}, or returns null (logged) if the port can't be had. */
-	static @Nullable WebServer start(Path folder, String address, int port) {
+	/**
+	 * Starts serving {@code folder}, or returns null (logged) if the port can't be had. Nothing is
+	 * served from a folder in it whose name, in lower case, {@code closed} says yes to.
+	 */
+	static @Nullable WebServer start(Path folder, String address, int port, java.util.function.Predicate<String> closed) {
 		try {
 			Path root = folder.toAbsolutePath().normalize();
-			return start(address, port, exchange -> serve(root, exchange));
+			return start(address, port, exchange -> serve(root, closed, exchange));
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Diorama's web map can't serve on port {} ({}); set web-map-port to a free one, or 0 to serve the folder yourself", port, e.toString());
 			return null;
@@ -72,7 +75,7 @@ final class WebServer {
 		this.workers.shutdownNow();
 	}
 
-	private static void serve(Path root, HttpExchange exchange) throws IOException {
+	private static void serve(Path root, java.util.function.Predicate<String> closed, HttpExchange exchange) throws IOException {
 		try {
 			String method = exchange.getRequestMethod();
 			if (!method.equals("GET") && !method.equals("HEAD")) {
@@ -87,8 +90,10 @@ final class WebServer {
 			// Only what's in the folder, and only the page, its map file and the pictures.
 			String name = file.getFileName() == null ? "" : file.getFileName().toString();
 			String type = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".json") ? "application/json" : name.endsWith(".html") ? "text/html; charset=utf-8" : null;
-			if (!file.startsWith(root) || type == null || !Files.isRegularFile(file) || !file.toRealPath().startsWith(root.toRealPath())) {
-				// Outside the folder, also through a link inside it.
+			if (!file.startsWith(root) || type == null
+				|| file.getNameCount() > root.getNameCount() + 1 && closed.test(file.getName(root.getNameCount()).toString().toLowerCase(java.util.Locale.ROOT))
+				|| !Files.isRegularFile(file) || !file.toRealPath().startsWith(root.toRealPath())) {
+				// Outside the folder, also through a link inside it; or a dimension the settings keep off the map.
 				send(exchange, 404, "text/plain", null);
 				return;
 			}
