@@ -313,6 +313,8 @@
 	"diorama.waypoint.random": "Random",
 	"diorama.settings.type_outline": "Colour by mob type",
 	"diorama.settings.type_outline.tooltip": "Outlines mob heads in red, yellow or green for hostile, neutral or passive. Off, they're outlined in black.",
+	"diorama.settings.height_arrows": "Height arrows",
+	"diorama.settings.height_arrows.tooltip": "Shows a small arrow beside players and mobs that are well above or below you. Off, they only fade.",
 	"diorama.settings.player_names": "Player names",
 	"diorama.settings.player_names.never": "Never",
 	"diorama.settings.player_names.fullscreen": "Fullscreen map",
