@@ -173,8 +173,9 @@ public final class Radar {
 				}
 			}
 			icon(icons, blip, alpha, settings);
-			// On a round view, only a name wholly inside the circle, like the icons.
-			if (blip.named() && (circle == null || nameInside(circle, blip))) {
+			// On a round view, a mob's name only where it's wholly inside the circle, like the icons.
+			// Players' names are left as they were.
+			if (blip.named() && (players || circle == null || nameInside(circle, blip))) {
 				if (players) {
 					nameTag(graphics, blip, alpha);
 				} else {
