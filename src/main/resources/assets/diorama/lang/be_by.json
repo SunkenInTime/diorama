@@ -242,7 +242,7 @@
     "diorama.settings.spawn_spots.tooltip": "Пазначае месцы мапы, дзе мобы могуць з'яўляцца: месцы, дзе цёмна заўсёды ці толькі ноччу.",
     "diorama.settings.claims.tooltip": "Дзе ёсць занятыя тэрыторыі FTB Chunks, Open Parties and Claims ці MineColonies, амалёўваюцца у колер уладальніка: ці на поўнаразмернай мапе, ці на мінімапе.",
     "diorama.settings.drawings.tooltip": "Дзе паказваюцца малюнкі на мапе: на поўнаэкраннай ці на мінімапе таксама (лініі і вобласці; нататкі застаюцца на поўнаэкраннай мапе).",
-    "diorama.settings.world_border.tooltip": "The game's world border on the map, where a server has set one: a line on the ground in the colour of the border's wall, blue, or green while it grows and red while it shrinks. On the fullscreen map, or on the minimap too.",
+    "diorama.settings.world_border.tooltip": "Межы гульнявога свету на мапе, дзе на серверы яны зададзены: каляровая лінія на зямлі сцяны свету, сіняя ці зялёная, калі расце,і чырвоная, калі змяньшаецца. На поўнай мапе ці таксама на мінімапе.",
     "diorama.settings.web_map": "Вэб-мапа",
     "diorama.settings.web_map.off": "Адкл",
     "diorama.settings.web_map.this_computer": "Гэты камп'ютар",
@@ -411,11 +411,11 @@
     "diorama.maps.made": "зроблена %s",
     "diorama.maps.none": "Няма мап",
     "diorama.maps.not_saved": "Не атрымалася захаваць спіс мап; глядзіце журнал гульні",
-    "diorama.settings.map_off": "Map off in dimensions",
-    "diorama.settings.map_off.tooltip": "Pick dimensions where Diorama is off: no minimap, no map, no waypoints in the world, and nothing is mapped there. For dimensions that are about finding your way without a map.",
-    "diorama.settings.map_off.none": "None",
-    "diorama.map_off.about": "In a ticked dimension Diorama is off: no minimap, no map, no waypoints in the world, and nothing is mapped there.",
-    "diorama.map_off.here": "Diorama is off in this dimension. Change it in Map settings: Look, Map off in dimensions.",
-    "diorama.map_off.here_server": "This server turns Diorama off in this dimension.",
-    "diorama.map_off.here_file": "Diorama is off in this dimension, set in config/diorama-server.properties."
+    "diorama.settings.map_off": "Адключэнне мапы ў вымярэннях",
+    "diorama.settings.map_off.tooltip": "Выберыце вымярэнні ў якіх Diorama адключана: ні мінімапы, ні мапы, ні указальнікаў і нічога тут не наносіцца на мапу. Для вымярэнняў, дзе вы павінны шукаць свой шлях без мап.",
+    "diorama.settings.map_off.none": "Няма",
+    "diorama.map_off.about": "У выбраным вымярэнні Diorama адключана: ні мінімапы, ні мапы, ні указальнікаў і нічога тут не наносіцца на мапу.",
+    "diorama.map_off.here": "Diorama адключана ў гэтым вымярэнні. Змяніць гэта можна ў наладах мапы: Выгляд > адключэнне мапы ў вымярэннях.",
+    "diorama.map_off.here_server": "Гэты сервер адключыў Diorama у гэтым вымярэнні.",
+    "diorama.map_off.here_file": "Diorama адключана ў гэтым вымярэнні, гэта зададзена ў config/diorama-server.properties."
 }
