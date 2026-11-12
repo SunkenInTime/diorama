@@ -1078,6 +1078,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
 				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
 			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
+			// One waypoint, far enough not to be reached, so the list shows its row and the sort buttons.
+			context.runOnClient(mc -> dev.diorama.waypoint.Waypoints.addTemporary(mc.player.blockPosition().offset(300, 0, 0), "minecraft:overworld"));
 			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
 				switchLanguage(context, language);
 				context.waitTicks(10);
