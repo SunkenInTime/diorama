@@ -24,6 +24,8 @@ import net.minecraft.world.entity.EntityType;
  * own category stay on the radar. An old settings file keeps what it switched off.
  */
 final class RadarCategoriesTest {
+	private static final Set<String> SUMMONED = Set.of("cow", "sheep", "pig", "chicken", "husk");
+
 	private RadarCategoriesTest() {
 	}
 
@@ -43,7 +45,8 @@ final class RadarCategoriesTest {
 		world.getServer().runCommand("summon sheep " + (x + 6) + " " + y + " " + (z - 6) + " " + still);
 		world.getServer().runCommand("summon pig " + (x + 7) + " " + y + " " + (z + 5) + " " + still);
 		world.getServer().runCommand("summon chicken " + (x - 8) + " " + y + " " + (z + 1) + " " + still);
-		world.getServer().runCommand("summon zombie " + (x + 2) + " " + y + " " + (z - 9) + " " + still);
+		// A husk: a zombie burns at noon.
+		world.getServer().runCommand("summon husk " + (x + 2) + " " + y + " " + (z - 9) + " " + still);
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.radarCategories.clear();
@@ -127,15 +130,15 @@ final class RadarCategoriesTest {
 		Set<String> shown = context.computeOnClient(mc -> {
 			Set<String> types = new TreeSet<>();
 			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
-				// Not the drops of the mobs cleared at the start.
-				if (blip.kind() != Radar.Kind.ITEM) {
+				// Only the mobs summoned here: the world has its own fish and drops.
+				if (SUMMONED.contains(EntityType.getKey(blip.entity().getType()).getPath())) {
 					types.add(EntityType.getKey(blip.entity().getType()).getPath() + (blip.named() ? "+name" : ""));
 				}
 			}
 			return types;
 		});
-		if (!shown.equals(Set.of("cow+name", "zombie"))) {
-			throw new AssertionError("With passive mobs off and cows in their own category the map's radar shows " + shown + ", not the cows and the zombie");
+		if (!shown.equals(Set.of("cow+name", "husk"))) {
+			throw new AssertionError("With passive mobs off and cows in their own category the map's radar shows " + shown + ", not the cows and the husk");
 		}
 		// The category switched off hides its mobs though their kind is on.
 		context.runOnClient(mc -> {
@@ -147,13 +150,13 @@ final class RadarCategoriesTest {
 		shown = context.computeOnClient(mc -> {
 			Set<String> types = new TreeSet<>();
 			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
-				if (blip.kind() != Radar.Kind.ITEM) {
+				if (SUMMONED.contains(EntityType.getKey(blip.entity().getType()).getPath())) {
 					types.add(EntityType.getKey(blip.entity().getType()).getPath());
 				}
 			}
 			return types;
 		});
-		if (!shown.equals(Set.of("chicken", "pig", "sheep", "zombie"))) {
+		if (!shown.equals(Set.of("chicken", "pig", "sheep", "husk"))) {
 			throw new AssertionError("With the cows' category off the map's radar shows " + shown);
 		}
 		context.setScreen(() -> null);
@@ -246,11 +249,22 @@ final class RadarCategoriesTest {
 		world.getServer().runCommand("summon cow " + (x - 9) + " " + y + " " + (z - 1) + " " + still);
 		world.getServer().runCommand("summon sheep " + (x + 9) + " " + y + " " + (z + 1) + " " + still);
 		world.getServer().runCommand("summon pig " + x + " " + y + " " + (z - 9) + " " + still);
-		world.getServer().runCommand("summon zombie " + x + " " + y + " " + (z + 10) + " " + still);
+		world.getServer().runCommand("summon husk " + x + " " + y + " " + (z + 10) + " " + still);
 		context.runOnClient(mc -> Settings.get().radarPassive = true);
-		// The portraits are drawn a couple a frame after the radar first asks for them.
-		context.waitTicks(100);
-		context.takeScreenshot("radar-categories-cobblemon-01-all");
+		// The portraits are drawn a couple a frame after the radar first asks for them, and Cobblemon's
+		// toast about starters sits over the minimap for its first seconds.
+		context.waitTicks(260);
+		context.takeScreenshot("radar-categories-cobblemon-01-minimap-all");
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			if (mc.gui.screen() instanceof MapScreen screen) {
+				screen.lookAt(mc.player.getX(), dev.diorama.Projection.v(mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
+			}
+		});
+		context.waitTicks(40);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("radar-categories-cobblemon-01-map-all");
 		context.setScreen(() -> new RadarCategoriesScreen(null));
 		context.waitTicks(5);
 		DioramaClientTest.click(context, "Passive mobs");
@@ -281,8 +295,8 @@ final class RadarCategoriesTest {
 			return types;
 		});
 		long pokemon = shown.stream().filter("cobblemon:pokemon"::equals).count();
-		if (pokemon < species.length || !shown.contains("minecraft:zombie") || shown.stream().anyMatch(type -> Set.of("minecraft:cow", "minecraft:sheep", "minecraft:pig").contains(type))) {
-			throw new AssertionError("With passive mobs off the radar should keep the Pokémon and the zombie and lose the farm animals; it shows " + shown);
+		if (pokemon < species.length || !shown.contains("minecraft:husk") || shown.stream().anyMatch(type -> Set.of("minecraft:cow", "minecraft:sheep", "minecraft:pig").contains(type))) {
+			throw new AssertionError("With passive mobs off the radar should keep the Pokémon and the husk and lose the farm animals; it shows " + shown);
 		}
 		context.setScreen(() -> null);
 		context.runOnClient(mc -> {
