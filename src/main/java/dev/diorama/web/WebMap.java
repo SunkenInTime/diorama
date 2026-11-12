@@ -22,6 +22,7 @@ import java.lang.management.ThreadMXBean;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -85,6 +86,10 @@ public final class WebMap {
 	private final Path modsFolder;
 	final Path folder;
 	private final Map<String, Dimension> dimensions = new ConcurrentHashMap<>();
+	/** The folders, in lower case, of the dimensions the settings keep off the map: the map's web server serves nothing in them. */
+	private final Set<String> closed = ConcurrentHashMap.newKeySet();
+	/** The folders a warning has been logged for, with pictures that couldn't be deleted. */
+	private final Set<String> warnedKept = new HashSet<>();
 	private final Object wake = new Object();
 	private final Thread thread;
 	private volatile @Nullable WebServer http;
@@ -209,41 +214,59 @@ public final class WebMap {
 
 	/**
 	 * Takes a dimension off the web map: its pictures, and when it was last drawn, so it's drawn
-	 * whole if the settings allow it again. Only the map's own pictures are deleted; a picture that
-	 * can't be is tried again at the next pass.
+	 * whole if the settings allow it again. Only the map's own pictures are deleted, in the map's own
+	 * folders (none reached through a link). Whatever can't be deleted, the map's web server no
+	 * longer serves, and it's tried again at the next pass.
 	 */
 	private void remove(String id, Properties progress) {
 		this.dimensions.remove(id);
 		if (progress.remove(id) != null) {
 			this.saveProgress(progress);
 		}
-		Path dimension = this.folder.resolve(folderName(id));
-		if (!Files.isDirectory(dimension)) {
+		String name = folderName(id);
+		Path dimension = this.folder.resolve(name);
+		// An ID from the settings file that isn't one folder's name inside the map's folder names nothing of the map's.
+		if (!this.folder.equals(dimension.getParent()) || !name.equals(String.valueOf(dimension.getFileName()))) {
+			return;
+		}
+		this.closed.add(name.toLowerCase(Locale.ROOT));
+		if (!Files.isDirectory(dimension, LinkOption.NOFOLLOW_LINKS)) {
 			return;
 		}
 		int deleted = 0;
-		try {
-			for (int zoom = 0; zoom <= MAX_ZOOM; zoom++) {
-				Path level = dimension.resolve(Integer.toString(zoom));
-				if (!Files.isDirectory(level)) {
-					continue;
-				}
-				try (DirectoryStream<Path> files = Files.newDirectoryStream(level, "*.jpg")) {
-					for (Path file : files) {
-						if (TILE_NAME.matcher(file.getFileName().toString()).matches()) {
+		int kept = 0;
+		for (int zoom = 0; zoom <= MAX_ZOOM; zoom++) {
+			Path level = dimension.resolve(Integer.toString(zoom));
+			if (!Files.isDirectory(level, LinkOption.NOFOLLOW_LINKS)) {
+				continue;
+			}
+			try (DirectoryStream<Path> files = Files.newDirectoryStream(level, "*.jpg")) {
+				for (Path file : files) {
+					if (TILE_NAME.matcher(file.getFileName().toString()).matches()) {
+						try {
 							Files.delete(file);
 							deleted++;
+						} catch (IOException e) {
+							kept++;
 						}
 					}
 				}
 				deleteIfEmpty(level);
+			} catch (IOException e) {
+				kept++;
 			}
+		}
+		try {
 			deleteIfEmpty(dimension);
 		} catch (IOException e) {
-			Diorama.LOGGER.warn("Couldn't delete the web map's pictures of {} in {}", id, dimension, e);
+			kept++;
 		}
 		if (deleted > 0) {
 			Diorama.LOGGER.info("Web map: deleted the {} pictures of {}, which this server's settings keep off it", deleted, id);
+		}
+		if (kept > 0 && this.warnedKept.add(name)) {
+			Diorama.LOGGER.warn("Web map: couldn't delete {} of the pictures or folders of {} in {}, which this server's settings keep off the map. Diorama's own web server "
+				+ "doesn't serve them; a web server of your own still would, so delete that folder yourself", kept, id, dimension);
 		}
 	}
 
@@ -277,12 +300,18 @@ public final class WebMap {
 					this.dimensions.computeIfAbsent(id, key -> new Dimension(this, level, key));
 				}
 			}
+			// A dimension turned off that isn't in this world now (its mod or data pack taken out) may still have pictures.
+			for (String id : ShareServer.locks(this.server).mapOffDimensions()) {
+				if (!out.contains(id)) {
+					this.remove(id, progress);
+				}
+			}
 			if (!out.isEmpty()) {
 				Diorama.LOGGER.info("Web map: not drawing {}, which this server's settings keep off the map (map-off-dimensions, or cave maps locked for a dimension under a roof)", String.join(", ", out));
 			}
 			this.writeMapJson();
 			if (this.settings.port() > 0 && !this.stopping) {
-				this.http = WebServer.start(this.folder, this.settings.address(), this.settings.port());
+				this.http = WebServer.start(this.folder, this.settings.address(), this.settings.port(), this.closed::contains);
 				if (this.stopping) {
 					// The server stopped while the pictures were being deleted, and has looked for this already.
 					WebServer late = this.http;

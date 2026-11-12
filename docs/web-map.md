@@ -34,7 +34,7 @@ The web map follows the server's other map settings in the same file, so it show
 - A dimension in `map-off-dimensions` isn't drawn, and the pictures it had are deleted.
 - With `cave-maps-allowed=false` or `cave-fog-of-war=true`, the Nether (any dimension under a roof) is left out the same way. There the map in the game shows only what each player has seen, and a page anyone can open can't know that.
 
-These are read when the server starts. A dimension allowed again is drawn whole again.
+These are read when the server starts. A dimension allowed again is drawn whole again. If you serve the folder with a web server of your own, the old pictures stay reachable until the Minecraft server has started and deleted them.
 
 ## Serving it yourself
 

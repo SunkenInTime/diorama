@@ -8,7 +8,7 @@ The game tests call it (ClientWebMapTest.photograph). Chrome's own --screenshot 
 wait for a picture being decoded: on a busy VM the map came out blank now and then. This runs
 Chrome on the real clock, asks the page through the DevTools protocol whether every tile in view
 has loaded (window.__fill) or it shows its "no map" line, and photographs it then; after
-[seconds] (30) it photographs whatever is there. Exits 3 if the machine has no Chrome.
+[seconds] (30) it photographs whatever is there and exits 4. Exits 3 if the machine has no Chrome.
 """
 import base64
 import json
@@ -124,7 +124,7 @@ def main():
         with open(out, 'wb') as file:
             file.write(base64.b64decode(tools.call('Page.captureScreenshot')['data']))
         print('photographed once the page had its pictures' if done else f'photographed after {seconds:.0f} s, the page still loading')
-        return 0
+        return 0 if done else 4
     finally:
         browser.terminate()
         try:

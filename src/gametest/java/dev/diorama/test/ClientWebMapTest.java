@@ -303,7 +303,8 @@ final class ClientWebMapTest {
 					return false;
 				}
 				if (process.exitValue() != 0) {
-					throw new AssertionError("page_photo.py failed for " + address + ": " + said);
+					// 4: the page never said its pictures were in, and the picture is of it still loading.
+					throw new AssertionError("page_photo.py failed for " + address + " (" + process.exitValue() + "): " + said);
 				}
 				return true;
 			} catch (IOException e) {

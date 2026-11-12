@@ -90,7 +90,7 @@ final class WebMapLocksTest {
 		write(config, base + "map-off-dimensions=minecraft:the_end\n");
 		try (RealServer server = RealServer.start(true)) {
 			String json = waitFor(context, http, port, server, PASS_WAIT_TICKS, OVERWORLD, NETHER);
-			expect(wrong, tile(json, END) == null, "with the End in map-off-dimensions, the server's web map lists the End");
+			expect(wrong, !listed(json, END), "with the End in map-off-dimensions, the server's web map lists the End");
 			expect(wrong, status(http, port, endTile) == 404, "with the End in map-off-dimensions, its picture " + endTile + " is still served (" + status(http, port, endTile) + ")");
 			expect(wrong, status(http, port, netherTile) == 200 && status(http, port, overworldTile) == 200, "with only the End off, the Nether's or the Overworld's pictures are gone");
 			ClientWebMapTest.photograph(page + "#dim=" + END, out.resolve("server-3-end-off.png"));
@@ -147,7 +147,7 @@ final class WebMapLocksTest {
 		write(config, base + "cave-maps-allowed=false\n");
 		try (RealServer server = RealServer.start(true)) {
 			String json = waitFor(context, http, port, server, PASS_WAIT_TICKS, OVERWORLD, END);
-			expect(wrong, tile(json, NETHER) == null, "with cave-maps-allowed=false, the server's web map lists the Nether");
+			expect(wrong, !listed(json, NETHER), "with cave-maps-allowed=false, the server's web map lists the Nether");
 			expect(wrong, status(http, port, netherTile) == 404, "with cave-maps-allowed=false, the Nether's picture " + netherTile + " is still served (" + status(http, port, netherTile) + ")");
 			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-4-cave-maps-not-allowed.png"));
 			ClientWebMapTest.photograph(page + "#dim=" + END, out.resolve("server-5-end-on-again.png"));
@@ -169,6 +169,9 @@ final class WebMapLocksTest {
 				context.waitTicks(10);
 				ownJson = get(http, ownPort, "/map.json");
 			}
+			if (tile(ownJson, NETHER) == null) {
+				throw new AssertionError("With cave-maps-allowed=false, the player's own web map has no Nether while they're in it: " + cut(ownJson));
+			}
 			ClientWebMapTest.photograph("http://127.0.0.1:" + ownPort + "/", out.resolve("client-4-nether-cave-maps-not-allowed.png"));
 			DioramaClientTest.openMapOnPlayer(context);
 			context.takeScreenshot("web-map-locks-nether-in-game-cave-maps-not-allowed");
@@ -180,21 +183,21 @@ final class WebMapLocksTest {
 			RealServer.leave(context);
 		}
 
-		// Cave fog of war: the same.
-		write(config, base + "cave-fog-of-war=true\n");
-		try (RealServer server = RealServer.start(true)) {
-			String json = waitFor(context, http, port, server, PASS_WAIT_TICKS, OVERWORLD, END);
-			expect(wrong, tile(json, NETHER) == null, "with cave-fog-of-war=true, the server's web map lists the Nether");
-			expect(wrong, status(http, port, netherTile) == 404, "with cave-fog-of-war=true, the Nether's picture " + netherTile + " is served (" + status(http, port, netherTile) + ")");
-			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-6-cave-fog-of-war.png"));
-		}
-
 		// Nothing set again: the Nether is drawn again.
 		write(config, base);
 		try (RealServer server = RealServer.start(true)) {
 			waitFor(context, http, port, server, PASS_WAIT_TICKS, OVERWORLD, NETHER, END);
-			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-7-nothing-set-nether-again.png"));
+			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-6-nothing-set-nether-again.png"));
 		}
+		// Cave fog of war: the same, with the Nether's pictures there again to delete.
+		write(config, base + "cave-fog-of-war=true\n");
+		try (RealServer server = RealServer.start(true)) {
+			String json = waitFor(context, http, port, server, PASS_WAIT_TICKS, OVERWORLD, END);
+			expect(wrong, !listed(json, NETHER), "with cave-fog-of-war=true, the server's web map lists the Nether");
+			expect(wrong, status(http, port, netherTile) == 404, "with cave-fog-of-war=true, the Nether's picture " + netherTile + " is served (" + status(http, port, netherTile) + ")");
+			ClientWebMapTest.photograph(page + "#dim=" + NETHER, out.resolve("server-7-cave-fog-of-war.png"));
+		}
+
 		try {
 			Files.deleteIfExists(config);
 		} catch (IOException e) {
@@ -255,6 +258,11 @@ final class WebMapLocksTest {
 	private static @Nullable String tile(String json, String dimension) {
 		Matcher matcher = Pattern.compile("\"id\":\"" + Pattern.quote(dimension) + "\",\"folder\":\"([^\"]+)\",\"zoomLevels\":\\d+,\"versions\":true,\"tiles\":\\[\\[(-?\\d+),(-?\\d+),").matcher(json);
 		return matcher.find() ? "/" + matcher.group(1) + "/0/" + matcher.group(2) + "_" + matcher.group(3) + ".jpg" : null;
+	}
+
+	/** Whether a map file lists a dimension at all, with pictures or without. */
+	private static boolean listed(String json, String dimension) {
+		return json.contains("\"id\":\"" + dimension + "\"");
 	}
 
 	private static String cut(String json) {
