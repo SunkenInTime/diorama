@@ -276,6 +276,8 @@
     "diorama.waypoint.random": "Случайный",
     "diorama.settings.type_outline": "Цвет по типу моба",
     "diorama.settings.type_outline.tooltip": "Выделяет контуры голов мобов красным, желтым или зеленым цветом в зависимости от того, являются они враждебными, нейтральными или мирными. Если выключено, контур черный.",
+    "diorama.settings.height_arrows": "Стрелки высоты",
+    "diorama.settings.height_arrows.tooltip": "Показывает стрелку рядом с игроками и мобами, которые находятся заметно выше или ниже вас. Если выключено, они только тускнеют.",
     "diorama.settings.player_names": "Имена игроков",
     "diorama.settings.player_names.never": "Никогда",
     "diorama.settings.player_names.fullscreen": "Полноэкранная карта",

@@ -276,6 +276,8 @@
     "diorama.waypoint.random": "Выпадкова",
     "diorama.settings.type_outline": "Колер па тыпу моба",
     "diorama.settings.type_outline.tooltip": "Абводзіць галаву моба у чырвоны, жоўты ці зялёны для варожых, нейтральных ці пасіўных. Пры адключэнні абводзіць усіх у чорны.",
+    "diorama.settings.height_arrows": "Стрэлкі вышыні",
+    "diorama.settings.height_arrows.tooltip": "Паказвае стрэлку побач з гульцамі і мобамі, якія знаходзяцца прыкметна вышэй ці ніжэй за вас. Пры адключэнні яны толькі цьмянеюць.",
     "diorama.settings.player_names": "Нікі гульцоў",
     "diorama.settings.player_names.never": "Ніколі",
     "diorama.settings.player_names.fullscreen": "Поўнаэкранная мапа",
