@@ -52,6 +52,9 @@ public final class MinimapHud implements HudElement {
 	private static final int EFFECT_WIDTH = 25;
 	private static final int EFFECT_ROW = 26;
 	private static final int[] NO_EFFECTS = {0, 0};
+	/** Half a boss bar's width and its height, as the game draws them midway across the top. */
+	private static final int BOSS_BAR_HALF_WIDTH = 91;
+	private static final int BOSS_BAR_HEIGHT = 5;
 	private static final int SMALLEST = 64;
 	/**
 	 * Longest the minimap keeps showing the old slice while the new one bakes. A tile takes about
@@ -64,6 +67,8 @@ public final class MinimapHud implements HudElement {
 	private static final int BED_TIME_COLOR = 0xFF9CC4FF;
 	/** Whether the game's effect icon drawing ran to the end since the minimap last looked (see EffectIconsMixin). */
 	private static boolean effectIconsDrawn;
+	/** The bottom of the lowest boss bar the game drew since the minimap last looked (see BossBarMixin), or 0 with none. */
+	private static int bossBarsBottom;
 	/** Where the HUD minimap was last drawn: x, y, size, and its height with its lines. Null when it wasn't. */
 	private static int @Nullable [] shown;
 	/** A size the position screen keeps the minimap at while it's dragged, or 0. */
@@ -96,6 +101,8 @@ public final class MinimapHud implements HudElement {
 		// Taken whether or not the minimap draws, so a frame with no icons can't reuse an old answer.
 		boolean effectIcons = effectIconsDrawn;
 		effectIconsDrawn = false;
+		int bossBars = bossBarsBottom;
+		bossBarsBottom = 0;
 		shown = null;
 		// The position screen shows it over the world, even switched off, to be put in place.
 		boolean placing = screen instanceof MinimapPositionScreen;
@@ -118,7 +125,7 @@ public final class MinimapHud implements HudElement {
 		}
 		// The enlarge key shows it bigger, growing away from the edges it's placed by.
 		int size = DioramaClient.minimapEnlarged() ? Math.round(settings.minimapSize * settings.minimapEnlarged / 100.0F) : settings.minimapSize;
-		int[] bounds = this.draw(graphics, partialTick, Anchor.of(settings), effectIcons ? effectCounts(mc.player) : NO_EFFECTS, size);
+		int[] bounds = this.draw(graphics, partialTick, Anchor.of(settings), effectIcons ? effectCounts(mc.player) : NO_EFFECTS, bossBars, size);
 		shown = new int[] {bounds[4], bounds[5], bounds[6], bounds[7]};
 	}
 
@@ -158,7 +165,7 @@ public final class MinimapHud implements HudElement {
 		}
 		Settings settings = Settings.get();
 		boolean top = settings.minimapCorner == Settings.Corner.TOP_RIGHT || settings.minimapCorner == Settings.Corner.TOP_LEFT;
-		int[] bounds = this.draw(graphics, partialTick, new Anchor(true, top, false, MARGIN, MARGIN), NO_EFFECTS, settings.minimapSize);
+		int[] bounds = this.draw(graphics, partialTick, new Anchor(true, top, false, MARGIN, MARGIN), NO_EFFECTS, 0, settings.minimapSize);
 		if (!settings.minimap) {
 			//? if <1.21.6 {
 			/*// Text sits a little above 0 and the GUI depth-tests, so lift the dimming over it.
@@ -208,10 +215,10 @@ public final class MinimapHud implements HudElement {
 	/**
 	 * Draws the minimap {@code wanted} pixels wide or less where {@code anchor} puts it, below the
 	 * status effect icons it would be over ({@code effects} is how many of each kind, see
-	 * {@link #effectCounts}). Returns what it covers, x0, y0, x1, y1, then the map's own x, y and
+	 * {@link #effectCounts}) and below the boss bars, which reach down to {@code bossBars}. Returns what it covers, x0, y0, x1, y1, then the map's own x, y and
 	 * size, and its height with the lines under it.
 	 */
-	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, Anchor anchor, int[] effects, int wanted) {
+	private int[] draw(GuiGraphicsExtractor graphics, float partialTick, Anchor anchor, int[] effects, int bossBars, int wanted) {
 		Minecraft mc = Minecraft.getInstance();
 		MapSession session = MapSession.get();
 		Entity viewer = MapSession.viewer();
@@ -222,7 +229,7 @@ public final class MinimapHud implements HudElement {
 		float text = TextSize.scale(settings.minimapTextSize);
 		// Each line is the game's text and a pixel of its shadow, with a pixel between lines.
 		int infoHeight = (int) Math.ceil(info.size() * 10 * text);
-		int[] placed = place(anchor, heldSize > 0 ? heldSize : wanted, heldSize <= 0, graphics.guiWidth(), graphics.guiHeight(), infoHeight, effects);
+		int[] placed = place(anchor, heldSize > 0 ? heldSize : wanted, heldSize <= 0, graphics.guiWidth(), graphics.guiHeight(), infoHeight, effects, bossBars);
 		int x = placed[0];
 		int y = placed[1];
 		int size = placed[2];
@@ -339,10 +346,12 @@ public final class MinimapHud implements HudElement {
 	 * shrinks so it and its lines fit the screen and, placed low beside the hotbar, so it stays
 	 * beside it instead of growing over the hearts or hunger bar ({@code avoidHotbar}). It stays
 	 * below the rows of status effect icons it would be over: placed at the top it moves down,
-	 * placed at the bottom it grows up only to them. Whatever the window or GUI scale did since it
+	 * placed at the bottom it grows up only to them. The same goes for the boss bars midway across
+	 * the top, whose lowest ends at {@code bossBars} (0 with none), when it would be over or under
+	 * them. Whatever the window or GUI scale did since it
 	 * was placed, it ends up on screen.
 	 */
-	static int[] place(Anchor anchor, int wanted, boolean avoidHotbar, int width, int height, int infoHeight, int[] effects) {
+	static int[] place(Anchor anchor, int wanted, boolean avoidHotbar, int width, int height, int infoHeight, int[] effects, int bossBars) {
 		// Enlarged on a tall, narrow window, it would otherwise reach past the far side.
 		int fitted = Math.min(wanted, width - 2 * MARGIN - 4);
 		if (!anchor.top()) {
@@ -363,6 +372,9 @@ public final class MinimapHud implements HudElement {
 			top = MARGIN + 2 * EFFECT_ROW;
 		} else if (right > width - EFFECT_WIDTH * effects[0]) {
 			top = MARGIN + EFFECT_ROW;
+		}
+		if (bossBars > 0 && right > width / 2 - BOSS_BAR_HALF_WIDTH && right - size - 4 < width / 2 + BOSS_BAR_HALF_WIDTH) {
+			top = Math.max(top, bossBars + MARGIN);
 		}
 		int room = anchor.top() ? height - top - infoHeight - MARGIN - 4 : height - anchor.dy() - infoHeight - top;
 		size = Math.max(SMALLEST, Math.min(size, room));
@@ -458,6 +470,11 @@ public final class MinimapHud implements HudElement {
 
 	/** A line under the minimap. */
 	private record InfoLine(String text, int color) {
+	}
+
+	/** Called as the game draws each boss bar, with the bar's top. */
+	public static void bossBarDrawn(int y) {
+		bossBarsBottom = Math.max(bossBarsBottom, y + BOSS_BAR_HEIGHT);
 	}
 
 	/** Called when the game's own drawing of the status effect icons runs to the end, icons or not. */
