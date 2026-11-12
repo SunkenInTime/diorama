@@ -123,6 +123,8 @@ public final class Settings {
 	public int radarIconScale = 100;
 	/** Outlines mob heads in red, yellow or green by how they treat you; off, they're outlined in black. */
 	public boolean radarTypeOutline = true;
+	/** The small arrow beside a player or mob well above or below you (Xaero's "Display Height: Direction"). Off, only the fade says so. */
+	public boolean radarHeightArrows = true;
 	public NameTags playerNames = NameTags.FULLSCREEN;
 	/** Index into {@link #ARROW_COLORS}. */
 	public int arrowColor = 0;
