@@ -4953,6 +4953,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 		moveCursor(context, spot[2], spot[3]);
 		context.waitTicks(10);
 		context.takeScreenshot("opac-claims-03-hover-server");
+		// A cow standing in the player's claim: hovering it names the cow, and the claim under it.
+		world.getServer().runCommand("summon cow " + (cx + 14) + " " + y + " " + (cz + 4) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,Tags:[\"diorama_claim_cow\"]}");
+		// This cow, not a wild one that wandered up.
+		java.util.function.Predicate<Radar.Blip> summoned = blip -> blip.entity().getType() == EntityTypes.COW
+			&& blip.entity().getBlockX() == cx + 14 && blip.entity().getBlockZ() == cz + 4;
+		context.waitFor(mc -> ((MapScreen) mc.gui.screen()).blips().stream().anyMatch(summoned), 200);
+		context.waitTicks(5);
+		float[] cow = context.computeOnClient(mc -> {
+			float scale = (float) mc.getWindow().getGuiScale();
+			Radar.Blip blip = ((MapScreen) mc.gui.screen()).blips().stream().filter(summoned).findFirst().orElseThrow();
+			return new float[] {blip.x() * scale, blip.y() * scale};
+		});
+		moveCursor(context, cow[0], cow[1]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-mob");
+		List<String> overCow = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).tooltipText());
+		world.getServer().runCommand("kill @e[tag=diorama_claim_cow]");
+		if (overCow.size() != 2 || !overCow.get(0).contains("Cow") || !overCow.get(1).contains(own.name())) {
+			throw new AssertionError("Hovering a cow in the player's claim should name the cow, then the claim \"" + own.name() + "\": " + overCow);
+		}
 		// Turned off, the claims go.
 		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
 		context.waitTicks(5);
