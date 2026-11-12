@@ -42,19 +42,21 @@ public record ServerLocks(boolean caveMapsAllowed, boolean caveFogOfWar, boolean
 		{CAVE_MAPS, """
 			# Map settings this server decides for players with Diorama. Their own settings come back
 			# when they leave. false: no cave maps underground, only the view from the sky; in the
-			# Nether, only what each player has seen under the roof.
+			# Nether, only what each player has seen under the roof. The web map can't know what
+			# each player has seen, so it leaves out the Nether while this is false.
 			""", "true"},
 		{CAVE_FOG, """
 			# true: cave maps show only the blocks each player has seen (fog of war), and players
-			# can't turn it off.
+			# can't turn it off. The web map leaves out the Nether while this is true.
 			""", "false"},
 		{RADAR, """
 			# false: no players or mobs on the minimap or the map.
 			""", "true"},
 		{MAP_OFF, """
 			# Dimensions where Diorama is off: no minimap, no map, no waypoints in the world, and
-			# nothing is mapped there. Dimension IDs separated by commas, for example
-			# minecraft:the_nether,somemod:maze. Empty: the map works in every dimension.
+			# nothing is mapped there; the web map leaves them out too. Dimension IDs separated by
+			# commas, for example minecraft:the_nether,somemod:maze. Empty: the map works in every
+			# dimension.
 			""", ""},
 	};
 

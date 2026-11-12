@@ -29,6 +29,13 @@ All in `config/diorama-server.properties`:
 | `web-map-folder` | Where the map's files go. Empty: `diorama-web` in the world folder. |
 | `share-land` | Which land the map shows, the same as the shared map: `visited` (land players have spent time near, as the game counts it in every chunk) or `generated` (every finished chunk, for worlds pre-generated with Chunky). |
 
+The web map follows the server's other map settings in the same file, so it shows no more than the map in the game does:
+
+- A dimension in `map-off-dimensions` isn't drawn, and the pictures it had are deleted.
+- With `cave-maps-allowed=false` or `cave-fog-of-war=true`, the Nether (any dimension under a roof) is left out the same way. There the map in the game shows only what each player has seen, and a page anyone can open can't know that.
+
+These are read when the server starts. A dimension allowed again is drawn whole again.
+
 ## Serving it yourself
 
 The folder is a plain static site: `index.html`, `map.json` and the pictures, one JPEG per tile in `<dimension>/<zoom>/<x>_<y>.jpg`. Point nginx, Caddy or any web server at it and set `web-map-port=0`. For example with nginx:
