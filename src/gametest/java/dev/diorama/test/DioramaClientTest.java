@@ -3302,6 +3302,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		settle(context, 60);
 		context.takeScreenshot("radar-01-minimap");
+		// Height arrows off: the bat above and the zombie below keep their faded heads and lose the arrows.
+		context.runOnClient(mc -> Settings.get().radarHeightArrows = false);
+		context.waitTicks(5);
+		context.takeScreenshot("radar-01a-no-height-arrows");
+		context.runOnClient(mc -> Settings.get().radarHeightArrows = true);
 		// A pig in the square's corner, outside the circle: the round minimap leaves it off.
 		world.getServer().runCommand("fill " + (x + 19) + " " + y + " " + (z - 25) + " " + (x + 21) + " " + (y + 3) + " " + (z - 23) + " air");
 		world.getServer().runCommand("fill " + (x + 19) + " " + (y - 1) + " " + (z - 25) + " " + (x + 21) + " " + (y - 1) + " " + (z - 23) + " grass_block");
