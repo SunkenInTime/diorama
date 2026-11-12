@@ -30,7 +30,7 @@ import org.jspecify.annotations.Nullable;
  * dot of that colour when they have no face icon. Xaero's Minimap's icon files can give a mob an
  * image, an item or a dot instead (see {@link XaeroRadarIcons}). Dropped items are small dots under
  * everything else. Anything well above or below you fades a little, and all but dropped items get a
- * caret, since the map is a top view and can't otherwise show height.
+ * caret, since the map is a top view and can't otherwise show height; the caret is a setting.
  */
 public final class Radar {
 	/** Vertical distance, in blocks, past which a caret shows. */
@@ -211,14 +211,14 @@ public final class Radar {
 		icons.endIcon();
 	}
 
-	/** One blip's icon in the radar style, with a caret if it's well above or below. */
+	/** One blip's icon in the radar style, with a caret if it's well above or below and height arrows are on. */
 	private static void icon(IconBatch icons, Blip blip, int alpha, Settings settings) {
 		switch (settings.radarStyle) {
 			case FRAMED -> framed(icons, blip, alpha);
 			case DOTS -> dot(icons, blip, alpha);
 			default -> pixelHead(icons, blip, alpha, settings.radarTypeOutline);
 		}
-		if (Math.abs(blip.dy()) > CARET_HEIGHT) {
+		if (settings.radarHeightArrows && Math.abs(blip.dy()) > CARET_HEIGHT) {
 			boolean below = blip.dy() < 0;
 			float s = blip.size();
 			if (settings.radarStyle == Settings.RadarStyle.FRAMED) {
