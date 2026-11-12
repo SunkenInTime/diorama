@@ -29,7 +29,8 @@ import org.jspecify.annotations.Nullable;
  * beyond the loaded chunks whose position the server reports (see {@link TrackedPlayers}). Mobs
  * show as their own face (see {@link MobFaces}) framed in a colour by how they treat you, or as a
  * dot of that colour when they have no face icon. Xaero's Minimap's icon files can give a mob an
- * image, an item or a dot instead (see {@link XaeroRadarIcons}). Dropped items are small dots under
+ * image, an item or a dot instead (see {@link XaeroRadarIcons}), and Pokémon show as their own
+ * pictures, a shiny one with a sparkle. Dropped items are small dots under
  * everything else. Anything well above or below you fades a little, and all but dropped items get a
  * caret, since the map is a top view and can't otherwise show height; the caret is a setting.
  * Whether something shows, how big, and with its name under it is up to its category (see
@@ -246,6 +247,25 @@ public final class Radar {
 				pixelCaret(icons, blip.x() + s * 0.7F + 1, blip.y() - s * 0.5F, below, alpha);
 			}
 		}
+		if (blip.kind() != Kind.PLAYER && CobblemonPortraits.shiny(blip.entity())) {
+			// On the corner across from the caret's. A mob's icon is 1.6 times its size across.
+			sparkle(icons, blip.x() - blip.size() * 0.8F, blip.y() - blip.size() * 0.8F, alpha);
+		}
+	}
+
+	/**
+	 * A small yellow sparkle, its centre pixel at (cx, cy): a shiny Pokémon. Its colours differ too
+	 * little to tell at an icon's size, and it's the one players go looking for.
+	 */
+	private static void sparkle(IconBatch icons, float cx, float cy, int alpha) {
+		int black = withAlpha(0xFF000000, alpha);
+		int yellow = withAlpha(0xFFFFE14A, alpha);
+		// A plus three pixels across, outlined, with a white middle.
+		icons.fill(cx - 1, cy - 2, cx + 2, cy + 3, black);
+		icons.fill(cx - 2, cy - 1, cx + 3, cy + 2, black);
+		icons.fill(cx, cy - 1, cx + 1, cy + 2, yellow);
+		icons.fill(cx - 1, cy, cx + 2, cy + 1, yellow);
+		icons.fill(cx, cy, cx + 1, cy + 1, withAlpha(0xFFFFFFFF, alpha));
 	}
 
 	/** Master's look: a player's face on a dark disc, a mob's face in a dark box framed in its kind's colour. */

@@ -49,6 +49,8 @@ A node the list has no line for stops the script before any VM starts. `--mods` 
 | NeoForge | The usual run, jars copied into the game's `mods` folder |
 | Forge 1.20.1 | The usual run, jars remapped by ModDevGradle onto the tests' classpath |
 
+A mod that can't run on the VM's JDK 25 gets another Java for the game with `--env DIORAMA_TEST_JAVA=21`, on Fabric 1.20.1 to 1.21.11 only: the VM installs it from Ubuntu's packages (about a minute, once per VM) and the production run starts the game with it. Cobblemon on Fabric needs it: its battle engine stops on Java 22 and later, and the game never reaches the title screen.
+
 `mods.init.gradle.kts` has the reasons. A run without `--mods` loads none of this, and on a warm VM starts without the last run's mods.
 
 ## Size and cost

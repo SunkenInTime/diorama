@@ -215,6 +215,83 @@ final class RadarCategoriesTest {
 		world.getServer().runCommand("kill @e[type=!player]");
 	}
 
+	/**
+	 * With Cobblemon installed (opt-in: {@code radar-categories-cobblemon}): the Pokémon category is
+	 * there without setup, and with passive mobs off, which a Pokémon is to the game, the cow goes
+	 * and the Pokémon stay (#344).
+	 */
+	static void cobblemon(ClientGameTestContext context, TestSingleplayerContext world) {
+		String made = context.computeOnClient(mc -> {
+			List<RadarCategories.Category> own = Settings.get().radarCategories;
+			return own.isEmpty() ? "none" : own.get(0).builtIn + " " + own.get(0).mobs + " " + own.get(0).name().getString();
+		});
+		if (!made.startsWith("pokemon [cobblemon:pokemon, pixelmon:pixelmon] Pok")) {
+			throw new AssertionError("With Cobblemon installed the first category is: " + made);
+		}
+		world.getServer().runCommand("time set noon");
+		world.getServer().runCommand("gamerule doMobSpawning false");
+		context.waitFor(mc -> mc.player.onGround(), 600);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = at.getX();
+		int y = at.getY();
+		int z = at.getZ();
+		world.getServer().runCommand("fill " + (x - 12) + " " + y + " " + (z - 12) + " " + (x + 12) + " " + (y + 24) + " " + (z + 12) + " air");
+		world.getServer().runCommand("fill " + (x - 12) + " " + (y - 1) + " " + (z - 12) + " " + (x + 12) + " " + (y - 1) + " " + (z + 12) + " grass_block");
+		world.getServer().runCommand("kill @e[type=!player]");
+		String[] species = {"bulbasaur", "pikachu", "snorlax", "eevee"};
+		for (int i = 0; i < species.length; i++) {
+			world.getServer().runCommand("pokespawnat " + (x + (i % 2 == 0 ? -6 : 6)) + " " + y + " " + (z + (i / 2 == 0 ? -6 : 8)) + " " + species[i] + " no_ai=true");
+		}
+		String still = "{NoAI:1b,PersistenceRequired:1b,Silent:1b}";
+		world.getServer().runCommand("summon cow " + (x - 9) + " " + y + " " + (z - 1) + " " + still);
+		world.getServer().runCommand("summon sheep " + (x + 9) + " " + y + " " + (z + 1) + " " + still);
+		world.getServer().runCommand("summon pig " + x + " " + y + " " + (z - 9) + " " + still);
+		world.getServer().runCommand("summon zombie " + x + " " + y + " " + (z + 10) + " " + still);
+		context.runOnClient(mc -> Settings.get().radarPassive = true);
+		// The portraits are drawn a couple a frame after the radar first asks for them.
+		context.waitTicks(100);
+		context.takeScreenshot("radar-categories-cobblemon-01-all");
+		context.setScreen(() -> new RadarCategoriesScreen(null));
+		context.waitTicks(5);
+		DioramaClientTest.click(context, "Passive mobs");
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("radar-categories-cobblemon-02-list");
+		context.setScreen(() -> null);
+		context.waitTicks(10);
+		context.takeScreenshot("radar-categories-cobblemon-03-farm-animals-hidden");
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> {
+			if (mc.gui.screen() instanceof MapScreen screen) {
+				screen.lookAt(mc.player.getX(), dev.diorama.Projection.v(mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
+			}
+		});
+		context.waitTicks(40);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("radar-categories-cobblemon-04-map");
+		List<String> shown = context.computeOnClient(mc -> {
+			List<String> types = new java.util.ArrayList<>();
+			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
+				if (blip.kind() != Radar.Kind.ITEM) {
+					types.add(EntityType.getKey(blip.entity().getType()).toString());
+				}
+			}
+			java.util.Collections.sort(types);
+			return types;
+		});
+		long pokemon = shown.stream().filter("cobblemon:pokemon"::equals).count();
+		if (pokemon < species.length || !shown.contains("minecraft:zombie") || shown.stream().anyMatch(type -> Set.of("minecraft:cow", "minecraft:sheep", "minecraft:pig").contains(type))) {
+			throw new AssertionError("With passive mobs off the radar should keep the Pokémon and the zombie and lose the farm animals; it shows " + shown);
+		}
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			Settings.get().radarPassive = true;
+			Settings.get().save();
+		});
+		world.getServer().runCommand("kill @e[type=!player]");
+	}
+
 	private static void expectScreen(ClientGameTestContext context, Class<?> type) {
 		context.waitTicks(3);
 		String open = context.computeOnClient(mc -> mc.gui.screen() == null ? "no screen" : mc.gui.screen().getClass().getSimpleName());

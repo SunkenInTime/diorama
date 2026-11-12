@@ -1,0 +1,13 @@
+# Cobblemon (1.8.4 on 1.21.1, 1.5.2 on 1.20.1, its newest on each), for the cobblemon and
+# cobblemon-radar sections. It needs Kotlin: Fabric Language Kotlin, or Kotlin for Forge, and
+# Architectury on 1.20.1. One line per jar: <node> <url>.
+# On Fabric, pass --env DIORAMA_TEST_JAVA=21: Cobblemon's battle engine doesn't start on the VM's
+# JDK 25 there ("Uncaught exception in thread Cobblemon Showdown"), and the game never reaches the
+# title screen. No Fabric 1.20.1 lines: not tried on Java 21 (1.5.2 asks for 17 or later).
+1.21.1 https://cdn.modrinth.com/data/MdwFAVRL/versions/PdOzYHKU/Cobblemon-fabric-1.8.4%2B1.21.1.jar
+1.21.1 https://cdn.modrinth.com/data/Ha28R6CL/versions/SKW1BTL3/fabric-language-kotlin-1.14.2%2Bkotlin.2.4.21.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/MdwFAVRL/versions/xsVHrAsY/Cobblemon-neoforge-1.8.4%2B1.21.1.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/ordsPcFz/versions/uhJhCT7X/kotlinforforge-5.12.0-all.jar
+1.20.1-forge https://cdn.modrinth.com/data/MdwFAVRL/versions/vm5zUZAg/Cobblemon-forge-1.5.2%2B1.20.1.jar
+1.20.1-forge https://cdn.modrinth.com/data/ordsPcFz/versions/Zsh14XeQ/kotlinforforge-4.12.0-all.jar
+1.20.1-forge https://cdn.modrinth.com/data/lhGA9TYQ/versions/1MKTLiiG/architectury-9.2.14-forge.jar
