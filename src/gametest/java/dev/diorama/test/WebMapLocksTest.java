@@ -95,8 +95,8 @@ final class WebMapLocksTest {
 			expect(wrong, status(http, port, netherTile) == 200 && status(http, port, overworldTile) == 200, "with only the End off, the Nether's or the Overworld's pictures are gone");
 			ClientWebMapTest.photograph(page + "#dim=" + END, out.resolve("server-3-end-off.png"));
 
+			// The player comes back where they left: in the End, with no map.
 			server.join(context);
-			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 50, 2400);
 			int own = freePort();
 			context.runOnClient(mc -> {
 				Settings.get().webMapPort = own;
