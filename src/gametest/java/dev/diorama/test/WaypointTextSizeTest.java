@@ -18,7 +18,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * The text under waypoints in the world (opt-in: {@code waypoint-text-size}): a near and a far
  * waypoint at every World size. Both are measured in the screenshot: the pin and the letters have
  * to be whole screen pixels, the letters the game's own size at the default and bigger and smaller
- * in step with the pin.
+ * in step with the pin up to 100%, where they stop growing while the pin goes on to 200%.
  */
 final class WaypointTextSizeTest {
 	/** Colours no other pin or block uses, to find each pin's head by. */
@@ -27,13 +27,13 @@ final class WaypointTextSizeTest {
 	/**
 	 * A GUI scale, then pairs of a World size and the screen pixels to a font pixel its text has to
 	 * be: first the default, which is the game's own text size, then every step the slider has
-	 * there. The step the slider shows for the default (50, 67 and 50) has to look like the default,
+	 * there; past 100 the text stays as it is at 100. The step the slider shows for the default (50, 67 and 50) has to look like the default,
 	 * or moving the slider and putting it back would leave the text another size.
 	 */
 	private static final int[][] SIZES = {
-		{2, 60, 2, 50, 2, 100, 4, 150, 6, 200, 8},
-		{3, 60, 3, 33, 2, 67, 3, 100, 5, 133, 6, 167, 8, 200, 9},
-		{4, 60, 4, 25, 2, 50, 4, 75, 6, 100, 8, 125, 10, 150, 12, 175, 14, 200, 16}
+		{2, 60, 2, 50, 2, 100, 4, 150, 4, 200, 4},
+		{3, 60, 3, 33, 2, 67, 3, 100, 5, 133, 5, 167, 5, 200, 5},
+		{4, 60, 4, 25, 2, 50, 4, 75, 6, 100, 8, 125, 8, 150, 8, 175, 8, 200, 8}
 	};
 	/** How many pixels of a pin's head are its own colour, across, and how many pin pixels its text starts below them; measured on the first pin. */
 	private static int headPixels = -1;

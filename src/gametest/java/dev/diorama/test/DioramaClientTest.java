@@ -1055,7 +1055,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/**
 	 * Every language on the screens with the newest text, for reading it in the game (opt-in:
 	 * {@code languages}): the game time, the dimension button and its map, the menu of a place not
-	 * yet mapped, and each settings tab with a tooltip showing.
+	 * yet mapped, each settings tab bare and with a tooltip showing, the waypoint list, and the
+	 * minimap position and map-off screens.
 	 */
 	private static void languages(ClientGameTestContext context) {
 		try (TestSingleplayerContext world = context.worldBuilder()
@@ -1077,6 +1078,8 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.waitFor(mc -> mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && mc.gui.screen() == null
 				&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
 			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
+			// One waypoint, far enough not to be reached, so the list shows its row and the sort buttons.
+			context.runOnClient(mc -> dev.diorama.waypoint.Waypoints.addTemporary(mc.player.blockPosition().offset(300, 0, 0), "minecraft:overworld"));
 			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
 				switchLanguage(context, language);
 				context.waitTicks(10);
@@ -1104,11 +1107,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 				context.setScreen(() -> new SettingsScreen(null));
 				context.waitTicks(5);
-				String[][] tooltips = {{"game_time"}, {"items"}, {"map_dimension_button"}, {"waypoint_size_minimap"}, {"saved_chunks"}};
+				// Each tab bare, so every label shows, then with one of its newest tooltips.
+				String[][] tooltips = {{"legible_caves"}, {"items"}, {"web_map"}, {"waypoint_beams"}, {"day_night"}};
 				for (int tab = 0; tab < tooltips.length; tab++) {
 					int index = tab;
 					context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(index));
+					context.getInput().setCursorPos(2, 2);
 					context.waitTicks(3);
+					context.takeScreenshot("languages-" + language + "-4-settings-tab-" + (tab + 1));
 					String label = net.minecraft.network.chat.Component.translatable("diorama.settings." + tooltips[tab][0]).getString();
 					double[] at = context.computeOnClient(mc -> {
 						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
@@ -1123,8 +1129,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 					});
 					context.getInput().setCursorPos(at[0], at[1]);
 					context.waitTicks(14);
-					context.takeScreenshot("languages-" + language + "-4-settings-" + tooltips[tab][0]);
+					context.takeScreenshot("languages-" + language + "-5-tooltip-" + tooltips[tab][0]);
 				}
+				context.setScreen(() -> null);
+				context.getInput().setCursorPos(2, 2);
+
+				context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-6-waypoint-list");
+				context.setScreen(() -> new dev.diorama.MinimapPositionScreen(new SettingsScreen(null)));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-7-position");
+				context.setScreen(() -> new dev.diorama.DimensionsScreen(new SettingsScreen(null)));
+				context.waitTicks(5);
+				context.takeScreenshot("languages-" + language + "-8-map-off");
 				context.setScreen(() -> null);
 			}
 			switchLanguage(context, "en_us");
@@ -3302,6 +3320,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 		settle(context, 60);
 		context.takeScreenshot("radar-01-minimap");
+		// Height arrows off: the bat above and the zombie below keep their faded heads and lose the arrows.
+		context.runOnClient(mc -> Settings.get().radarHeightArrows = false);
+		context.waitTicks(5);
+		context.takeScreenshot("radar-01a-no-height-arrows");
+		context.runOnClient(mc -> Settings.get().radarHeightArrows = true);
 		// A pig in the square's corner, outside the circle: the round minimap leaves it off.
 		world.getServer().runCommand("fill " + (x + 19) + " " + y + " " + (z - 25) + " " + (x + 21) + " " + (y + 3) + " " + (z - 23) + " air");
 		world.getServer().runCommand("fill " + (x + 19) + " " + (y - 1) + " " + (z - 25) + " " + (x + 21) + " " + (y - 1) + " " + (z - 23) + " grass_block");
@@ -4761,7 +4784,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		// Far out the map shows overview tiles, which carry their own chunks once rebuilt. Back
 		// over spawn, which has more mapped round it.
 		context.waitTicks(200);
-		double[] far = {0.35, 0.12};
+		// The map draws one overview level finer than the zoom asks for where the view's tiles fit
+		// in memory (#250): at 0.35 those are the detailed tiles.
+		double[] far = {0.25, 0.12};
 		for (int i = 0; i < far.length; i++) {
 			double zoom = far[i];
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(spawnX, Projection.v(spawnY, spawnZ), zoom, TileKey.SURFACE));
@@ -4948,6 +4973,26 @@ public class DioramaClientTest implements FabricClientGameTest {
 		moveCursor(context, spot[2], spot[3]);
 		context.waitTicks(10);
 		context.takeScreenshot("opac-claims-03-hover-server");
+		// A cow standing in the player's claim: hovering it names the cow, and the claim under it.
+		world.getServer().runCommand("summon cow " + (cx + 14) + " " + y + " " + (cz + 4) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,Tags:[\"diorama_claim_cow\"]}");
+		// This cow, not a wild one that wandered up.
+		java.util.function.Predicate<Radar.Blip> summoned = blip -> blip.entity().getType() == EntityTypes.COW
+			&& blip.entity().getBlockX() == cx + 14 && blip.entity().getBlockZ() == cz + 4;
+		context.waitFor(mc -> ((MapScreen) mc.gui.screen()).blips().stream().anyMatch(summoned), 200);
+		context.waitTicks(5);
+		float[] cow = context.computeOnClient(mc -> {
+			float scale = (float) mc.getWindow().getGuiScale();
+			Radar.Blip blip = ((MapScreen) mc.gui.screen()).blips().stream().filter(summoned).findFirst().orElseThrow();
+			return new float[] {blip.x() * scale, blip.y() * scale};
+		});
+		moveCursor(context, cow[0], cow[1]);
+		context.waitTicks(10);
+		context.takeScreenshot("opac-claims-03-hover-mob");
+		List<String> overCow = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).tooltipText());
+		world.getServer().runCommand("kill @e[tag=diorama_claim_cow]");
+		if (overCow.size() != 2 || !overCow.get(0).contains("Cow") || !overCow.get(1).contains(own.name())) {
+			throw new AssertionError("Hovering a cow in the player's claim should name the cow, then the claim \"" + own.name() + "\": " + overCow);
+		}
 		// Turned off, the claims go.
 		context.runOnClient(mc -> Settings.get().claims = Settings.ClaimsShown.OFF);
 		context.waitTicks(5);

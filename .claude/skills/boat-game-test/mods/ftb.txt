@@ -1,0 +1,19 @@
+# FTB Chunks with FTB Teams, FTB Library and Architectury, which it needs, for the ftb-claims
+# section. The FTB jars come from FTB's own Maven: they aren't on Modrinth. One line per jar:
+# <node> <url>.
+1.21.11 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-chunks-fabric/2111.1.1/ftb-chunks-fabric-2111.1.1.jar
+1.21.11 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-library-fabric/2111.1.1/ftb-library-fabric-2111.1.1.jar
+1.21.11 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-teams-fabric/2111.1.1/ftb-teams-fabric-2111.1.1.jar
+1.21.11 https://cdn.modrinth.com/data/lhGA9TYQ/versions/uNdfrcQ8/architectury-19.0.1-fabric.jar
+1.21.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-chunks-fabric/2101.1.22/ftb-chunks-fabric-2101.1.22.jar
+1.21.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-library-fabric/2101.1.37/ftb-library-fabric-2101.1.37.jar
+1.21.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-teams-fabric/2101.1.11/ftb-teams-fabric-2101.1.11.jar
+1.21.1 https://cdn.modrinth.com/data/lhGA9TYQ/versions/Pzc2FP5K/architectury-13.0.11-fabric.jar
+1.20.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-chunks-fabric/2001.3.8/ftb-chunks-fabric-2001.3.8.jar
+1.20.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-library-fabric/2001.2.13/ftb-library-fabric-2001.2.13.jar
+1.20.1 https://maven.ftb.dev/releases/dev/ftb/mods/ftb-teams-fabric/2001.3.2/ftb-teams-fabric-2001.3.2.jar
+1.20.1 https://cdn.modrinth.com/data/lhGA9TYQ/versions/WbL7MStR/architectury-9.2.14-fabric.jar
+1.21.1-neoforge https://maven.ftb.dev/releases/dev/ftb/mods/ftb-chunks-neoforge/2101.1.22/ftb-chunks-neoforge-2101.1.22.jar
+1.21.1-neoforge https://maven.ftb.dev/releases/dev/ftb/mods/ftb-library-neoforge/2101.1.37/ftb-library-neoforge-2101.1.37.jar
+1.21.1-neoforge https://maven.ftb.dev/releases/dev/ftb/mods/ftb-teams-neoforge/2101.1.11/ftb-teams-neoforge-2101.1.11.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/lhGA9TYQ/versions/1IiqEQGl/architectury-13.0.11-neoforge.jar

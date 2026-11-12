@@ -123,6 +123,8 @@ public final class Settings {
 	public int radarIconScale = 100;
 	/** Outlines mob heads in red, yellow or green by how they treat you; off, they're outlined in black. */
 	public boolean radarTypeOutline = true;
+	/** The small arrow beside a player or mob well above or below you (Xaero's "Display Height: Direction"). Off, only the fade says so. */
+	public boolean radarHeightArrows = true;
 	public NameTags playerNames = NameTags.FULLSCREEN;
 	/** Index into {@link #ARROW_COLORS}. */
 	public int arrowColor = 0;
@@ -149,7 +151,8 @@ public final class Settings {
 	 * pixel: {@link #MIN_WAYPOINT_SIZE} to {@link #MAX_SCALE}. {@code Pins.scale} rounds it to whole
 	 * screen pixels, so 60 is drawn at 67% on GUI scales 3 and 6 and at 50% on 2 and 4. In the world
 	 * the name and distance under a pin follow its size: the game's own text size at
-	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller as the pin is drawn ({@code Pins.textScale}).
+	 * {@link #DEFAULT_WAYPOINT_SIZE}, bigger and smaller as the pin is drawn, and no bigger than at
+	 * 100 ({@code Pins.textScale}).
 	 */
 	public int waypointMinimapSize = DEFAULT_WAYPOINT_SIZE;
 	public int waypointMapSize = DEFAULT_WAYPOINT_SIZE;
