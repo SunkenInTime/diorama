@@ -276,25 +276,68 @@ final class ClientWebMapTest {
 	 * how wide and how tall the arrow's blue is, in pixels, or null on a machine with no Chromium.
 	 */
 	private static int @org.jspecify.annotations.Nullable [] browser(int port, Path file) {
+		return photograph("http://127.0.0.1:" + port + "/", file) ? arrow(file) : null;
+	}
+
+	/**
+	 * Photographs a page in Chromium into {@code file}; false on a machine with no Chromium. On a
+	 * boat VM through the game test skill's page_photo.py, which waits until the page says its
+	 * pictures are in. Elsewhere on Chromium's own made-up clock, which can run out while a picture
+	 * is still being decoded and leave the map blank.
+	 */
+	static boolean photograph(String address, Path file) {
+		Path log = file.resolveSibling(file.getFileName() + ".log");
+		Path helper = Path.of(System.getProperty("user.home"), "diorama", ".claude", "skills", "boat-game-test", "page_photo.py");
+		if (Files.isRegularFile(helper)) {
+			try {
+				Process process = new ProcessBuilder("python3", helper.toString(), address, file.toAbsolutePath().toString())
+					.redirectErrorStream(true).redirectOutput(log.toFile()).start();
+				if (!process.waitFor(180, TimeUnit.SECONDS)) {
+					process.destroyForcibly();
+					throw new AssertionError("page_photo.py didn't finish photographing " + address);
+				}
+				String said = Files.readString(log).strip();
+				Diorama.LOGGER.info("web map: {} into {}: exit {}, {}", address, file, process.exitValue(), said);
+				if (process.exitValue() == 3) {
+					Diorama.LOGGER.warn("web map: no Chromium on this machine, so no picture of the page");
+					return false;
+				}
+				if (process.exitValue() != 0) {
+					// 4: the page never said its pictures were in, and the picture is of it still loading.
+					throw new AssertionError("page_photo.py failed for " + address + " (" + process.exitValue() + "): " + said);
+				}
+				return true;
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			} catch (InterruptedException e) {
+				throw new AssertionError(e);
+			}
+		}
+		Path profile;
+		try {
+			profile = Files.createTempDirectory("diorama-web-map-browser");
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 		for (String name : new String[] {"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "/snap/bin/chromium"}) {
 			try {
 				Process process = new ProcessBuilder(name, "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars", "--window-size=1280,800",
-					"--virtual-time-budget=20000", "--screenshot=" + file.toAbsolutePath(), "http://127.0.0.1:" + port + "/")
-					.redirectErrorStream(true).redirectOutput(file.resolveSibling(file.getFileName() + ".log").toFile()).start();
+					"--virtual-time-budget=20000", "--user-data-dir=" + profile, "--screenshot=" + file.toAbsolutePath(), address)
+					.redirectErrorStream(true).redirectOutput(log.toFile()).start();
 				if (!process.waitFor(180, TimeUnit.SECONDS)) {
 					process.destroyForcibly();
 					throw new AssertionError(name + " didn't finish photographing the page");
 				}
-				Diorama.LOGGER.info("web-map-client: {} photographed the page into {} (exit {})", name, file, process.exitValue());
-				return arrow(file);
+				Diorama.LOGGER.info("web map: {} photographed {} into {} (exit {})", name, address, file, process.exitValue());
+				return true;
 			} catch (IOException e) {
 				// Not this one.
 			} catch (InterruptedException e) {
 				throw new AssertionError(e);
 			}
 		}
-		Diorama.LOGGER.warn("web-map-client: no Chromium on this machine, so no picture of the page");
-		return null;
+		Diorama.LOGGER.warn("web map: no Chromium on this machine, so no picture of the page");
+		return false;
 	}
 
 	/** Checks a picture of the page, and returns how wide and how tall the arrow's blue is. */

@@ -109,8 +109,13 @@ public final class ShareServer {
 
 	/** Whether this server's settings turn the map off in a level's dimension. */
 	public static boolean mapOff(ServerLevel level) {
+		return locks(level.getServer()).mapOffDimensions().contains(level.dimension().identifier().toString());
+	}
+
+	/** The map settings this server decides for its players; {@link ServerLocks#NONE} if it locks none. */
+	public static ServerLocks locks(MinecraftServer server) {
 		Locked locks = locked;
-		return locks != null && locks.server == level.getServer() && locks.locks.mapOffDimensions().contains(level.dimension().identifier().toString());
+		return locks != null && locks.server == server ? locks.locks : ServerLocks.NONE;
 	}
 
 	public static void stopped(MinecraftServer server) {
