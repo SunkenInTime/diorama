@@ -37,6 +37,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | --- | --- |
 | `tour` | The minimap, the fullscreen map at three zooms, a resource reload and a cave slice |
 | `radar` | Players and mobs on the radar |
+| `radar-categories` | The radar categories screens, and a mob following the player's own category (`radar-categories-cobblemon` with `--mods cobblemon`) |
 | `xaero-icons` | Radar icons from Xaero's Minimap icon files ([docs](radar-icons.md)) |
 | `model-faces` | Faces read off mob models |
 | `waypoints` | Adding, editing, sharing and showing waypoints |
