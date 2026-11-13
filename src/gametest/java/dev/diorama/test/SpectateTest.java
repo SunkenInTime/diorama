@@ -110,12 +110,12 @@ final class SpectateTest {
 		context.runOnClient(mc -> {
 			Entity camera = mc.getCameraEntity();
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
-			if (Math.abs(view.centerU() - camera.getX()) > 2 || Math.abs(view.centerV() - Projection.v(camera.getY(), camera.getZ())) > 2) {
-				wrong.add("The map is centred at u " + view.centerU() + ", v " + view.centerV() + ", not on the camera at x " + camera.getX() + ", u " + camera.getX());
+			if (Math.abs(view.centerU() - Projection.u(camera.getX(), camera.getZ())) > 2 || Math.abs(view.centerV() - Projection.v(camera.getX(), camera.getY(), camera.getZ())) > 2) {
+				wrong.add("The map is centred at u " + view.centerU() + ", v " + view.centerV() + ", not on the camera at x " + camera.getX() + ", u " + Projection.u(camera.getX(), camera.getZ()));
 			}
 			// Looked at directly, wherever the map stayed.
 			MapScreen screen = (MapScreen) mc.gui.screen();
-			screen.lookAt(camera.getX(), Projection.v(camera.getY(), camera.getZ()), view.zoom(), view.layer());
+			screen.lookAt(Projection.u(camera.getX(), camera.getZ()), Projection.v(camera.getX(), camera.getY(), camera.getZ()), view.zoom(), view.layer());
 		});
 		context.waitTicks(2);
 		context.runOnClient(mc -> {
@@ -153,8 +153,8 @@ final class SpectateTest {
 		context.waitTicks(5);
 		context.runOnClient(mc -> {
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
-			if (Math.abs(view.centerU() - mc.player.getX()) > 2) {
-				wrong.add("After stopping, the map is centred at u " + view.centerU() + ", not on the player at x " + mc.player.getX());
+			if (Math.abs(view.centerU() - Projection.u(mc.player.getX(), mc.player.getZ())) > 2 || Math.abs(view.centerV() - Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ())) > 2) {
+				wrong.add("After stopping, the map is centred at u " + view.centerU() + ", v " + view.centerV() + ", not on the player at u " + Projection.u(mc.player.getX(), mc.player.getZ()) + ", v " + Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()));
 			}
 			if (view.layer() == TileKey.SURFACE) {
 				wrong.add("After stopping in the room, the map opened on the surface");
