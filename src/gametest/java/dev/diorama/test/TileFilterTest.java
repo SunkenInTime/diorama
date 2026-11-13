@@ -56,7 +56,13 @@ final class TileFilterTest {
 	static void run(ClientGameTestContext context) {
 		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
 		boolean radar = context.computeOnClient(mc -> Settings.get().radarOnMap);
-		context.runOnClient(mc -> Settings.get().radarOnMap = false);
+		// Waypoints an earlier test left beside the player put their pins and name labels over the
+		// strip of map that's compared: the map is drawn without them too.
+		boolean waypoints = context.computeOnClient(mc -> Settings.get().waypointsOnMap);
+		context.runOnClient(mc -> {
+			Settings.get().radarOnMap = false;
+			Settings.get().waypointsOnMap = false;
+		});
 		TileStore store = context.computeOnClient(mc -> MapSession.get().map().savedMap());
 		// Overview tiles are rebuilt a few seconds after the tiles under them: bring them up to now.
 		try {
@@ -96,6 +102,7 @@ final class TileFilterTest {
 		}
 		context.runOnClient(mc -> {
 			Settings.get().radarOnMap = radar;
+			Settings.get().waypointsOnMap = waypoints;
 			MapViewport.hideFogForTests(false);
 		});
 		DioramaClientTest.setGuiScale(context, scale);

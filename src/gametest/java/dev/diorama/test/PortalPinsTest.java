@@ -186,6 +186,8 @@ final class PortalPinsTest {
 	 */
 	static void netherRoof(ClientGameTestContext context, TestSingleplayerContext world) {
 		context.runOnClient(mc -> Settings.get().portalMarkers = true);
+		String from = context.computeOnClient(mc -> mc.level.dimension().identifier().toString());
+		BlockPos start = context.computeOnClient(mc -> mc.player.blockPosition());
 		world.getServer().runCommand("execute in minecraft:the_nether run tp @a 0 70 0");
 		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.NETHER
 			&& MapSession.get().map().chunkCount() > 200, 2400);
@@ -240,6 +242,11 @@ final class PortalPinsTest {
 		frameBroken(world, NETHER, same, 128, z);
 		expectNetherPins(context, 0, "breaking both");
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+		// Back where the player was: the tests after this one expect the dimension they'd have had.
+		world.getServer().runCommand("execute in " + from + " run tp @a " + start.getX() + " " + start.getY() + " " + start.getZ());
+		context.waitFor(mc -> mc.level != null && mc.level.dimension().identifier().toString().equals(from) && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
 	}
 
 	private static java.util.List<Waypoint> netherPins() {
