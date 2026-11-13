@@ -1,0 +1,19 @@
+# Cobblemon Raid Dens Icons 1.11.0, which patches Diorama's own waypoint classes to put raid dens on
+# the map, so a Diorama change it doesn't expect can stop the game at start (#387). No section of
+# its own: any waypoints section starting and passing with it is the check. With it come Cobblemon
+# Raid Dens, Asymmetric Battles API, GeckoLib, Architectury and Cobblemon with Kotlin.
+# On Fabric, pass --env DIORAMA_TEST_JAVA=21, as for cobblemon.txt. One line per jar: <node> <url>.
+1.21.1 https://cdn.modrinth.com/data/Ou0WNFNa/versions/akupxSoZ/cri-fabric-1.11.0.jar
+1.21.1 https://cdn.modrinth.com/data/GebWh45l/versions/xYlWpZlg/cobblemonraiddens-fabric-0.14.2%2B1.21.1.jar
+1.21.1 https://cdn.modrinth.com/data/sI88vVWl/versions/8SKIm6Cl/asymmetricbattles-fabric-1.4.2%2B1.21.1.jar
+1.21.1 https://cdn.modrinth.com/data/8BmcQJ2H/versions/tmxM7U4W/geckolib-fabric-1.21.1-4.9.3.jar
+1.21.1 https://cdn.modrinth.com/data/lhGA9TYQ/versions/Pzc2FP5K/architectury-13.0.11-fabric.jar
+1.21.1 https://cdn.modrinth.com/data/MdwFAVRL/versions/PdOzYHKU/Cobblemon-fabric-1.8.4%2B1.21.1.jar
+1.21.1 https://cdn.modrinth.com/data/Ha28R6CL/versions/SKW1BTL3/fabric-language-kotlin-1.14.2%2Bkotlin.2.4.21.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/Ou0WNFNa/versions/AzJhwdpC/cri-neoforge-1.11.0.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/GebWh45l/versions/JTE8MBUf/cobblemonraiddens-neoforge-0.14.2%2B1.21.1.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/sI88vVWl/versions/1Rmyutsx/asymmetricbattles-neoforge-1.4.2%2B1.21.1.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/8BmcQJ2H/versions/Grwn5rUB/geckolib-neoforge-1.21.1-4.9.3.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/lhGA9TYQ/versions/1IiqEQGl/architectury-13.0.11-neoforge.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/MdwFAVRL/versions/xsVHrAsY/Cobblemon-neoforge-1.8.4%2B1.21.1.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/ordsPcFz/versions/uhJhCT7X/kotlinforforge-5.12.0-all.jar

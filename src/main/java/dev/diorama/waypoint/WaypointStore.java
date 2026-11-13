@@ -219,6 +219,23 @@ public final class WaypointStore {
 	 */
 	public List<Waypoint> shownIn(String dimension) {
 		List<Waypoint> out = this.in(dimension);
+		this.addShownIn(dimension, out);
+		return out;
+	}
+
+	/**
+	 * {@link #shownIn(String)} for a caller that asked {@link #in} for the dimension's own waypoints
+	 * itself: {@code own} is that list, which another mod's hook on the call may have handed back
+	 * shorter, or as a list that can't be added to (see {@link WaypointHud}).
+	 */
+	public List<Waypoint> shownIn(String dimension, List<Waypoint> own) {
+		List<Waypoint> out = new ArrayList<>(own);
+		this.addShownIn(dimension, out);
+		return out;
+	}
+
+	/** Adds the copies of the waypoints picked to show in a dimension to its own, {@code out}. */
+	private void addShownIn(String dimension, List<Waypoint> out) {
 		// Asked every frame for the player's own dimension, which notes its scale while they're in it.
 		double scale = this.coordinateScale(dimension);
 		Map<Waypoint, Waypoint> previous = this.copies.getOrDefault(dimension, Map.of());
@@ -238,7 +255,6 @@ public final class WaypointStore {
 		} else {
 			this.copies.put(dimension, made);
 		}
-		return out;
 	}
 
 	/** Whether {@code from}'s waypoints are shown in {@code in} too. */
