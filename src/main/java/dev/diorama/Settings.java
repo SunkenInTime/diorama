@@ -126,6 +126,15 @@ public final class Settings {
 	/** The small arrow beside a player or mob well above or below you (Xaero's "Display Height: Direction"). Off, only the fade says so. */
 	public boolean radarHeightArrows = true;
 	public NameTags playerNames = NameTags.FULLSCREEN;
+	/**
+	 * The player's own radar categories, each a list of mobs with its own on/off, icon size and names,
+	 * first match first; see {@link RadarCategories}.
+	 */
+	public java.util.List<RadarCategories.Category> radarCategories = new java.util.ArrayList<>();
+	/** The icon size and names of the fixed categories, by {@code Radar.Kind}; one that changes nothing isn't here. */
+	public java.util.Map<String, RadarCategories.KindLook> radarKinds = new java.util.TreeMap<>();
+	/** Whether the Pokémon category was made, so deleting it lasts. */
+	public boolean radarPokemonAdded = false;
 	/** Index into {@link #ARROW_COLORS}. */
 	public int arrowColor = 0;
 
@@ -501,6 +510,7 @@ public final class Settings {
 		if (settings.waypointBeams == null) {
 			settings.waypointBeams = Beams.TEMPORARY;
 		}
+		RadarCategories.loaded(settings);
 		settings.teleportCommand = cleanCommand(settings.teleportCommand);
 		// Hand-edited IDs: trimmed, lower case, and Minecraft's own if they name no mod.
 		java.util.Set<String> off = new java.util.TreeSet<>();

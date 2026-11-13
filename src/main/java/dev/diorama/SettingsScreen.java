@@ -132,6 +132,9 @@ public final class SettingsScreen extends Screen {
 		radar.choice("player_names", Settings.NameTags.values(), () -> s.playerNames, v -> s.playerNames = v);
 		int[] ranges = Settings.RANGES;
 		radar.slider("range", indexOf(ranges, s.radarRange), ranges.length, i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
+		radar.open("radar_categories", RadarCategoriesScreen.summary(), () -> this.minecraft.gui.setScreen(new RadarCategoriesScreen(this)));
+		// Beside the range, so the tab doesn't grow.
+		radar.lastTwoSideBySide();
 
 		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
 		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
@@ -401,7 +404,7 @@ public final class SettingsScreen extends Screen {
 	 * A slider over a list of values, one equal stretch of the track each, the way vanilla's
 	 * option sliders pick a whole number. Saves when the value it points at changes.
 	 */
-	private static final class StepSlider extends AbstractSliderButton {
+	static final class StepSlider extends AbstractSliderButton {
 		private final Component name;
 		private final int count;
 		private final IntConsumer set;
@@ -473,7 +476,7 @@ public final class SettingsScreen extends Screen {
 		return Tooltip.create(Component.translatable("diorama.settings." + key + ".tooltip"));
 	}
 
-	private static Component label(Component name, Component value) {
+	static Component label(Component name, Component value) {
 		return Component.empty().append(name).append(": ").append(value);
 	}
 
