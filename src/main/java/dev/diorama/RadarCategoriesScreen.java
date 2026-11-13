@@ -60,10 +60,12 @@ public final class RadarCategoriesScreen extends Screen {
 		for (int i = this.page * perPage; i < Math.min(entries.size(), (this.page + 1) * perPage); i++) {
 			RadarCategories.Entry entry = entries.get(i);
 			int y = TOP + (i - this.page * perPage) * ROW;
-			Checkbox checkbox = SettingsScreen.checkbox(entry.name(), this.font, entry.shown(), WIDTH / 2, entry::shown);
+			Component summary = summary(entry);
+			// The name has what the summary leaves of the row.
+			Checkbox checkbox = SettingsScreen.checkbox(entry.name(), this.font, entry.shown(), WIDTH - EDIT - 12 - this.font.width(summary), entry::shown);
 			checkbox.setPosition(left, y);
 			this.addRenderableWidget(checkbox);
-			this.summaries.add(summary(entry));
+			this.summaries.add(summary);
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.radar_categories.edit"), b -> this.minecraft.gui.setScreen(new RadarCategoryScreen(this, entry)))
 				.bounds(left + WIDTH - EDIT, y, EDIT, 20).build());
 		}

@@ -43,6 +43,16 @@ public final class RadarMobsScreen extends Screen {
 		super(Component.translatable("diorama.radar_mobs.title", category.name()));
 		this.parent = parent;
 		this.category = category;
+		// First what the category lists that this game doesn't have, such as a mod's mob while the mod
+		// is out, by its ID: it still counts, and can be unticked.
+		java.util.Set<String> known = new java.util.HashSet<>();
+		this.mobs.forEach(mob -> known.add(mob.id()));
+		for (String listed : category.mobs) {
+			String mod = listed.endsWith(":*") ? listed.substring(0, listed.length() - 2) : null;
+			if (!known.contains(listed) && (mod == null || !RadarCategories.mobMods(this.mobs).contains(mod))) {
+				this.rows.add(new Row(listed, Component.literal(listed), Component.literal(listed)));
+			}
+		}
 		for (String mod : RadarCategories.mobMods(this.mobs)) {
 			this.rows.add(new Row(mod + ":*", Component.translatable("diorama.radar_mobs.every", RadarCategories.modName(mod)), Component.literal(mod + ":*")));
 		}

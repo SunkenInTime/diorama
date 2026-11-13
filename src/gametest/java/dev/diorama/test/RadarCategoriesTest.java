@@ -214,7 +214,9 @@ final class RadarCategoriesTest {
 				throw new AssertionError(e);
 			}
 			Settings s = Settings.reload();
-			boolean kept = !s.radarPassive && !s.radarItems && s.radarHostile && s.radarIconScale == 150 && s.radarCategories.isEmpty()
+			boolean kept = !s.radarPassive && !s.radarItems && s.radarHostile && s.radarIconScale == 150
+				// None but the one Diorama makes itself, if this game has a Pokémon mod.
+				&& s.radarCategories.stream().allMatch(category -> category.builtIn != null)
 				&& !RadarCategories.kind(Radar.Kind.PASSIVE).shown() && RadarCategories.kind(Radar.Kind.HOSTILE).shown()
 				&& RadarCategories.kind(Radar.Kind.PLAYER).names() == Settings.NameTags.ALWAYS
 				&& RadarCategories.kind(Radar.Kind.PASSIVE).iconScale() == RadarCategories.SAME_SIZE;
