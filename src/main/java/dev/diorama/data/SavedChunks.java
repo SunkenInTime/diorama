@@ -83,6 +83,12 @@ public final class SavedChunks implements ChunkSave {
 	private static final short NONE = Short.MIN_VALUE + 1;
 	/** A server tick has 50 ms; past this the game is close to slowing down. */
 	private static final long SERVER_BEHIND_NANOS = 40_000_000;
+	/**
+	 * The longest a listing waits for the server's chunks to reach its files. They took up to 1.3 s
+	 * with Distant Horizons generating; a storage thread that reads keep too busy to write would
+	 * otherwise hold up the whole fill, and what it hasn't written by then shows at the next listing.
+	 */
+	private static final long WRITES_WAIT_NANOS = 10_000_000_000L;
 
 	private final Level level;
 	private final ServerLevel serverLevel;
@@ -138,7 +144,13 @@ public final class SavedChunks implements ChunkSave {
 	 * without answering them, so this keeps checking whether to give up.
 	 */
 	private <T> @Nullable T await(CompletableFuture<T> future) {
-		while (!this.closed) {
+		return this.await(future, -1);
+	}
+
+	/** The same, giving up after {@code nanos} as well, unless that's negative. */
+	private <T> @Nullable T await(CompletableFuture<T> future, long nanos) {
+		long start = System.nanoTime();
+		while (!this.closed && (nanos < 0 || System.nanoTime() - start < nanos)) {
 			try {
 				return future.get(100, TimeUnit.MILLISECONDS);
 			} catch (TimeoutException e) {
@@ -200,11 +212,12 @@ public final class SavedChunks implements ChunkSave {
 
 	/**
 	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, and waits
-	 * until they're in the files, so this listing has them. The server writes those in time it has to
-	 * spare and at its autosave; a busy one, such as one Distant Horizons has generating chunks near
-	 * the player, leaves them unwritten for minutes, while the chunks it made further out are written
-	 * as soon as it lets go of them: the map showed a ring of fog round the player with the land
-	 * beyond it filled in. Xaero's World Map has the server write them too before it reads the save.
+	 * until they're in the files, for up to ten seconds, so this listing has them. The server writes
+	 * those in time it has to spare and at its autosave; a busy one, such as one Distant Horizons has
+	 * generating chunks near the player, leaves them unwritten for minutes, while the chunks it made
+	 * further out are written as soon as it lets go of them: the map showed a ring of fog round the
+	 * player with the land beyond it filled in. Xaero's World Map has the server write them too
+	 * before it reads the save.
 	 *
 	 * <p>The server only hands the chunks to its storage thread, which writes them one by one after
 	 * that. Listed before it's done, they'd be missing until the next listing a minute on, and the
@@ -222,7 +235,7 @@ public final class SavedChunks implements ChunkSave {
 			}));
 			// Another mod's storage is left to write in its own time, as before.
 			if (!this.closed && this.chunkMap.chunkScanner() instanceof IOWorker storage) {
-				this.await(storage.synchronize(false));
+				this.await(storage.synchronize(false), WRITES_WAIT_NANOS);
 			}
 			if (Diorama.DEBUG) {
 				Diorama.LOGGER.info("Saved chunks: the server's chunks were in its files after {} ms", (System.nanoTime() - start) / 100_000 / 10.0);
