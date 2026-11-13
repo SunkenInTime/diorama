@@ -53,7 +53,11 @@ public final class WaypointHud implements HudElement {
 		float width = graphics.guiWidth();
 		float height = graphics.guiHeight();
 		Font font = mc.font;
-		List<Waypoint> waypoints = store.shownIn(mc.level.dimension().identifier().toString());
+		String dimension = mc.level.dimension().identifier().toString();
+		// Cobblemon Raid Dens Icons patches this method where it calls WaypointStore.in(String), to
+		// leave out its far raid markers, and the game doesn't start when that call is gone
+		// (0.10.0, #387). So the dimension's own waypoints are asked for here, with that call.
+		List<Waypoint> waypoints = store.shownIn(dimension, store.in(dimension));
 		float scale = Pins.scale(Settings.get().waypointWorldSize);
 		float textScale = Pins.textScale(Settings.get().waypointWorldSize);
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
