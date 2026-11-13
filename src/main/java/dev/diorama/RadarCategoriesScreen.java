@@ -24,6 +24,9 @@ public final class RadarCategoriesScreen extends Screen {
 	private static final int EDIT = 50;
 	private static final int SUMMARY = 0xFFA0A0A0;
 
+	/** The Edit buttons' width: the usual 50, or what the word takes in a language where it's longer. */
+	private int edit = EDIT;
+
 	private final Screen parent;
 	private int page;
 	/** What each row on the page says beside its Edit button, top to bottom. */
@@ -46,6 +49,7 @@ public final class RadarCategoriesScreen extends Screen {
 	@Override
 	protected void init() {
 		int left = this.width / 2 - WIDTH / 2;
+		this.edit = Math.max(EDIT, this.font.width(Component.translatable("diorama.radar_categories.edit")) + 10);
 		MultiLineTextWidget about = new MultiLineTextWidget(Component.translatable("diorama.radar_categories.about").withStyle(ChatFormatting.GRAY), this.font);
 		about.setMaxWidth(WIDTH);
 		about.setCentered(true);
@@ -62,12 +66,12 @@ public final class RadarCategoriesScreen extends Screen {
 			int y = TOP + (i - this.page * perPage) * ROW;
 			Component summary = summary(entry);
 			// The name has what the summary leaves of the row.
-			Checkbox checkbox = SettingsScreen.checkbox(entry.name(), this.font, entry.shown(), WIDTH - EDIT - 12 - this.font.width(summary), entry::shown);
+			Checkbox checkbox = SettingsScreen.checkbox(entry.name(), this.font, entry.shown(), WIDTH - this.edit - 12 - this.font.width(summary), entry::shown);
 			checkbox.setPosition(left, y);
 			this.addRenderableWidget(checkbox);
 			this.summaries.add(summary);
 			this.addRenderableWidget(Button.builder(Component.translatable("diorama.radar_categories.edit"), b -> this.minecraft.gui.setScreen(new RadarCategoryScreen(this, entry)))
-				.bounds(left + WIDTH - EDIT, y, EDIT, 20).build());
+				.bounds(left + WIDTH - this.edit, y, this.edit, 20).build());
 		}
 		int bottom = this.height - 26;
 		if (pages > 1) {
@@ -129,7 +133,7 @@ public final class RadarCategoriesScreen extends Screen {
 		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
 		graphics.centeredText(this.font, this.title, this.width / 2, 14, 0xFFFFFFFF);
-		int right = this.width / 2 + WIDTH / 2 - EDIT - 6;
+		int right = this.width / 2 + WIDTH / 2 - this.edit - 6;
 		for (int i = 0; i < this.summaries.size(); i++) {
 			Component summary = this.summaries.get(i);
 			graphics.text(this.font, summary, right - this.font.width(summary), TOP + i * ROW + 6, SUMMARY, true);
