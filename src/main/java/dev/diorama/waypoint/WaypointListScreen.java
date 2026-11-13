@@ -76,6 +76,9 @@ public final class WaypointListScreen extends Screen {
 	 * Delete arms them into one red Click again to delete.
 	 */
 	private final List<Button> folderActions = new ArrayList<>();
+	/** The folder's name in the folder bar: as wide as the folder's buttons leave, in a language with long ones. */
+	private int folderNameWidth = FOLDER_NAME_WIDTH;
+	private @Nullable Button nextFolder;
 	/**
 	 * Every folder to pick from, open under the folder's name after a click on it, as Xaero's Minimap
 	 * picks a waypoint set from a dropdown: one click of an arrow per folder is slow with many, and
@@ -257,7 +260,7 @@ public final class WaypointListScreen extends Screen {
 		}
 		int left = folderNameLeft(this.width / 2 - LIST_WIDTH / 2);
 		this.menuMoves = false;
-		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, FOLDER_NAME_WIDTH, this.height);
+		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, Math.max(FOLDER_NAME_WIDTH, this.folderNameWidth), this.height);
 	}
 
 	/**
@@ -466,7 +469,7 @@ public final class WaypointListScreen extends Screen {
 		Folder folder = this.folder();
 		int nameRight = folderNameLeft(left) + FOLDER_NAME_WIDTH;
 		this.addRenderableWidget(Button.builder(Component.literal("<"), b -> this.stepFolder(-1)).bounds(left, FOLDER_Y, ARROW, 20).build());
-		this.addRenderableWidget(Button.builder(Component.literal(">"), b -> this.stepFolder(1)).bounds(nameRight + ACTION_GAP, FOLDER_Y, ARROW, 20).build());
+		this.nextFolder = this.addRenderableWidget(Button.builder(Component.literal(">"), b -> this.stepFolder(1)).bounds(nameRight + ACTION_GAP, FOLDER_Y, ARROW, 20).build());
 		boolean hidden = store != null && store.folderHidden(folder.key());
 		this.folderActions.add(this.action(Component.translatable(hidden ? "diorama.waypoints.show" : "diorama.waypoints.hide"), () -> {
 			WaypointStore current = WaypointStore.get();
@@ -813,6 +816,13 @@ public final class WaypointListScreen extends Screen {
 		}
 		int right = this.width / 2 + LIST_WIDTH / 2;
 		int x = right - span;
+		// The name and its second arrow end clear of the buttons: Russian and Belarusian ones are
+		// wide enough to reach over a name of the usual width.
+		int nameLeft = folderNameLeft(right - LIST_WIDTH);
+		this.folderNameWidth = Math.max(60, Math.min(FOLDER_NAME_WIDTH, x - 6 - ARROW - ACTION_GAP - nameLeft));
+		if (this.nextFolder != null) {
+			this.nextFolder.setPosition(nameLeft + this.folderNameWidth + ACTION_GAP, FOLDER_Y);
+		}
 		for (Button button : buttons) {
 			show(button, !this.folderArmed);
 			button.setPosition(x, FOLDER_Y);
@@ -942,7 +952,7 @@ public final class WaypointListScreen extends Screen {
 		graphics.centeredText(this.font, this.title, cx, 8, 0xFFFFFFFF);
 		// The folder's name between its arrows, with how many waypoints it holds; dimmed when hidden.
 		int nameLeft = folderNameLeft(left);
-		int nameRight = nameLeft + FOLDER_NAME_WIDTH;
+		int nameRight = nameLeft + this.folderNameWidth;
 		ScreenArt.sprite(graphics, ScreenArt.TEXT_FIELD, nameLeft, FOLDER_Y, nameRight - nameLeft, 20);
 		WaypointStore store = WaypointStore.get();
 		Folder folder = this.folder();
@@ -1285,7 +1295,7 @@ public final class WaypointListScreen extends Screen {
 		}
 		int left = this.width / 2 - LIST_WIDTH / 2;
 		// A click on the folder's name opens the list of folders to pick from.
-		if (x >= folderNameLeft(left) && x < folderNameLeft(left) + FOLDER_NAME_WIDTH && y >= FOLDER_Y && y < FOLDER_Y + 20) {
+		if (x >= folderNameLeft(left) && x < folderNameLeft(left) + this.folderNameWidth && y >= FOLDER_Y && y < FOLDER_Y + 20) {
 			this.setFocused(null);
 			this.openFolderMenu();
 			return true;
@@ -1508,7 +1518,7 @@ public final class WaypointListScreen extends Screen {
 
 	/** The middle of the folder's name in the folder bar. For tests. */
 	public int[] folderNameCentre() {
-		return new int[] {folderNameLeft(this.width / 2 - LIST_WIDTH / 2) + FOLDER_NAME_WIDTH / 2, FOLDER_Y + 10};
+		return new int[] {folderNameLeft(this.width / 2 - LIST_WIDTH / 2) + this.folderNameWidth / 2, FOLDER_Y + 10};
 	}
 
 	/** The sort direction's button, which has a caret for a label. For tests. */
