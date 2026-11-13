@@ -153,8 +153,8 @@ final class SpectateTest {
 		context.waitTicks(5);
 		context.runOnClient(mc -> {
 			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
-			if (Math.abs(view.centerU() - Projection.u(mc.player.getX(), mc.player.getZ())) > 2) {
-				wrong.add("After stopping, the map is centred at u " + view.centerU() + ", not on the player at u " + Projection.u(mc.player.getX(), mc.player.getZ()));
+			if (Math.abs(view.centerU() - Projection.u(mc.player.getX(), mc.player.getZ())) > 2 || Math.abs(view.centerV() - Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ())) > 2) {
+				wrong.add("After stopping, the map is centred at u " + view.centerU() + ", v " + view.centerV() + ", not on the player at u " + Projection.u(mc.player.getX(), mc.player.getZ()) + ", v " + Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()));
 			}
 			if (view.layer() == TileKey.SURFACE) {
 				wrong.add("After stopping in the room, the map opened on the surface");
