@@ -50,6 +50,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.PalettedContainer;
 import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.chunk.storage.IOWorker;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.LevelResource;
@@ -82,6 +83,12 @@ public final class SavedChunks implements ChunkSave {
 	private static final short NONE = Short.MIN_VALUE + 1;
 	/** A server tick has 50 ms; past this the game is close to slowing down. */
 	private static final long SERVER_BEHIND_NANOS = 40_000_000;
+	/**
+	 * The longest a listing waits for the server's chunks to reach its files. They took up to 1.3 s
+	 * with Distant Horizons generating; a storage thread that reads keep too busy to write would
+	 * otherwise hold up the whole fill, and what it hasn't written by then shows at the next listing.
+	 */
+	private static final long WRITES_WAIT_NANOS = 10_000_000_000L;
 
 	private final Level level;
 	private final ServerLevel serverLevel;
@@ -137,7 +144,13 @@ public final class SavedChunks implements ChunkSave {
 	 * without answering them, so this keeps checking whether to give up.
 	 */
 	private <T> @Nullable T await(CompletableFuture<T> future) {
-		while (!this.closed) {
+		return this.await(future, -1);
+	}
+
+	/** The same, giving up after {@code nanos} as well, unless that's negative. */
+	private <T> @Nullable T await(CompletableFuture<T> future, long nanos) {
+		long start = System.nanoTime();
+		while (!this.closed && (nanos < 0 || System.nanoTime() - start < nanos)) {
 			try {
 				return future.get(100, TimeUnit.MILLISECONDS);
 			} catch (TimeoutException e) {
@@ -170,8 +183,8 @@ public final class SavedChunks implements ChunkSave {
 
 	/**
 	 * Every region file's chunks, by {@link #regionKey}: for each of its 32 × 32 chunks, indexed
-	 * {@code (z << 5) | x}, when the save last wrote it in seconds, or 0 if it has none. Chunks the
-	 * server hasn't written to its files yet are left out until it does.
+	 * {@code (z << 5) | x}, when the save last wrote it in seconds, or 0 if it has none. The server
+	 * writes the chunks it holds first (see {@link #saveHeldChunks}).
 	 */
 	@Override
 	public Map<Long, int[]> scan() {
@@ -198,22 +211,35 @@ public final class SavedChunks implements ChunkSave {
 	}
 
 	/**
-	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, so the
-	 * files list them: at this listing, or the next if its disk writes are still going. The server
-	 * writes those in time it has to spare and at its autosave; a busy one, such as one Distant
-	 * Horizons has generating chunks near the player, leaves them unwritten for minutes, and the map
-	 * showed a ring of fog round the player with the land beyond it filled in. Xaero's World Map does
-	 * the same before it reads the save.
+	 * Has the server write the chunks it holds and hasn't saved yet, as its autosave does, and waits
+	 * until they're in the files, for up to ten seconds, so this listing has them. The server writes
+	 * those in time it has to spare and at its autosave; a busy one, such as one Distant Horizons has
+	 * generating chunks near the player, leaves them unwritten for minutes, while the chunks it made
+	 * further out are written as soon as it lets go of them: the map showed a ring of fog round the
+	 * player with the land beyond it filled in. Xaero's World Map has the server write them too
+	 * before it reads the save.
+	 *
+	 * <p>The server only hands the chunks to its storage thread, which writes them one by one after
+	 * that. Listed before it's done, they'd be missing until the next listing a minute on, and the
+	 * ring would show for that minute.
 	 */
 	private void saveHeldChunks() {
 		try {
+			long start = System.nanoTime();
 			this.await(this.serverLevel.getServer().submit(() -> {
-				long start = System.nanoTime();
+				long saving = System.nanoTime();
 				this.serverLevel.getChunkSource().save(false);
 				if (Diorama.DEBUG) {
-					Diorama.LOGGER.info("Saved chunks: the server saved its loaded chunks in {} ms", (System.nanoTime() - start) / 100_000 / 10.0);
+					Diorama.LOGGER.info("Saved chunks: the server saved its loaded chunks in {} ms", (System.nanoTime() - saving) / 100_000 / 10.0);
 				}
 			}));
+			// Another mod's storage is left to write in its own time, as before.
+			if (!this.closed && this.chunkMap.chunkScanner() instanceof IOWorker storage) {
+				this.await(storage.synchronize(false), WRITES_WAIT_NANOS);
+			}
+			if (Diorama.DEBUG) {
+				Diorama.LOGGER.info("Saved chunks: the server's chunks were in its files after {} ms", (System.nanoTime() - start) / 100_000 / 10.0);
+			}
 		} catch (RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't have the server save its loaded chunks", e);
 		}
