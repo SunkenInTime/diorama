@@ -89,15 +89,18 @@ final class SavedChunksTest {
 		});
 		context.waitTicks(40);
 		context.takeScreenshot("saved-chunks-far");
-		// The tooltip over them gives no biome: the client has none for a chunk it hasn't loaded (#262).
+		// The tooltip over them names their biome, read from the save: the client has none for a
+		// chunk it hasn't loaded, and its stand-in for one is all Plains (#262).
 		hoverMiddle(context);
+		BlockPos far = new BlockPos(X + 24, ground, Z + 24);
+		context.waitFor(mc -> ((MapScreen) mc.gui.screen()).biomeAt(far) != null, 200);
+		context.waitTicks(5);
 		context.takeScreenshot("saved-chunks-far-tooltip");
-		context.runOnClient(mc -> {
-			Component biome = ((MapScreen) mc.gui.screen()).biomeAt(new BlockPos(X + 24, ground, Z + 24));
-			if (biome != null) {
-				throw new AssertionError("The tooltip over chunks the client hasn't loaded names a biome: " + biome.getString());
-			}
-		});
+		sameBiomeAsTheServer(context, world, far, "over chunks the client hasn't loaded");
+		java.util.List<String> tooltip = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).tooltipText());
+		if (tooltip.size() != 2 || !tooltip.get(1).contains(" · ")) {
+			throw new AssertionError("The tooltip over chunks the client hasn't loaded should have a biome and a distance on its second line: " + tooltip);
+		}
 		// Where the player is, it does.
 		BlockPos near = context.computeOnClient(mc -> mc.player.blockPosition().offset(8, 0, 0));
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(near.getX(), Projection.v(near.getY(), near.getZ()), 2, TileKey.SURFACE));
@@ -107,25 +110,40 @@ final class SavedChunksTest {
 			if (((MapScreen) mc.gui.screen()).biomeAt(near) == null) {
 				throw new AssertionError("The tooltip next to the player names no biome");
 			}
-			// At the east edge of the loaded chunks, the last blocks of a loaded chunk can take their
-			// biome from the unloaded one beyond it, so they name none; its middle still does.
+		});
+		// At the east edge of the loaded chunks, the last blocks of a loaded chunk can take their
+		// biome from the unloaded one beyond it: that one comes from the save too, not from the
+		// client's stand-in. The chunk's middle needs no save.
+		BlockPos edge = context.computeOnClient(mc -> {
 			int chunkX = near.getX() >> 4;
 			int chunkZ = near.getZ() >> 4;
 			while (mc.level.getChunkSource().hasChunk(chunkX + 1, chunkZ)) {
 				chunkX++;
 			}
-			MapScreen map = (MapScreen) mc.gui.screen();
-			int z = chunkZ * 16 + 8;
-			if (map.biomeAt(new BlockPos(chunkX * 16 + 15, near.getY(), z)) != null) {
-				throw new AssertionError("The tooltip names a biome at the edge of chunk " + chunkX + "," + chunkZ + ", next to one the client hasn't loaded");
-			}
-			if (map.biomeAt(new BlockPos(chunkX * 16 + 8, near.getY(), z)) == null) {
+			if (((MapScreen) mc.gui.screen()).biomeAt(new BlockPos(chunkX * 16 + 8, near.getY(), chunkZ * 16 + 8)) == null) {
 				throw new AssertionError("The tooltip names no biome in the middle of the loaded chunk " + chunkX + "," + chunkZ);
 			}
+			return new BlockPos(chunkX * 16 + 15, near.getY(), chunkZ * 16 + 8);
 		});
+		// The server may not have written the chunk beyond the edge yet.
+		save(context, world);
+		context.waitFor(mc -> ((MapScreen) mc.gui.screen()).biomeAt(edge) != null, 400);
+		sameBiomeAsTheServer(context, world, edge, "at the edge of the loaded chunks");
 		context.getInput().setCursorPos(0, 0);
 		context.setScreen(() -> null);
 		return ground;
+	}
+
+	/** The map names the biome at {@code pos} that the server has there. */
+	private static void sameBiomeAsTheServer(ClientGameTestContext context, TestSingleplayerContext world, BlockPos pos, String where) {
+		String key = world.getServer().computeOnServer(server -> server.overworld().getBiome(pos).unwrapKey().orElseThrow().identifier().toLanguageKey("biome"));
+		context.runOnClient(mc -> {
+			Component biome = ((MapScreen) mc.gui.screen()).biomeAt(pos);
+			String expected = Component.translatable(key).getString();
+			if (biome == null || !biome.getString().equals(expected)) {
+				throw new AssertionError("The tooltip " + where + " names " + (biome == null ? "no biome" : biome.getString()) + " at " + pos + ", where the server has " + expected);
+			}
+		});
 	}
 
 	/** The mouse on the middle of the map, long enough for its tooltip to show. */

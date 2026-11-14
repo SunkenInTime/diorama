@@ -26,7 +26,7 @@ import org.jspecify.annotations.Nullable;
  * codecs rather than its chunk loader: that one builds a whole chunk and, before 1.21.2, starts on
  * its light and points of interest as it goes. The world's save in singleplayer ({@link SavedChunks})
  * and the chunks a server shares both come this way. No client classes, so the server half uses it
- * too. One thread at a time.
+ * too. It keeps nothing between reads, so threads can share one.
  */
 public final class ChunkTags {
 	private final Level level;
@@ -75,7 +75,7 @@ public final class ChunkTags {
 		int count = this.level.getSectionsCount();
 		int minSection = this.level.getMinSectionY();
 		PalettedContainer<BlockState>[] states = new PalettedContainer[count];
-		PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[count];
+		PalettedContainerRO<Holder<Biome>>[] biomes = this.biomes(tag);
 		DataLayer[] blockLight = new DataLayer[count];
 		DataLayer[] skyLight = new DataLayer[count];
 		ListTag sections = Nbt.list(tag, "sections");
@@ -88,8 +88,6 @@ public final class ChunkTags {
 			if (finished) {
 				states[i] = this.blockStates(section);
 			}
-			biomes[i] = this.biomes.parse(NbtOps.INSTANCE, Nbt.compound(section, "biomes")).resultOrPartial(e -> {
-			}).orElse(null);
 			if (finished) {
 				// Block light lights every view at night; sky light only the view from under a roof.
 				blockLight[i] = light(section, "BlockLight");
@@ -107,6 +105,24 @@ public final class ChunkTags {
 		}
 		finished &= surface != null && solid != null;
 		return new SavedChunk(chunkX, chunkZ, finished, states, biomes, blockLight, skyLight, finished ? surface : new int[0], finished ? solid : new int[0]);
+	}
+
+	/** Only the biomes of the chunk in {@code tag}, already brought up to this version: per section, null where the save has none. */
+	@SuppressWarnings("unchecked")
+	public @Nullable PalettedContainerRO<Holder<Biome>>[] biomes(CompoundTag tag) {
+		int count = this.level.getSectionsCount();
+		int minSection = this.level.getMinSectionY();
+		PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[count];
+		ListTag sections = Nbt.list(tag, "sections");
+		for (int s = 0; s < sections.size(); s++) {
+			CompoundTag section = Nbt.compound(sections, s);
+			int i = Nbt.sectionY(section) - minSection;
+			if (i >= 0 && i < count) {
+				biomes[i] = this.biomes.parse(NbtOps.INSTANCE, Nbt.compound(section, "biomes")).resultOrPartial(e -> {
+				}).orElse(null);
+			}
+		}
+		return biomes;
 	}
 
 	/** A saved section's blocks, or null if it has none or they can't be read. */
@@ -202,6 +218,19 @@ public final class ChunkTags {
 			return status.endsWith("heightmaps") || status.endsWith("initialize_light") || status.endsWith("light") || status.endsWith("spawn") || status.endsWith("full");
 		}
 		return status.equals("full") || status.equals("minecraft:full");
+	}
+
+	/**
+	 * Whether the chunk's biomes are its own. Generation fills them in at its third step; a chunk
+	 * saved before that has Plains everywhere, the game's stand-in. A chunk from before 1.18 that is
+	 * waiting for its new depths (see {@link #finished}) has had its biomes all along.
+	 */
+	public static boolean hasBiomes(CompoundTag tag) {
+		String status = Nbt.string(tag, "Status");
+		if ("empty".equals(status) || "minecraft:empty".equals(status)) {
+			return !Nbt.string(Nbt.compound(tag, "below_zero_retrogen"), "target_status").isEmpty();
+		}
+		return !status.isEmpty() && !status.endsWith("structure_starts") && !status.endsWith("structure_references");
 	}
 
 	private static @Nullable DataLayer light(CompoundTag section, String name) {

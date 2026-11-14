@@ -7,6 +7,7 @@ import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.bake.TileSpots;
+import dev.diorama.data.SavedBiomes;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import dev.diorama.render.Markers;
@@ -22,6 +23,7 @@ import dev.diorama.waypoint.WaypointStore;
 import dev.diorama.waypoint.Waypoints;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,6 +55,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -162,6 +165,8 @@ public final class MapScreen extends Screen {
 	private @Nullable BlockPos spot;
 	/** The latest look-up of {@link #spot} from a saved tile; an older one's answer is dropped. */
 	private @Nullable Object spotRequest;
+	/** Biomes for the tooltip over land the client has no chunks for; null until that's hovered, and outside singleplayer. */
+	private @Nullable SavedBiomes savedBiomes;
 	/** The dimension whose saved map is shown, or null for the one the player is in. */
 	private @Nullable String otherDimension;
 	/** That map while it's open. It's closed with the screen, and with each screen opened over this one. */
@@ -1617,7 +1622,11 @@ public final class MapScreen extends Screen {
 		return claim.forceLoaded() ? line.copy().append(Component.translatable("diorama.map.claim.force_loaded").withStyle(ChatFormatting.GRAY)) : line;
 	}
 
-	/** The biome at a spot, where the game has its chunk loaded; null elsewhere. Public for tests. */
+	/**
+	 * The biome at a spot: the game's where it has the chunk loaded, else in singleplayer the one in
+	 * the world's save, which takes a moment to read. Null until then, and where neither has it.
+	 * Public for tests.
+	 */
 	public @Nullable Component biomeAt(BlockPos pos) {
 		ClientLevel level = this.minecraft.level;
 		if (level == null) {
@@ -1629,14 +1638,22 @@ public final class MapScreen extends Screen {
 		// chunk source: the client level answers that every chunk is loaded (#262).
 		int cellX = (pos.getX() - 2) >> 2;
 		int cellZ = (pos.getZ() - 2) >> 2;
+		boolean loaded = true;
 		for (int chunkX = cellX >> 2; chunkX <= ((cellX + 1) >> 2); chunkX++) {
 			for (int chunkZ = cellZ >> 2; chunkZ <= ((cellZ + 1) >> 2); chunkZ++) {
-				if (!level.getChunkSource().hasChunk(chunkX, chunkZ)) {
-					return null;
-				}
+				loaded &= level.getChunkSource().hasChunk(chunkX, chunkZ);
 			}
 		}
-		return level.getBiome(pos).unwrapKey()
+		Holder<Biome> biome;
+		if (loaded) {
+			biome = level.getBiome(pos);
+		} else {
+			if (this.savedBiomes == null || this.savedBiomes.level() != level) {
+				this.savedBiomes = SavedBiomes.open(level);
+			}
+			biome = this.savedBiomes == null ? null : this.savedBiomes.at(pos);
+		}
+		return biome == null ? null : biome.unwrapKey()
 			.map(k -> (Component) Component.translatableWithFallback(k.identifier().toLanguageKey("biome"), k.identifier().getPath()))
 			.orElse(null);
 	}
