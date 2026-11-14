@@ -71,6 +71,12 @@ final class SeenBiomesTest {
 			return new double[] {mc.gui.screen().width / 2.0 * scale, mc.gui.screen().height / 2.0 * scale};
 		});
 		context.getInput().setCursorPos(at[0], at[1]);
+		// The biomes kept come off the disk a moment after they're first asked for.
+		try {
+			context.waitFor(mc -> ((MapScreen) mc.gui.screen()).biomeAt(spot) != null, 200);
+		} catch (AssertionError e) {
+			// Said below, with the picture.
+		}
 		context.waitTicks(20);
 		context.takeScreenshot(picture);
 		String expected = context.computeOnClient(mc -> Component.translatable(key).getString());
@@ -81,8 +87,8 @@ final class SeenBiomesTest {
 		if (biome == null || !biome.getString().equals(expected)) {
 			throw new AssertionError("The map names " + (biome == null ? "no biome" : biome.getString()) + " at " + spot + " " + when + ", where the server has " + expected);
 		}
-		if (tooltip.size() != 2 || !tooltip.get(1).contains(" · ")) {
-			throw new AssertionError("The tooltip over land the player left should have a biome and a distance on its second line " + when + ": " + tooltip);
+		if (tooltip.size() != 2 || !tooltip.get(1).startsWith(expected + " · ")) {
+			throw new AssertionError("The tooltip over land the player left should have " + expected + " and a distance on its second line " + when + ": " + tooltip);
 		}
 	}
 

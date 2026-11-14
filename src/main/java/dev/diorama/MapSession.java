@@ -112,7 +112,7 @@ public final class MapSession {
 		}
 		this.lights.close();
 		if (this.seenBiomes != null) {
-			this.seenBiomes.save();
+			this.seenBiomes.close();
 		}
 		this.crafts.close(this.ticks);
 		this.map.close();
