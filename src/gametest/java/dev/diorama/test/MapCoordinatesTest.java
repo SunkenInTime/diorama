@@ -8,9 +8,9 @@ import java.util.regex.Pattern;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 
 /**
- * The Map coordinates setting (opt-in: {@code map-coordinates}): on, the map's status line gives
- * the player's position and the tooltip of the spot under the mouse starts with its coordinates;
- * switched off with its checkbox, neither does, and the tooltip keeps its biome and distance.
+ * The Cursor coordinates setting (opt-in: {@code map-coordinates}): on, the tooltip of the spot
+ * under the mouse on the map starts with its coordinates; switched off with its checkbox, it keeps
+ * its biome and distance alone. The player's position at the top of the map stays either way.
  */
 final class MapCoordinatesTest {
 	private static final Pattern COORDINATES = Pattern.compile("-?[0-9]+, -?[0-9]+, -?[0-9]+");
@@ -34,9 +34,9 @@ final class MapCoordinatesTest {
 		context.setScreen(() -> new SettingsScreen(null));
 		context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(2));
 		context.waitTicks(5);
-		DioramaClientTest.click(context, "Map coordinates");
+		DioramaClientTest.click(context, "Cursor coordinates");
 		if (context.computeOnClient(mc -> Settings.get().mapCoordinates)) {
-			throw new AssertionError("Clicking Map coordinates didn't switch it off");
+			throw new AssertionError("Clicking Cursor coordinates didn't switch it off");
 		}
 		// The mouse is still on the checkbox: the picture has its tooltip.
 		context.waitTicks(20);
@@ -44,11 +44,11 @@ final class MapCoordinatesTest {
 
 		List<String> hidden = hover(context, "map-coordinates-03-off");
 		status = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).statusLine());
-		if (COORDINATES.matcher(status).find()) {
-			throw new AssertionError("The map's status line still gives a position with Map coordinates off: " + status);
+		if (!status.contains(position)) {
+			throw new AssertionError("The map's status line lost the player's position " + position + " with Cursor coordinates off: " + status);
 		}
 		if (hidden.size() != 1 || !hidden.get(0).equals(shown.get(1))) {
-			throw new AssertionError("With Map coordinates off the tooltip of a spot should be \"" + shown.get(1) + "\" alone: " + hidden);
+			throw new AssertionError("With Cursor coordinates off the tooltip of a spot should be \"" + shown.get(1) + "\" alone: " + hidden);
 		}
 		context.getInput().setCursorPos(0, 0);
 		context.setScreen(() -> null);

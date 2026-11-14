@@ -623,9 +623,8 @@ public final class MapScreen extends Screen {
 	}
 
 	/**
-	 * The status line: whether the view is under the Nether's roof, the player's position unless the
-	 * Map coordinates setting is off, the chunks mapped, whether baking is running and how far an
-	 * image export is. It has {@code room}
+	 * The status line: whether the view is under the Nether's roof, the player's position, the
+	 * chunks mapped, whether baking is running and how far an image export is. It has {@code room}
 	 * pixels before the buttons; what doesn't fit is left out whole, the chunk count first, then
 	 * baking, the roof and the export. On another dimension's map, where the player's position
 	 * doesn't belong, it says where they are instead, and there are no chunks or bakes to count.
@@ -635,7 +634,7 @@ public final class MapScreen extends Screen {
 		String roof = !caves && shown.roofless() ? Component.translatable("diorama.map.under_roof").getString() : null;
 		String position = elsewhere
 			? Component.translatable("diorama.map.you_are_in", Waypoints.dimensionName(viewer.level().dimension().identifier().toString())).getString()
-			: Settings.get().mapCoordinates ? String.format("%d, %d, %d", viewer.getBlockX(), viewer.getBlockY(), viewer.getBlockZ()) : null;
+			: String.format("%d, %d, %d", viewer.getBlockX(), viewer.getBlockY(), viewer.getBlockZ());
 		String chunks = elsewhere ? null : Component.translatable("diorama.map.chunks", shown.chunkCount()).getString();
 		SavedChunkImport job = elsewhere ? null : MapSession.get().savedChunks();
 		boolean redrawing = job != null && shown.memory() != null && job.chunksLeft() > 0;
@@ -1526,7 +1525,7 @@ public final class MapScreen extends Screen {
 		return new Tip(lines(name, second), new ScreenRectangle(control.getX(), control.getY(), control.getWidth(), control.getHeight()));
 	}
 
-	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map; the second line alone with the Map coordinates setting off. */
+	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map; the second line alone with the Cursor coordinates setting off. */
 	private @Nullable List<FormattedCharSequence> spotTooltip(int mouseX, int mouseY) {
 		MapViewport.View view = this.lastView;
 		Entity viewer = MapSession.viewer();

@@ -173,7 +173,7 @@ public final class Settings {
 	public boolean mapMapsButton = true;
 	/** The square at the bottom left of the map that shows the next dimension's map. */
 	public boolean mapDimensionButton = true;
-	/** The player's position at the top of the map, and the coordinates in the tooltip of the spot under the mouse. */
+	/** The coordinates in the map's tooltip of the spot under the mouse, as Xaero's World Map's Cursor Coordinates. */
 	public boolean mapCoordinates = true;
 	/** Add waypoint and Add temporary waypoint in the map's right-click menu. */
 	public boolean mapAddWaypoints = true;
