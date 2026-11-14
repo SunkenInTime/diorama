@@ -26,7 +26,7 @@ import org.jspecify.annotations.Nullable;
  * codecs rather than its chunk loader: that one builds a whole chunk and, before 1.21.2, starts on
  * its light and points of interest as it goes. The world's save in singleplayer ({@link SavedChunks})
  * and the chunks a server shares both come this way. No client classes, so the server half uses it
- * too. One thread at a time.
+ * too. It keeps nothing between reads, so threads can share one.
  */
 public final class ChunkTags {
 	private final Level level;
@@ -218,6 +218,19 @@ public final class ChunkTags {
 			return status.endsWith("heightmaps") || status.endsWith("initialize_light") || status.endsWith("light") || status.endsWith("spawn") || status.endsWith("full");
 		}
 		return status.equals("full") || status.equals("minecraft:full");
+	}
+
+	/**
+	 * Whether the chunk's biomes are its own. Generation fills them in at its third step; a chunk
+	 * saved before that has Plains everywhere, the game's stand-in. A chunk from before 1.18 that is
+	 * waiting for its new depths (see {@link #finished}) has had its biomes all along.
+	 */
+	public static boolean hasBiomes(CompoundTag tag) {
+		String status = Nbt.string(tag, "Status");
+		if ("empty".equals(status) || "minecraft:empty".equals(status)) {
+			return !Nbt.string(Nbt.compound(tag, "below_zero_retrogen"), "target_status").isEmpty();
+		}
+		return !status.isEmpty() && !status.endsWith("structure_starts") && !status.endsWith("structure_references");
 	}
 
 	private static @Nullable DataLayer light(CompoundTag section, String name) {

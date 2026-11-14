@@ -32,7 +32,7 @@ import org.jspecify.annotations.Nullable;
 public final class SavedBiomes {
 	/** Chunks kept: far more than the mouse crosses between two looks at the map. */
 	private static final int KEPT = 256;
-	/** How long before a chunk the save didn't have is asked for again: the server may have written it since. */
+	/** How long before a chunk the save didn't have, or had without biomes of its own, is asked for again: the server may have written it since. */
 	private static final long ASK_AGAIN_NANOS = 10_000_000_000L;
 
 	/** One chunk's biomes per section: null while they're being read, and where the save has none. */
@@ -108,7 +108,7 @@ public final class SavedBiomes {
 	private @Nullable Holder<Biome> cell(int quartX, int quartY, int quartZ) {
 		Read entry = this.chunks.get(ChunkSnapshot.key(quartX >> 2, quartZ >> 2));
 		PalettedContainerRO<Holder<Biome>>[] sections = entry == null ? null : entry.sections;
-		if (sections == null || sections.length == 0) {
+		if (sections == null) {
 			return null;
 		}
 		int minQuart = this.level.getMinSectionY() << 2;
@@ -127,10 +127,24 @@ public final class SavedBiomes {
 		Read entry = new Read();
 		this.chunks.put(key, entry);
 		ChunkPos pos = new ChunkPos(chunkX, chunkZ);
-		// Parsed on a thread of its own: the read is answered on the server's storage thread.
+		// Parsed on a background thread: the read is answered on the server's storage thread.
 		this.chunkMap.read(pos).thenApplyAsync(read -> {
 			CompoundTag tag = read.orElse(null);
-			return tag == null ? null : this.tags.biomes(((ChunkMapInvoker) this.chunkMap).diorama$upgrade(tag));
+			if (tag == null) {
+				return null;
+			}
+			tag = ((ChunkMapInvoker) this.chunkMap).diorama$upgrade(tag);
+			// A chunk the world has only begun has no biomes of its own yet: it's asked for again later, like one the save lacks.
+			if (!ChunkTags.hasBiomes(tag)) {
+				return null;
+			}
+			PalettedContainerRO<Holder<Biome>>[] sections = this.tags.biomes(tag);
+			for (PalettedContainerRO<Holder<Biome>> section : sections) {
+				if (section != null) {
+					return sections;
+				}
+			}
+			return null;
 		}).exceptionally(t -> {
 			Diorama.LOGGER.warn("Couldn't read the biomes of saved chunk {}", pos, t);
 			return null;
