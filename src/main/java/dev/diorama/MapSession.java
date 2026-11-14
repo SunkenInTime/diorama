@@ -5,6 +5,7 @@ import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
 import dev.diorama.compat.SubLevels;
 import dev.diorama.craft.Crafts;
+import dev.diorama.data.SeenBiomes;
 import dev.diorama.data.ChunkSnapshot;
 import dev.diorama.data.Copycats;
 import dev.diorama.light.Lights;
@@ -68,6 +69,8 @@ public final class MapSession {
 	private final boolean mainMap;
 	/** Fills the main map in from the world's save, in singleplayer; null elsewhere and when turned off. */
 	private @Nullable SavedChunkImport savedChunks;
+	/** Surface biomes of the land seen, for the map's tooltip on a server; null in singleplayer, where the world's save has them. */
+	private final @Nullable SeenBiomes seenBiomes;
 	private final Crafts crafts;
 	/** Portals found in the save, waiting for the client thread to pin them. */
 	private final Queue<Portals.Spot> savedPortals = new ConcurrentLinkedQueue<>();
@@ -87,6 +90,7 @@ public final class MapSession {
 		Path folder = mapFolder(level, key);
 		this.map = new MapLevel(level.getMinY(), level.getMaxY() + 1, roof, folder);
 		this.mainMap = key != null && Maps.of(key).active(level.dimension().identifier().toString()).isEmpty();
+		this.seenBiomes = folder == null || Minecraft.getInstance().getSingleplayerServer() != null ? null : new SeenBiomes(folder.resolve("biomes"));
 		this.crafts = new Crafts(level, this.map, folder, this::lookAgain);
 		this.lights = new Lights(level, this.map);
 	}
@@ -107,6 +111,9 @@ public final class MapSession {
 			this.savedChunks.stop();
 		}
 		this.lights.close();
+		if (this.seenBiomes != null) {
+			this.seenBiomes.close();
+		}
 		this.crafts.close(this.ticks);
 		this.map.close();
 	}
@@ -565,6 +572,9 @@ public final class MapSession {
 		}
 		if (this.ticks % 600 == 0) {
 			this.map.saveSeen();
+			if (this.seenBiomes != null) {
+				this.seenBiomes.save();
+			}
 		}
 		int playerChunkX = viewer == null ? 0 : viewer.blockPosition().getX() >> 4;
 		int playerChunkZ = viewer == null ? 0 : viewer.blockPosition().getZ() >> 4;
@@ -603,6 +613,9 @@ public final class MapSession {
 				boolean known = this.map.worldChunk(cx, cz) != null;
 				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level);
 				this.map.put(snapshot, known ? p.box : null, playerChunkX, playerChunkZ);
+				if (this.seenBiomes != null) {
+					this.seenBiomes.record(chunk);
+				}
 				if (pins != null) {
 					Portals.chunkSeen(snapshot, dimension, pins, this.map.world());
 				}
@@ -672,6 +685,11 @@ public final class MapSession {
 		} else {
 			this.underground = covered && sky < 5;
 		}
+	}
+
+	/** Surface biomes of the land seen on a server; null in singleplayer. */
+	public @Nullable SeenBiomes seenBiomes() {
+		return this.seenBiomes;
 	}
 
 	public MapLevel map() {
