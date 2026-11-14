@@ -144,6 +144,7 @@ public final class SettingsScreen extends Screen {
 		overlays.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		overlays.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		overlays.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
+		overlays.toggle("map_coordinates", () -> s.mapCoordinates, v -> s.mapCoordinates = v);
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));

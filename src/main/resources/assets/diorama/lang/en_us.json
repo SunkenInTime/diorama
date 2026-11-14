@@ -297,6 +297,8 @@
 	"diorama.settings.map_settings_button.tooltip": "The Settings button at the top of the map. Off, open settings from the mod list, or bind its key in Controls and press it while playing.",
 	"diorama.settings.map_maps_button": "Maps button",
 	"diorama.settings.map_maps_button.tooltip": "The Maps button at the top of the map, where each dimension's maps are made and switched.",
+	"diorama.settings.map_coordinates": "Map coordinates",
+	"diorama.settings.map_coordinates.tooltip": "Your position at the top of the map, and the coordinates of the spot under the mouse. Off, the map still tells you the biome and how far away a spot is.",
 	"diorama.settings.map_dimension_button": "Dimension button",
 	"diorama.settings.map_dimension_button.tooltip": "The square at the bottom left of the map that shows another dimension's map without going there. It shows up once a second dimension has been mapped. Off, its key still works if you bind one.",
 	"diorama.settings.outlines.tooltip": "Darkens the edge where a block stands in front of lower ground, so cliffs and roofs stand out.",
