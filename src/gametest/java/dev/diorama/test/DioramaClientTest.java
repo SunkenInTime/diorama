@@ -469,6 +469,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("xaero-real-server")) {
 			XaeroRealTest.server(context);
 		}
+		if (tests.contains("seen-biomes")) {
+			SeenBiomesTest.run(context);
+		}
 		if (tests.contains("unsent-chunks")) {
 			UnsentChunksTest.run(context);
 		}

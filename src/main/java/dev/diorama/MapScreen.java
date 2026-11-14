@@ -1637,7 +1637,8 @@ public final class MapScreen extends Screen {
 
 	/**
 	 * The biome at a spot: the game's where it has the chunk loaded, else in singleplayer the one in
-	 * the world's save, which takes a moment to read. Null until then, and where neither has it.
+	 * the world's save, which takes a moment to read, and on a server the one seen there before
+	 * ({@link #seenBiome}). Null until then, and where none has it.
 	 * Public for tests.
 	 */
 	public @Nullable Component biomeAt(BlockPos pos) {
@@ -1665,10 +1666,28 @@ public final class MapScreen extends Screen {
 				this.savedBiomes = SavedBiomes.open(level);
 			}
 			biome = this.savedBiomes == null ? null : this.savedBiomes.at(pos);
+			if (this.savedBiomes == null) {
+				return this.seenBiome(pos);
+			}
 		}
 		return biome == null ? null : biome.unwrapKey()
 			.map(k -> (Component) Component.translatableWithFallback(k.identifier().toLanguageKey("biome"), k.identifier().getPath()))
 			.orElse(null);
+	}
+
+	/**
+	 * On a server, the biome the player saw at the surface over a spot, kept with the map. One for
+	 * every 4 × 4 columns, so a block or two from a border it can name the neighbour, where the game
+	 * blurs the line. A cave map's spots are under the surface, in biomes of their own: none there.
+	 */
+	private @Nullable Component seenBiome(BlockPos pos) {
+		MapSession session = MapSession.get();
+		if (session == null || session.seenBiomes() == null || this.layer != TileKey.SURFACE) {
+			return null;
+		}
+		String name = session.seenBiomes().at(pos.getX(), pos.getZ());
+		Identifier id = name == null ? null : Identifier.tryParse(name);
+		return id == null ? null : Component.translatableWithFallback(id.toLanguageKey("biome"), id.getPath());
 	}
 
 	/** A tooltip: a white first line and a grey second one. */
