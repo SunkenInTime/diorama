@@ -16,24 +16,25 @@ import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * The text under waypoints in the world (opt-in: {@code waypoint-text-size}): a near and a far
- * waypoint at every World size. Both are measured in the screenshot: the pin and the letters have
- * to be whole screen pixels, the letters the game's own size at the default and bigger and smaller
- * in step with the pin up to 100%, where they stop growing while the pin goes on to 200%.
+ * waypoint at every World size and every Text size. Both are measured in the screenshot: the pin
+ * and the letters have to be whole screen pixels, the pin as big as World size says with the text
+ * left alone, and the text as big as Text size says with the pin left alone (#386).
  */
 final class WaypointTextSizeTest {
 	/** Colours no other pin or block uses, to find each pin's head by. */
 	private static final int NEAR = 0xFF00FF;
 	private static final int FAR = 0x00FFFF;
-	/**
-	 * A GUI scale, then pairs of a World size and the screen pixels to a font pixel its text has to
-	 * be: first the default, which is the game's own text size, then every step the slider has
-	 * there; past 100 the text stays as it is at 100. The step the slider shows for the default (50, 67 and 50) has to look like the default,
-	 * or moving the slider and putting it back would leave the text another size.
-	 */
+	/** A GUI scale, then every World size its slider has there. */
 	private static final int[][] SIZES = {
-		{2, 60, 2, 50, 2, 100, 4, 150, 4, 200, 4},
-		{3, 60, 3, 33, 2, 67, 3, 100, 5, 133, 5, 167, 5, 200, 5},
-		{4, 60, 4, 25, 2, 50, 4, 75, 6, 100, 8, 125, 8, 150, 8, 175, 8, 200, 8}
+		{2, 60, 50, 100, 150, 200},
+		{3, 60, 33, 67, 100, 133, 167, 200},
+		{4, 60, 25, 50, 75, 100, 125, 150, 175, 200}
+	};
+	/** For the same GUI scales, every Text size its slider has there. */
+	private static final int[][] TEXT_SIZES = {
+		{50, 100, 150, 200},
+		{33, 67, 100, 133, 167, 200},
+		{25, 50, 75, 100, 125, 150, 175, 200}
 	};
 	/** How many pixels of a pin's head are its own colour, across, and how many pin pixels its text starts below them; measured on the first pin. */
 	private static int headPixels = -1;
@@ -71,24 +72,43 @@ final class WaypointTextSizeTest {
 		// Big enough for a GUI scale of 4, which a smaller window clamps to 3. Long enough for the commands' chat lines to fade.
 		context.getInput().resizeWindow(1920, 1080);
 		context.waitTicks(220);
-		for (int[] row : SIZES) {
+		int textBefore = context.computeOnClient(mc -> Settings.get().waypointWorldTextSize);
+		for (int r = 0; r < SIZES.length; r++) {
+			int[] row = SIZES[r];
 			int gui = row[0];
 			DioramaClientTest.setGuiScale(context, gui);
-			for (int i = 1; i < row.length; i += 2) {
+			int[] offered = context.computeOnClient(mc -> dev.diorama.render.TextSize.sizes());
+			if (!Arrays.equals(offered, TEXT_SIZES[r])) {
+				throw new AssertionError("The Text size slider on GUI scale " + gui + " offers " + Arrays.toString(offered) + ", not " + Arrays.toString(TEXT_SIZES[r]));
+			}
+			// The pin at every World size: the text stays the game's own size, one GUI pixel to a font pixel.
+			context.runOnClient(mc -> Settings.get().waypointWorldTextSize = 100);
+			for (int i = 1; i < row.length; i++) {
 				int size = row[i];
-				int text = row[i + 1];
 				context.runOnClient(mc -> Settings.get().waypointWorldSize = size);
 				context.waitTicks(4);
 				BufferedImage shot = read(context.takeScreenshot("label-size-gui" + gui + "-" + size));
 				int pin = Math.max(1, Math.round(size * gui / 100.0F));
-				check(shot, NEAR, pin, text, "the near waypoint at " + size + "% on GUI scale " + gui);
-				check(shot, FAR, pin, text, "the far waypoint at " + size + "% on GUI scale " + gui);
+				check(shot, NEAR, pin, gui, "the near waypoint at World " + size + "% on GUI scale " + gui);
+				check(shot, FAR, pin, gui, "the far waypoint at World " + size + "% on GUI scale " + gui);
+			}
+			// The text at every Text size: the pin stays as the default draws it.
+			context.runOnClient(mc -> Settings.get().waypointWorldSize = Settings.DEFAULT_WAYPOINT_SIZE);
+			int pin = Math.max(1, Math.round(Settings.DEFAULT_WAYPOINT_SIZE * gui / 100.0F));
+			for (int size : TEXT_SIZES[r]) {
+				context.runOnClient(mc -> Settings.get().waypointWorldTextSize = size);
+				context.waitTicks(4);
+				BufferedImage shot = read(context.takeScreenshot("label-size-gui" + gui + "-text-" + size));
+				int text = Math.round(size * gui / 100.0F);
+				check(shot, NEAR, pin, text, "the near waypoint at Text size " + size + "% on GUI scale " + gui);
+				check(shot, FAR, pin, text, "the far waypoint at Text size " + size + "% on GUI scale " + gui);
 			}
 		}
 		// The minimap's and the map's pins have their own sizes: the picture shows the minimap's unchanged.
 		context.runOnClient(mc -> {
 			Settings.get().minimap = true;
 			Settings.get().waypointWorldSize = 200;
+			Settings.get().waypointWorldTextSize = 100;
 		});
 		context.waitTicks(4);
 		context.takeScreenshot("label-size-with-minimap");
@@ -99,6 +119,7 @@ final class WaypointTextSizeTest {
 		context.runOnClient(mc -> {
 			Settings settings = Settings.get();
 			settings.waypointWorldSize = Settings.DEFAULT_WAYPOINT_SIZE;
+			settings.waypointWorldTextSize = textBefore;
 			settings.waypointLabels = labels;
 			settings.minimap = true;
 			WaypointStore store = WaypointStore.get();

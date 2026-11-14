@@ -4,6 +4,7 @@ import dev.diorama.MapSession;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
 import dev.diorama.render.Pins;
+import dev.diorama.render.TextSize;
 import java.util.List;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 //? if >=1.21 {
@@ -19,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
  * Waypoints in the world: each one is projected through the game camera and drawn on the HUD as
  * a pin standing on its spot, with the distance under it, so it shows through terrain at any range. The name appears when it
  * is near the crosshair or close by, which keeps a screen full of waypoints readable. The World size
- * setting sizes the pin and the text together, the text only up to 100%. Under the pins go the beams ({@link WaypointBeams})
+ * setting sizes the pin and Text size the text under it. Under the pins go the beams ({@link WaypointBeams})
  * of the waypoints the beam setting picks.
  */
 public final class WaypointHud implements HudElement {
@@ -59,7 +60,7 @@ public final class WaypointHud implements HudElement {
 		// (0.10.0, #387). So the dimension's own waypoints are asked for here, with that call.
 		List<Waypoint> waypoints = store.shownIn(dimension, store.in(dimension));
 		float scale = Pins.scale(Settings.get().waypointWorldSize);
-		float textScale = Pins.textScale(Settings.get().waypointWorldSize);
+		float textScale = TextSize.scale(Settings.get().waypointWorldTextSize);
 		// A pin stands above its spot, so a big one is still on screen with its spot well off it.
 		float margin = 28 * Math.max(1, scale);
 		Settings.Beams beamsShown = Settings.get().waypointBeams;
