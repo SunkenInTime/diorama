@@ -50,6 +50,8 @@ public final class SettingsScreen extends Screen {
 	private static final int CONTENT = 280;
 	private static final int COLUMN_GAP = 8;
 	private static final int HEADING = 11;
+	/** How wide a text size slider is beside a button that keeps the rest of the row: room for "Text size: 200%". */
+	private static final int TEXT_SLIDER = 84;
 	private static final int TAB_BAR_HEIGHT = 24;
 	private static final Identifier LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/inworld_menu_list_background.png");
 
@@ -166,6 +168,10 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
 		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
+		// How big those labels are, beside what they say: the tab has no room for another row.
+		int[] labelSizes = TextSize.sizes();
+		waypoints.slider("waypoint_text_size", nearestIndex(labelSizes, s.waypointWorldTextSize), labelSizes.length, i -> s.waypointWorldTextSize = labelSizes[i], i -> Component.literal(labelSizes[i] + "%"));
+		waypoints.lastTwoSideBySide(TEXT_SLIDER);
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],
 			i -> distances[i] == 0 ? Component.translatable("diorama.settings.waypoint_distance.any") : Component.literal(distances[i] + " m"));
@@ -264,6 +270,8 @@ public final class SettingsScreen extends Screen {
 		/** Wide widgets that share a row with the one after them. */
 		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
 		private final java.util.Set<AbstractWidget> tripled = new java.util.HashSet<>();
+		/** The second of a pair that isn't half the row: its width. */
+		private final java.util.Map<AbstractWidget, Integer> narrow = new java.util.HashMap<>();
 		private final java.util.Set<AbstractWidget> headings = new java.util.HashSet<>();
 		/** Whether the tab says which of its settings the server sets. */
 		private boolean serverNoted;
@@ -335,6 +343,12 @@ public final class SettingsScreen extends Screen {
 			this.pairedWithNext.add(this.wide.get(this.wide.size() - 2));
 		}
 
+		/** The same, the second {@code width} wide and the first with the rest of the row. */
+		void lastTwoSideBySide(int width) {
+			this.lastTwoSideBySide();
+			this.narrow.put(this.wide.get(this.wide.size() - 1), width);
+		}
+
 		void lastThreeSideBySide() {
 			this.tripled.add(this.wide.get(this.wide.size() - 3));
 		}
@@ -386,12 +400,14 @@ public final class SettingsScreen extends Screen {
 					}
 					i += 2;
 				} else if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
-					int half = (content - 4) / 2;
-					widget.setPosition(left, y);
-					widget.setWidth(half);
 					AbstractWidget next = this.wide.get(++i);
-					next.setPosition(left + content - half, y);
-					next.setWidth(half);
+					int half = (content - 4) / 2;
+					int second = Math.min(half, this.narrow.getOrDefault(next, half));
+					widget.setPosition(left, y);
+					// Halves as they've always been; the first only takes the rest beside a narrow second.
+					widget.setWidth(second == half ? half : content - 4 - second);
+					next.setPosition(left + content - second, y);
+					next.setWidth(second);
 				} else {
 					widget.setPosition(left, y);
 					widget.setWidth(content);
