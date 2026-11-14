@@ -122,6 +122,8 @@ public final class MapScreen extends Screen {
 	private List<Radar.Blip> blips = List.of();
 	/** The map's own tooltip at the mouse this frame: a mob, player, waypoint or spot. Null with none, or over a control. */
 	private @Nullable List<FormattedCharSequence> tooltipLines;
+	/** The status line as drawn last frame. */
+	private String statusShown = "";
 	private List<WaypointOverlay.Pin> pins = List.of();
 	private MapViewport.@Nullable View lastView;
 	/** Where the current mouse press started, to tell a click from a drag. */
@@ -585,7 +587,8 @@ public final class MapScreen extends Screen {
 		graphics.fill(0, 0, this.width, BAR, 0x90000000);
 		this.drawTabs(graphics, mouseX, mouseY);
 		int statusX = this.tabsEnd + 8;
-		graphics.text(this.font, this.statusText(shown, viewer, caves, this.buttonsStart() - 2 - statusX), statusX, 4, 0xFFFFFFFF, false);
+		this.statusShown = this.statusText(shown, viewer, caves, this.buttonsStart() - 2 - statusX);
+		graphics.text(this.font, this.statusShown, statusX, 4, 0xFFFFFFFF, false);
 		graphics.fill(0, this.height - BOTTOM_BAR, this.width, this.height, 0x90000000);
 		String help = (this.draw.active() ? this.draw.help() : HELP).getString();
 		graphics.text(this.font, help, 6, this.height - 11, 0xFFC8D0DA, false);
@@ -1527,7 +1530,7 @@ public final class MapScreen extends Screen {
 		return new Tip(lines(name, second), new ScreenRectangle(control.getX(), control.getY(), control.getWidth(), control.getHeight()));
 	}
 
-	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map. */
+	/** "-382, 62, 825" over "River · 146 m" for the block under an empty spot of the map; the second line alone with the Cursor coordinates setting off. */
 	private @Nullable List<FormattedCharSequence> spotTooltip(int mouseX, int mouseY) {
 		MapViewport.View view = this.lastView;
 		Entity viewer = MapSession.viewer();
@@ -1567,14 +1570,19 @@ public final class MapScreen extends Screen {
 		if (spot == null) {
 			return null;
 		}
+		boolean coordinates = Settings.get().mapCoordinates;
 		if (this.otherDimension != null) {
-			return List.of(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()).getVisualOrderText());
+			// Another dimension's map has only the coordinates to say.
+			return coordinates ? List.of(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()).getVisualOrderText()) : null;
 		}
 		long distance = Math.round(Math.sqrt(viewer.distanceToSqr(spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5)));
 		Component biome = this.biomeAt(spot);
 		Component detail = biome != null
 			? Component.translatable("diorama.map.spot_detail", biome, distance)
 			: Component.translatable("diorama.map.distance", distance);
+		if (!coordinates) {
+			return withClaim(detail, spot.getX(), spot.getZ());
+		}
 		return withClaim(lines(Component.translatable("diorama.map.spot", spot.getX(), spot.getY(), spot.getZ()), detail), spot.getX(), spot.getZ());
 	}
 
@@ -1608,6 +1616,11 @@ public final class MapScreen extends Screen {
 			text.add(builder.toString());
 		}
 		return text;
+	}
+
+	/** The status line at the top of the map as drawn last frame. Public for tests. */
+	public String statusLine() {
+		return this.statusShown;
 	}
 
 	/** Who owns the chunk under the mouse: a square of their colour, then their name, or the claim's own title. */

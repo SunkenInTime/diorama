@@ -143,6 +143,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("waypoint-beams")) {
 				WaypointBeamsTest.run(context, world);
 			}
+			if (tests.contains("map-coordinates")) {
+				MapCoordinatesTest.run(context);
+			}
 			if (tests.contains("waypoint-text-size")) {
 				WaypointTextSizeTest.run(context, world);
 			}
