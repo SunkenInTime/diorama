@@ -230,9 +230,20 @@ public final class BlockLooks extends Looks {
 		BlockLooks looks = new BlockLooks(size, Copycats.INSTALLED ? size + COPYCAT_LOOKS : size, models, mc.getBlockColors(), atlas);
 		warnedFreed = false;
 		synchronized (MAKING) {
-			// Before any block: those tinted like water ask for the same colour as water does.
+			// Before any block: those tinted like water ask for the same colour as water does. The
+			// rest are the game's as they are now, which a mod may have swapped for its own.
 			looks.probe.reset();
-			BiomeTints.setWater(waterResolver(looks.probe));
+			BiomeTints.setGame(
+				BiomeColors.GRASS_COLOR_RESOLVER,
+				BiomeColors.FOLIAGE_COLOR_RESOLVER,
+				//? if >=1.21.5 {
+				BiomeColors.DRY_FOLIAGE_COLOR_RESOLVER,
+				//?} else {
+				/*// Dry foliage (leaf litter) came in 1.21.5; nothing reads this slot before.
+				BiomeColors.FOLIAGE_COLOR_RESOLVER,
+				*///?}
+				waterResolver(looks.probe)
+			);
 		}
 		// What a bake reads where a section's palette has no entry.
 		looks.ensure(VoxelReader.AIR_ID);
