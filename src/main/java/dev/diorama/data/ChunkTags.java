@@ -75,7 +75,7 @@ public final class ChunkTags {
 		int count = this.level.getSectionsCount();
 		int minSection = this.level.getMinSectionY();
 		PalettedContainer<BlockState>[] states = new PalettedContainer[count];
-		PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[count];
+		PalettedContainerRO<Holder<Biome>>[] biomes = this.biomes(tag);
 		DataLayer[] blockLight = new DataLayer[count];
 		DataLayer[] skyLight = new DataLayer[count];
 		ListTag sections = Nbt.list(tag, "sections");
@@ -88,8 +88,6 @@ public final class ChunkTags {
 			if (finished) {
 				states[i] = this.blockStates(section);
 			}
-			biomes[i] = this.biomes.parse(NbtOps.INSTANCE, Nbt.compound(section, "biomes")).resultOrPartial(e -> {
-			}).orElse(null);
 			if (finished) {
 				// Block light lights every view at night; sky light only the view from under a roof.
 				blockLight[i] = light(section, "BlockLight");
@@ -107,6 +105,24 @@ public final class ChunkTags {
 		}
 		finished &= surface != null && solid != null;
 		return new SavedChunk(chunkX, chunkZ, finished, states, biomes, blockLight, skyLight, finished ? surface : new int[0], finished ? solid : new int[0]);
+	}
+
+	/** Only the biomes of the chunk in {@code tag}, already brought up to this version: per section, null where the save has none. */
+	@SuppressWarnings("unchecked")
+	public @Nullable PalettedContainerRO<Holder<Biome>>[] biomes(CompoundTag tag) {
+		int count = this.level.getSectionsCount();
+		int minSection = this.level.getMinSectionY();
+		PalettedContainerRO<Holder<Biome>>[] biomes = new PalettedContainerRO[count];
+		ListTag sections = Nbt.list(tag, "sections");
+		for (int s = 0; s < sections.size(); s++) {
+			CompoundTag section = Nbt.compound(sections, s);
+			int i = Nbt.sectionY(section) - minSection;
+			if (i >= 0 && i < count) {
+				biomes[i] = this.biomes.parse(NbtOps.INSTANCE, Nbt.compound(section, "biomes")).resultOrPartial(e -> {
+				}).orElse(null);
+			}
+		}
+		return biomes;
 	}
 
 	/** A saved section's blocks, or null if it has none or they can't be read. */
