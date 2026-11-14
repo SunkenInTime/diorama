@@ -579,6 +579,10 @@ public final class MapSession {
 		}
 		if (pins != null) {
 			Portals.add(saved, dimension, pins, this.map.roof());
+			if (viewer != null && this.ticks % 20 == 0) {
+				BlockPos at = viewer.blockPosition();
+				Portals.playerAt(at.getX(), at.getY(), at.getZ(), dimension, pins, this.map.world());
+			}
 		}
 		int budget = SNAPSHOTS_PER_TICK;
 		Iterator<Map.Entry<Long, Pending>> it = this.pending.entrySet().iterator();

@@ -24,7 +24,8 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * Portal pins. {@link #checks} runs by default ({@code portal-pins}): one pin on the biggest Nether
  * portal, a pin each on an End portal and a gateway, and what happens to pins as the setting turns,
  * as the player deletes one and as a portal goes out; portals in far chunks read from the save;
- * nothing under fog of war; a portal out of its frame is named plainly. {@link #pluginPortals} is
+ * nothing under fog of war; a portal out of its frame is named plainly. {@link #unlit} runs by
+ * default too ({@code portal-unlit}): a stronghold's End portal before it's lit. {@link #pluginPortals} is
  * opt-in ({@code portal-plugin}), on a Paper server with the AdvancedPortals plugin. {@link #photos} is opt-in ({@code portal-photos}): {@link ShowcaseScene}'s
  * castle with a portal beside it, for the PR's pictures.
  */
@@ -247,6 +248,142 @@ final class PortalPinsTest {
 		context.waitFor(mc -> mc.level != null && mc.level.dimension().identifier().toString().equals(from) && mc.gui.screen() == null
 			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
 		DioramaClientTest.settle(context, 100);
+	}
+
+	/**
+	 * Issue #384: the End portal in a stronghold gets its pin when the player reaches the portal
+	 * room, before it's lit, and not while they're only passing overhead. Lighting it leaves that one
+	 * pin, and breaking the frames takes it. Frames that don't face in, which eyes wouldn't light,
+	 * get none; a ring a player built across four chunks gets one.
+	 */
+	static void unlit(ClientGameTestContext context, TestSingleplayerContext world) {
+		context.runOnClient(mc -> Settings.get().portalMarkers = true);
+		String from = context.computeOnClient(mc -> mc.level.dimension().identifier().toString());
+		String mode = context.computeOnClient(mc -> mc.gameMode.getPlayerMode().getName());
+		BlockPos start = context.computeOnClient(mc -> mc.player.blockPosition());
+		// The portal room of the nearest stronghold, as the game made it: {minX, minY, minZ, maxX, maxY, maxZ}.
+		int[] room = world.getServer().computeOnServer(server -> {
+			BlockPos stronghold = server.overworld().findNearestMapStructure(StructureTags.EYE_OF_ENDER_LOCATED, start, 100, false);
+			if (stronghold == null) {
+				throw new AssertionError("No stronghold in the world");
+			}
+			for (var made : server.overworld().getChunk(stronghold).getAllStarts().values()) {
+				for (var piece : made.getPieces()) {
+					if (piece instanceof net.minecraft.world.level.levelgen.structure.structures.StrongholdPieces.PortalRoom) {
+						var box = piece.getBoundingBox();
+						return new int[] {box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()};
+					}
+				}
+			}
+			throw new AssertionError("The stronghold at " + stronghold + " has no portal room");
+		});
+		int x = (room[0] + room[3]) / 2;
+		int z = (room[2] + room[5]) / 2;
+		world.getServer().runCommand("difficulty peaceful");
+		world.getServer().runCommand("gamemode spectator @a");
+		// Overhead first: the room's chunks are loaded and on the map, and the player hasn't found it.
+		world.getServer().runCommand("execute in minecraft:overworld run tp @a " + x + " " + (room[4] + 30) + " " + z);
+		context.waitFor(mc -> MapSession.get() != null && mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD
+			&& MapSession.get().map().worldChunk(room[0] >> 4, room[2] >> 4) != null && MapSession.get().map().worldChunk(room[3] >> 4, room[5] >> 4) != null, 2400);
+		context.waitTicks(60);
+		expectEndPins(context, room, 0, "passing over a stronghold");
+		// Into the room, above the frames.
+		world.getServer().runCommand("tp @a " + x + " " + (room[1] + 5) + " " + z);
+		DioramaClientTest.settle(context, 60);
+		context.takeScreenshot("portal-unlit-room");
+		context.setScreen(MapScreen::new);
+		DioramaClientTest.settle(context, 40);
+		context.takeScreenshot("portal-unlit-map");
+		context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
+		context.waitTicks(5);
+		context.takeScreenshot("portal-unlit-list");
+		context.setScreen(() -> null);
+		expectEndPins(context, room, 1, "reaching a stronghold's portal room");
+		Waypoint pin = context.computeOnClient(mc -> endPins(room).get(0));
+		if (!pin.name.equals("End Portal")) {
+			throw new AssertionError("The unlit portal's pin should be named End Portal, but it's " + pin.name);
+		}
+		int y = pin.y;
+		// The pin stands where the portal's middle block will be: twelve frames around it.
+		int frames = world.getServer().computeOnServer(server -> {
+			int count = 0;
+			for (BlockPos at : BlockPos.betweenClosed(pin.x - 2, y, pin.z - 2, pin.x + 2, y, pin.z + 2)) {
+				count += server.overworld().getBlockState(at).is(net.minecraft.world.level.block.Blocks.END_PORTAL_FRAME) ? 1 : 0;
+			}
+			return count;
+		});
+		if (frames != 12) {
+			throw new AssertionError("The pin at " + pin.x + " " + y + " " + pin.z + " has " + frames + " frames around it, not the ring's 12");
+		}
+
+		// Lit, as far as the map can tell: the ring filled with portal blocks, as the last eye does.
+		world.getServer().runCommand("fill " + (pin.x - 1) + " " + y + " " + (pin.z - 1) + " " + (pin.x + 1) + " " + y + " " + (pin.z + 1) + " end_portal");
+		context.waitTicks(60);
+		expectEndPins(context, room, 1, "lighting the portal");
+		if (!context.computeOnClient(mc -> endPins(room).get(0).id.equals(pin.id))) {
+			throw new AssertionError("Lighting the portal replaced its pin");
+		}
+		context.takeScreenshot("portal-unlit-lit");
+		world.getServer().runCommand("fill " + (pin.x - 2) + " " + y + " " + (pin.z - 2) + " " + (pin.x + 2) + " " + y + " " + (pin.z + 2) + " air");
+		expectEndPins(context, room, 0, "breaking the portal and its frames");
+
+		// A player's own, with its centre on a chunk corner, so its frames are over four chunks. All facing
+		// north first, as a careless fill leaves them: eyes wouldn't light that.
+		int cx = pin.x & ~15;
+		int cz = pin.z & ~15;
+		int[] built = {cx - 2, y, cz - 2, cx + 2, y, cz + 2};
+		world.getServer().runCommand("tp @a " + cx + " " + (y + 2) + " " + cz);
+		world.getServer().runCommand("fill " + (cx - 2) + " " + y + " " + (cz - 2) + " " + (cx + 2) + " " + y + " " + (cz + 2) + " air");
+		for (String side : new String[] {(cx - 1) + " " + y + " " + (cz - 2) + " " + (cx + 1) + " " + y + " " + (cz - 2), (cx - 1) + " " + y + " " + (cz + 2) + " " + (cx + 1) + " " + y + " " + (cz + 2),
+			(cx - 2) + " " + y + " " + (cz - 1) + " " + (cx - 2) + " " + y + " " + (cz + 1), (cx + 2) + " " + y + " " + (cz - 1) + " " + (cx + 2) + " " + y + " " + (cz + 1)}) {
+			world.getServer().runCommand("fill " + side + " end_portal_frame[facing=north]");
+		}
+		context.waitTicks(80);
+		expectEndPins(context, built, 0, "a ring of frames that don't face in");
+		// Broken and placed again, as a player turns a frame: a frame turned in place by a command
+		// looks the same, which is no news to the map.
+		world.getServer().runCommand("fill " + (cx - 2) + " " + y + " " + (cz - 2) + " " + (cx + 2) + " " + y + " " + (cz + 2) + " air");
+		context.waitTicks(40);
+		world.getServer().runCommand("fill " + (cx - 1) + " " + y + " " + (cz - 2) + " " + (cx + 1) + " " + y + " " + (cz - 2) + " end_portal_frame[facing=south]");
+		world.getServer().runCommand("fill " + (cx - 1) + " " + y + " " + (cz + 2) + " " + (cx + 1) + " " + y + " " + (cz + 2) + " end_portal_frame[facing=north]");
+		world.getServer().runCommand("fill " + (cx - 2) + " " + y + " " + (cz - 1) + " " + (cx - 2) + " " + y + " " + (cz + 1) + " end_portal_frame[facing=east]");
+		world.getServer().runCommand("fill " + (cx + 2) + " " + y + " " + (cz - 1) + " " + (cx + 2) + " " + y + " " + (cz + 1) + " end_portal_frame[facing=west]");
+		expectEndPins(context, built, 1, "a ring built across four chunks");
+		Waypoint own = context.computeOnClient(mc -> endPins(built).get(0));
+		if (own.x != cx || own.y != y || own.z != cz) {
+			throw new AssertionError("The built ring's pin is off its centre: " + own.x + " " + own.y + " " + own.z);
+		}
+		world.getServer().runCommand("setblock " + (cx + 2) + " " + y + " " + cz + " air");
+		expectEndPins(context, built, 0, "breaking one frame of the built ring");
+		world.getServer().runCommand("fill " + (cx - 2) + " " + y + " " + (cz - 2) + " " + (cx + 2) + " " + y + " " + (cz + 2) + " air");
+
+		context.runOnClient(mc -> Settings.get().portalMarkers = false);
+		world.getServer().runCommand("gamemode " + mode + " @a");
+		// Back where the player was: the tests after this one expect the place they'd have had.
+		world.getServer().runCommand("execute in " + from + " run tp @a " + start.getX() + " " + start.getY() + " " + start.getZ());
+		context.waitFor(mc -> mc.level != null && mc.level.dimension().identifier().toString().equals(from) && mc.gui.screen() == null
+			&& MapSession.get() != null && MapSession.get().map().chunkCount() > 200, 2400);
+		DioramaClientTest.settle(context, 100);
+	}
+
+	/** The End portal pins within a box of {minX, minY, minZ, maxX, maxY, maxZ}, across the map. */
+	private static java.util.List<Waypoint> endPins(int[] box) {
+		return WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.END_PORTAL && w.x >= box[0] && w.x <= box[3] && w.z >= box[2] && w.z <= box[5]).toList();
+	}
+
+	private static void expectEndPins(ClientGameTestContext context, int[] box, int count, String after) {
+		for (int i = 0; ; i++) {
+			int pins = context.computeOnClient(mc -> endPins(box).size());
+			if (pins == count) {
+				return;
+			}
+			if (i > PIN_TICKS) {
+				String all = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind == Waypoint.Kind.END_PORTAL)
+					.map(w -> w.x + " " + w.y + " " + w.z).collect(java.util.stream.Collectors.joining(", ")) + "; player at " + mc.player.blockPosition().toShortString());
+				throw new AssertionError(count + " End portal pins expected in " + java.util.Arrays.toString(box) + " after " + after + ", got " + pins + "; all End portal pins: " + all);
+			}
+			context.waitTick();
+		}
 	}
 
 	private static java.util.List<Waypoint> netherPins() {

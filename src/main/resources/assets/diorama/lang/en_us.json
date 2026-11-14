@@ -288,7 +288,7 @@
 	"diorama.settings.deaths.tooltip": "Adds a waypoint where you die.",
 	"diorama.settings.deaths_reached.tooltip": "Removes a death marker once you're back within 4 blocks of it.",
 	"diorama.settings.beds.tooltip": "Puts a pin on the bed you last slept in.",
-	"diorama.settings.portals.tooltip": "Puts a pin on every lit Nether portal, End portal and End gateway the map finds.",
+	"diorama.settings.portals.tooltip": "Puts a pin on every lit Nether portal, End portal and End gateway the map finds, and on a stronghold's End portal once you reach it.",
 	"diorama.settings.map_add_waypoints": "Add from the map",
 	"diorama.settings.map_add_waypoints.tooltip": "Right-clicking the map offers Add waypoint here and Add temporary waypoint. Off, waypoints are added with their key or from the waypoint list.",
 	"diorama.settings.map_waypoints_button": "Waypoints button",

@@ -43,6 +43,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `waypoints` | Adding, editing, sharing and showing waypoints |
 | `icons` | Waypoint icons: each one ships, sleeping in a bed keeps a Bed pin there, an icon is saved with its waypoint |
 | `portal-pins` | Pins on lit portals: one on the widest Nether portal, the setting, deleting one, breaking a portal, portals in the save, nothing under fog of war |
+| `portal-unlit` | A stronghold's End portal before it's lit: no pin from overhead, one on reaching the room, the same one once lit, none on frames that don't face in |
 | `xaero-import` | Importing waypoints from Xaero's Minimap |
 | `fog-of-war` | Cave slices under a server's fair-play rule |
 | `settings` | The settings screen |
