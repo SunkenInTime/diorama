@@ -403,7 +403,8 @@ public final class SettingsScreen extends Screen {
 					int half = (content - 4) / 2;
 					int second = Math.min(half, this.narrow.getOrDefault(next, half));
 					widget.setPosition(left, y);
-					widget.setWidth(content - 4 - second);
+					// Halves as they've always been; the first only takes the rest beside a narrow second.
+					widget.setWidth(second == half ? half : content - 4 - second);
 					next.setPosition(left + content - second, y);
 					next.setWidth(second);
 				} else {
