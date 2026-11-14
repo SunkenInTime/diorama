@@ -161,6 +161,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("leaves")) {
 				LeavesTest.run(context, world);
 			}
+			if (tests.contains("seasons")) {
+				SeasonsTest.run(context, world);
+			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
 			}
@@ -2920,7 +2923,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	 * The map blends biome tints on bake threads from its own copies of the chunks. They must come
 	 * out the same as the game's blend, for every column whose neighbours the map also has.
 	 */
-	private static void assertTintsMatchGame(ClientGameTestContext context) {
+	static void assertTintsMatchGame(ClientGameTestContext context) {
 		String result = context.computeOnClient(mc -> {
 			MapLevel map = MapSession.get().map();
 			int pcx = mc.player.blockPosition().getX() >> 4;

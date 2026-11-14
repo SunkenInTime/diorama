@@ -17,7 +17,8 @@ import net.minecraft.world.level.biome.BiomeManager;
  */
 public final class BiomeTints {
 	// The game's own resolvers (BiomeColors), written out: that class is the client's, and a
-	// dedicated server blends tints for the web map too.
+	// dedicated server blends tints for the web map too. A client puts the game's in their place
+	// (see {@link #setGame}).
 	private static final ColorResolver[] RESOLVERS = {
 		Biome::getGrassColor,
 		(biome, x, z) -> biome.getFoliageColor(),
@@ -42,8 +43,16 @@ public final class BiomeTints {
 		return RESOLVERS[WATER];
 	}
 
-	static void setWater(ColorResolver resolver) {
-		RESOLVERS[WATER] = resolver;
+	/**
+	 * The client's biome colours, as the game holds them when {@link BlockLooks#build} asks: a mod
+	 * can put its own in the game's place, as Serene Seasons does for grass and foliage by the
+	 * season, and the map then has to blend the mod's to match the game (#389).
+	 */
+	static void setGame(ColorResolver grass, ColorResolver foliage, ColorResolver dryFoliage, ColorResolver water) {
+		RESOLVERS[0] = grass;
+		RESOLVERS[1] = foliage;
+		RESOLVERS[2] = dryFoliage;
+		RESOLVERS[WATER] = water;
 	}
 
 	/** The snapshot's tints, blended now if no bake has needed them yet. Any thread. */
