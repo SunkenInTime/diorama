@@ -388,11 +388,15 @@ public final class SettingsScreen extends Screen {
 			boolean tight = 22 + checkRows * 22 + rows * 24 + this.headings.size() * HEADING > area.height();
 			int rowStep = tight ? 22 : 24;
 			int y = area.top() + (tight ? 6 : 12);
+			// The Minimap tab's five rows of checkboxes still reach the buttons below on the smallest
+			// window: then the checkboxes, 17 pixels tall, sit a pixel apart.
+			boolean tighter = tight && 6 + checkRows * 20 + 3 + rows * 22 - 2 + this.headings.size() * HEADING > area.height();
+			int checkStep = tighter ? 18 : tight ? 20 : 22;
 			for (int i = 0; i < this.checkboxes.size(); i++) {
-				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * (tight ? 20 : 22));
+				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * checkStep);
 			}
 			if (!this.checkboxes.isEmpty()) {
-				y += checkRows * (tight ? 20 : 22) + (tight ? 3 : 10);
+				y += checkRows * checkStep + (tight ? 3 : 10);
 			}
 			for (int i = 0; i < this.wide.size(); i++) {
 				AbstractWidget widget = this.wide.get(i);

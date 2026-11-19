@@ -241,7 +241,7 @@ public final class MapViewport {
 		if (memory != null) {
 			memory.draw(view.canvas(graphics), view, NightLook.dim(night, alpha), lodFor(level, view), tileSampling(sampling(view)));
 		}
-		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit, night);
+		this.drawTiles(graphics, level, view, frame, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit, night);
 		this.drawFog(graphics, level, view, frame, night);
 		graphics.disableScissor();
 	}
@@ -349,7 +349,7 @@ public final class MapViewport {
 		return Math.sqrt(du * du + dv * dv);
 	}
 
-	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit, float night) {
+	private void drawTiles(GuiGraphicsExtractor graphics, MapLevel level, View view, View frame, int overlays, boolean claims, @Nullable Runnable lit, float night) {
 		int lod = lodFor(level, view);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
 		double u0 = view.minU();
@@ -375,10 +375,21 @@ public final class MapViewport {
 				double du = (tu + 0.5) * units - view.centerU();
 				double dv = (tv + 0.5) * units - view.centerV();
 				boolean visible = tu >= tu0 && tu <= tu1 && tv >= tv0 && tv <= tv1;
-				// Tiles just outside the view bake too, so panning finds them ready.
-				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : MapLevel.OUTSIDE_VIEW));
 				float sx = view.screenX(tu * units);
 				float sy = view.screenY(tv * units);
+				if (view != frame) {
+					// A turned square shows only part of the ground drawn for it, a different part at
+					// each angle. Asking for all of it, an enlarged minimap wanted more tiles than stay
+					// in memory, and baked the ones it lost again for as long as it showed. So only
+					// the tiles the frame can show as it's turned now, and those a tile out from it.
+					float out = outside(frame, sx + size / 2, sy + size / 2) - size * 0.7072F;
+					if (out > size) {
+						continue;
+					}
+					visible &= out <= 0;
+				}
+				// Tiles just outside the view bake too, so panning finds them ready.
+				MapTile tile = level.want(key, Math.sqrt(du * du + dv * dv) + (visible ? 0 : MapLevel.OUTSIDE_VIEW));
 				if (visible && (tile == null || tile.texture() == null)) {
 					// Not loaded yet, as after zooming to another level: show what's loaded of the same ground.
 					drawStandIn(level, key, canvas, tiles, circle, sx, sy, size, tint, night);
@@ -418,6 +429,18 @@ public final class MapViewport {
 			lit.run();
 		}
 		above.forEach(Runnable::run);
+	}
+
+	/**
+	 * How far outside a turned frame a point of its ground is once turned with it, in GUI pixels:
+	 * the further of the two ways out, and negative inside.
+	 */
+	private static float outside(View frame, float x, float y) {
+		float dx = x - (frame.x() + frame.width() / 2.0F);
+		float dy = y - (frame.y() + frame.height() / 2.0F);
+		float sin = (float) Math.sin(frame.turn());
+		float cos = (float) Math.cos(frame.turn());
+		return Math.max(Math.abs(dx * cos - dy * sin) - frame.width() / 2.0F, Math.abs(dx * sin + dy * cos) - frame.height() / 2.0F);
 	}
 
 	/**

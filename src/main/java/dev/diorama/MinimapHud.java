@@ -239,7 +239,7 @@ public final class MinimapHud implements HudElement {
 		float turn = settings.minimapLockNorth ? 0 : turn(yaw);
 		double centerU = Projection.u(pos.x, pos.z);
 		double centerV = Projection.v(pos.x, pos.y, pos.z);
-		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, centerU, centerV, zoom(session.map(), wantedLayer), wantedLayer, false, false, turn).ground());
+		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, centerU, centerV, zoom(session.map(), wantedLayer), wantedLayer));
 		float opacity = settings.opacity();
 		float fadeIn = this.fadeStart < 0 ? 1 : (System.currentTimeMillis() - this.fadeStart) / (float) LAYER_FADE_MS;
 		if (fadeIn < 1) {
