@@ -100,6 +100,11 @@ final class RadarTagTest {
 				if (stand != null) {
 					wrong.add("The armour stand, which nothing tagged, is on the radar as " + stand);
 				}
+				// The test's resources load with the game, as a mod's own jar does, and name an item.
+				String icon = dev.diorama.render.XaeroRadarIcons.describe(entity(mc.level.entitiesForRendering(), "minecraft:minecart"));
+				if (!"item minecraft:minecart".equals(icon)) {
+					wrong.add("The minecart's icon file names an item, and the radar draws " + (icon == null ? "its own face or a dot" : icon));
+				}
 				if (RadarCategories.mobs().stream().noneMatch(mob -> mob.id().equals("minecraft:minecart"))) {
 					wrong.add("The tagged minecart can't be picked for a radar category");
 				}
