@@ -1,7 +1,8 @@
 """Run Diorama's client game tests on boat.dev VMs: software rendering, no GPU. See SKILL.md.
 
 usage: python boat_run.py <node[,node...]> --tests <sections|all> [--type default|large] [--env KEY=VALUE]...
-                           [--mods <list|folder|jar|url>[,...]] [--server-mods <...>] [--warm-minutes N] [--keep]
+                           [--mods <list|folder|jar|url>[,...]] [--server-mods <...>] [--client-mods <...>]
+                           [--warm-minutes N] [--keep]
 
 Each node gets its own VM, started at the same time from the newest warmed snapshot, or the VM an
 earlier run from this checkout left warm. The script sends this working tree (uncommitted changes
@@ -10,7 +11,8 @@ and deletes the VM or leaves it warm for the next run. Exits non-zero if any nod
 
 --mods runs the tests with other mods' release jars installed (see SKILL.md, "Other mods in a run").
 --server-mods installs them on the real server only (DIORAMA_REAL_SERVER=1), for a server mod the
-player doesn't have.
+player doesn't have. --client-mods installs them in the game only, beside --mods, for a mod the
+server doesn't have.
 """
 import argparse
 import concurrent.futures
@@ -423,7 +425,8 @@ def send_mods(node, vm, mods, out, name='mods.tgz'):
     tgz.unlink()
     if sent.returncode:
         raise RuntimeError(f'boat scp of the mods failed: {tail(sent)}')
-    say(node, ('other mods on the real server only: ' if name != 'mods.tgz' else 'other mods: ')
+    where = {'server-mods.tgz': 'other mods on the real server only: ', 'client-mods.tgz': 'other mods in the game only: '}
+    say(node, where.get(name, 'other mods: ')
         + ', '.join([j.name for j in jars] + [file for file, _ in urls]))
 
 
@@ -540,7 +543,7 @@ def push_tree(node, vm, repo, snapshot, reused, out):
     # Results of an earlier run on this VM could pass for this run's.
     # And the last run's mods would load in this one.
     paths = ['/home/user/src', '/home/user/result', '/home/user/result.tgz', '/home/user/overlay.tgz',
-             '/home/user/mods.tgz', '/home/user/server-mods.tgz']
+             '/home/user/mods.tgz', '/home/user/server-mods.tgz', '/home/user/client-mods.tgz']
     cleared = boat_retry('exec', vm, '--timeout', '120', '--', 'rm', '-rf', *paths)
     if cleared.returncode:
         raise RuntimeError(f'could not clear the VM: {tail(cleared)}')
@@ -599,6 +602,8 @@ def run_node(node, args, repo, snapshot, start):
             send_mods(node, vm, args.mods[node], out)
         if node in args.server_mods:
             send_mods(node, vm, args.server_mods[node], out, 'server-mods.tgz')
+        if node in args.client_mods:
+            send_mods(node, vm, args.client_mods[node], out, 'client-mods.tgz')
         pushed = time.time() - start
         say(node, f'pushed after {pushed:.0f} s; running {args.tests}')
         # The tests get what's left after setup, less 2 min to pack the results and 10 to fetch
@@ -715,6 +720,9 @@ def main():
     parser.add_argument('--server-mods', default='',
                         help="as --mods, but only on the real server (DIORAMA_REAL_SERVER=1), not in the game: "
                              "a server mod the player doesn't have")
+    parser.add_argument('--client-mods', default='',
+                        help="as --mods, but only in the game, not on the real server: a mod the server "
+                             "doesn't have. Goes beside --mods")
     parser.add_argument('--keep', action='store_true', help='stop the VM instead of deleting it, to look around after')
     parser.add_argument('--snapshot', help='saved snapshot to start from (default: the newest diorama-gametest-*)')
     parser.add_argument('--warm-minutes', type=int,
@@ -736,6 +744,10 @@ def main():
     if server_items and not any(e.startswith('DIORAMA_REAL_SERVER=') for e in args.env):
         sys.exit('--server-mods only goes to the real server: add --env DIORAMA_REAL_SERVER=1')
     args.server_mods = {n: mods_for(n, server_items) for n in nodes} if server_items else {}
+    client_items = [m for m in args.client_mods.split(',') if m]
+    if client_items and not items:
+        sys.exit('--client-mods goes beside --mods: name the mods both sides have with --mods')
+    args.client_mods = {n: mods_for(n, client_items) for n in nodes} if client_items else {}
     if args.warm_minutes is None:
         args.warm_minutes = WARM_MINUTES if len(nodes) <= WARM_NODES else 0
     global CHECKOUT

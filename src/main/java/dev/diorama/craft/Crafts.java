@@ -2,6 +2,7 @@ package dev.diorama.craft;
 
 import dev.diorama.Diorama;
 import dev.diorama.bake.BlockLooks;
+import dev.diorama.compat.CreateTrains;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import java.nio.file.Path;
@@ -29,7 +30,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>A craft that stops and then leaves the client's view, because the player flew off without
  * it, stays on the map where it was left, and is saved with the map so it's still there next
- * time. It's dropped once the player comes back near and it isn't there.
+ * time. It's dropped once the player comes back near and it isn't there, or, for a train's
+ * carriage, once Create says it stands somewhere else ({@link FarTrains}).
  */
 public final class Crafts {
 	/** Ticks between reading a live craft's blocks again, in case they changed. */
@@ -45,6 +47,10 @@ public final class Crafts {
 	/** Ticks the player has to be near a parked craft that doesn't show up before it's dropped. */
 	private static final int GONE_AFTER = 100;
 	private static final int SAVE_EVERY = 1200;
+	/** Ticks between looking whether parked carriages still stand where Create says its trains are: as often as it says. */
+	private static final int TRAINS_EVERY = 5;
+	/** Blocks a train's wheel may be outside a parked craft's box and still be taken for standing in it. */
+	private static final int WHEEL_SLACK = 1;
 
 	/** Where crafts come from: a mod that moves built structures around the world. */
 	public interface Source {
@@ -124,6 +130,7 @@ public final class Crafts {
 				if (read != null && (craft.blocks == null || !read.blocks().looksLike(craft.blocks.blocks(), looks)
 					|| !java.util.Arrays.equals(read.min(), craft.blocks.min()))) {
 					craft.blocks = read;
+					craft.states = CraftFile.states(read.blocks());
 					this.dirty = true;
 				}
 			}
@@ -186,10 +193,50 @@ public final class Crafts {
 				}
 			}
 		}
+		if (tick % TRAINS_EVERY == 0 && CreateTrains.known()) {
+			this.trainsLeft();
+		}
 		if (this.dirty && tick - this.savedAt >= SAVE_EVERY) {
 			this.savedAt = tick;
 			this.save(tick, false);
 		}
+	}
+
+	/**
+	 * Drops the parked carriages that have left: Create says where its trains are while the full
+	 * map is open, and a carriage that has driven off since it was parked is drawn where it is now.
+	 * A carriage Create gives no place for keeps its picture, as does anything that isn't one.
+	 */
+	private void trainsLeft() {
+		String here = this.level.dimension().identifier().toString();
+		for (CreateTrains.Carriage carriage : CreateTrains.carriages()) {
+			Craft craft = this.crafts.get(carriage.craft());
+			if (craft == null || !craft.parked || craft.blocks == null || carriage.dimension().equals(here) && holds(craft, carriage)) {
+				continue;
+			}
+			this.worldChanged.accept(craft.box(craft.pose));
+			craft.close();
+			this.crafts.remove(carriage.craft());
+			this.dirty = true;
+		}
+	}
+
+	/** Whether this carriage of a far train is parked on the map where it stands, so it needs no marker. */
+	boolean parkedAt(CreateTrains.Carriage carriage) {
+		Craft craft = this.crafts.get(carriage.craft());
+		return craft != null && craft.parked && craft.blocks != null && holds(craft, carriage);
+	}
+
+	/** Whether both outer wheels of a carriage are in a craft's box where it was parked. */
+	private static boolean holds(Craft craft, CreateTrains.Carriage carriage) {
+		int[] box = craft.box(craft.pose);
+		return within(box, carriage.first()) && within(box, carriage.second());
+	}
+
+	private static boolean within(int[] box, net.minecraft.world.phys.Vec3 at) {
+		return at.x >= box[0] - WHEEL_SLACK && at.x <= box[3] + 1 + WHEEL_SLACK
+			&& at.y >= box[1] - WHEEL_SLACK && at.y <= box[4] + 1 + WHEEL_SLACK
+			&& at.z >= box[2] - WHEEL_SLACK && at.z <= box[5] + 1 + WHEEL_SLACK;
 	}
 
 	private static double distance(double[] pose, double[] anchor) {
@@ -212,6 +259,7 @@ public final class Crafts {
 			}
 			Craft craft = new Craft(s.id());
 			craft.blocks = blocks;
+			craft.states = CraftFile.states(blocks.blocks());
 			System.arraycopy(s.pose(), 0, craft.pose, 0, 12);
 			craft.posed = true;
 			craft.parked = true;
@@ -232,7 +280,7 @@ public final class Crafts {
 		List<CraftFile.Saved> keep = new ArrayList<>();
 		for (Craft craft : this.crafts.values()) {
 			if (craft.blocks != null && craft.posed && (craft.parked || tick - craft.movedAt >= PARK_AFTER)) {
-				keep.add(CraftFile.Saved.of(craft.id, craft.pose, craft.blocks));
+				keep.add(CraftFile.Saved.of(craft.id, craft.pose, craft.blocks, craft.states));
 			}
 		}
 		// On the baker thread either way, so two writes never overlap.

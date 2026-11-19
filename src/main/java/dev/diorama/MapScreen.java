@@ -6,6 +6,8 @@ import dev.diorama.drawing.DrawMode;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileKey;
+import dev.diorama.compat.CreateTrains;
+import dev.diorama.craft.FarTrains;
 import dev.diorama.bake.TileSpots;
 import dev.diorama.data.SavedBiomes;
 import dev.diorama.render.MapLevel;
@@ -391,6 +393,7 @@ public final class MapScreen extends Screen {
 		if (this.otherMap != null) {
 			this.otherMap.map().update();
 		}
+		CreateTrains.tick(true);
 	}
 
 	/** Puts the zoom buttons beside the gauge on the cave map, in the corner otherwise. */
@@ -510,6 +513,7 @@ public final class MapScreen extends Screen {
 		if (!elsewhere) {
 			session.crafts().draw(graphics, view, a, 1);
 		}
+		Component train = FarTrains.draw(graphics, view, shown, this.dimension(), elsewhere ? null : session.crafts(), mouseX, mouseY);
 		// The client only knows the border of the dimension it's in.
 		if (!elsewhere && Settings.get().worldBorder != Settings.WorldBorderShown.OFF) {
 			this.worldBorder.draw(graphics, this.font, view, this.minecraft.level, viewer);
@@ -551,7 +555,8 @@ public final class MapScreen extends Screen {
 			this.gauge.cancel();
 		}
 		// The tooltip is for a control under the mouse, else whatever is drawn on top: a player,
-		// then a waypoint, then a mob, then the spot itself. The menu covers them while it's open.
+		// then a waypoint, then a mob, then a far train, then the spot itself. The menu covers them
+		// while it's open.
 		if (this.menu == null) {
 			if (this.draw.active() && !this.overControls(mouseX, mouseY)) {
 				// Drawing: the map's own tooltips would sit on what's being drawn.
@@ -581,6 +586,8 @@ public final class MapScreen extends Screen {
 					: withClaim(WaypointOverlay.describe(waypoint, viewer), waypoint.x, waypoint.z);
 			} else if (hovered != null) {
 				this.tooltipLines = withClaim(Radar.describe(hovered, viewer), hovered.entity().getBlockX(), hovered.entity().getBlockZ());
+			} else if (train != null) {
+				this.tooltipLines = List.of(train.getVisualOrderText());
 			} else if (this.pressButton == -1) {
 				this.tooltipLines = this.spotTooltip(mouseX, mouseY);
 			}
@@ -1760,6 +1767,7 @@ public final class MapScreen extends Screen {
 
 	@Override
 	public void removed() {
+		CreateTrains.tick(false);
 		this.viewport.close();
 		this.draw.close();
 		this.closeOtherMap();

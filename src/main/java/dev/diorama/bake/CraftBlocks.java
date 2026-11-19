@@ -1,6 +1,8 @@
 package dev.diorama.bake;
 
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
 
 /**
  * The blocks of one moving craft, copied off the client thread's world so a bake can read them
@@ -38,6 +40,21 @@ public final class CraftBlocks {
 
 	public int copycat(int index) {
 		return this.copycats.getOrDefault(index, 0);
+	}
+
+	/** Every state id in the grid, filled copycats' materials included; not air's. */
+	public IntSet ids() {
+		IntSet ids = new IntOpenHashSet();
+		int last = 0;
+		for (int id : this.states) {
+			if (id != last) {
+				ids.add(id);
+				last = id;
+			}
+		}
+		ids.addAll(this.copycats.values());
+		ids.remove(0);
+		return ids;
 	}
 
 	public int volume() {

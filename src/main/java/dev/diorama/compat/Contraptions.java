@@ -95,7 +95,10 @@ public final class Contraptions {
 			if (!entityType.isInstance(entity) || entity.isRemoved()) {
 				continue;
 			}
-			bodies.add(new Moving(entity.getUUID(), entity));
+			// A train's carriage goes by its train and its place in it, which Create tells the client
+			// for carriages out of view too (CreateTrains); anything else by its entity.
+			UUID carriage = CreateTrains.craftId(entity);
+			bodies.add(new Moving(carriage != null ? carriage : entity.getUUID(), entity));
 		}
 		return bodies;
 	}

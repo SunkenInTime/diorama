@@ -371,6 +371,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("create-buried")) {
 				CreateBuriedTest.run(context, world);
 			}
+			if (tests.contains("create-far-train")) {
+				CreateFarTrainTest.run(context, world);
+			}
 			if (tests.contains("roof-caves")) {
 				RoofCavesTest.run(context, world);
 			}
@@ -482,6 +485,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
+		}
+		if (tests.contains("aeronautics-server")) {
+			AeronauticsServerTest.run(context);
 		}
 		if (tests.contains("web-map-players")) {
 			WebMapPlayersTest.run(context);
