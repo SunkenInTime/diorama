@@ -376,13 +376,14 @@ public final class RadarCategories {
 
 	/**
 	 * Every mob the game has, a mod's included, by name: the entity types that are alive, which are
-	 * the ones with attributes. Players and armour stands are alive too, and aren't mobs.
+	 * the ones with attributes. Players and armour stands are alive too, and aren't mobs. Also what
+	 * a mod has put on the radar without being one ({@link Radar#RADAR_SHOWN}).
 	 */
 	public static List<Mob> mobs() {
 		List<Mob> mobs = new ArrayList<>();
 		for (EntityType<?> type : BuiltInRegistries.ENTITY_TYPE) {
 			String id = EntityType.getKey(type).toString();
-			if (!hasAttributes(type) || id.equals("minecraft:player") || id.equals("minecraft:armor_stand")) {
+			if (!hasAttributes(type) && !type.builtInRegistryHolder().is(Radar.RADAR_SHOWN) || id.equals("minecraft:player") || id.equals("minecraft:armor_stand")) {
 				continue;
 			}
 			mobs.add(new Mob(id, type.getDescription()));
