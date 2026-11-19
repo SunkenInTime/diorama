@@ -124,6 +124,7 @@ public final class Crafts {
 				if (read != null && (craft.blocks == null || !read.blocks().looksLike(craft.blocks.blocks(), looks)
 					|| !java.util.Arrays.equals(read.min(), craft.blocks.min()))) {
 					craft.blocks = read;
+					craft.states = CraftFile.states(read.blocks());
 					this.dirty = true;
 				}
 			}
@@ -212,6 +213,7 @@ public final class Crafts {
 			}
 			Craft craft = new Craft(s.id());
 			craft.blocks = blocks;
+			craft.states = CraftFile.states(blocks.blocks());
 			System.arraycopy(s.pose(), 0, craft.pose, 0, 12);
 			craft.posed = true;
 			craft.parked = true;
@@ -232,7 +234,7 @@ public final class Crafts {
 		List<CraftFile.Saved> keep = new ArrayList<>();
 		for (Craft craft : this.crafts.values()) {
 			if (craft.blocks != null && craft.posed && (craft.parked || tick - craft.movedAt >= PARK_AFTER)) {
-				keep.add(CraftFile.Saved.of(craft.id, craft.pose, craft.blocks));
+				keep.add(CraftFile.Saved.of(craft.id, craft.pose, craft.blocks, craft.states));
 			}
 		}
 		// On the baker thread either way, so two writes never overlap.

@@ -480,6 +480,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
 		}
+		if (tests.contains("aeronautics-server")) {
+			AeronauticsServerTest.run(context);
+		}
 		if (tests.contains("web-map-players")) {
 			WebMapPlayersTest.run(context);
 		}
