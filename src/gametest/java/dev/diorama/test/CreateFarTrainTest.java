@@ -275,6 +275,8 @@ final class CreateFarTrainTest {
 	 * drawn block for block; far away again, and after leaving and joining again, the map keeps
 	 * that picture, made of the same blocks (run it with {@code --client-mods} naming a mod with
 	 * blocks of its own to have NeoForge or Forge number blocks another way once the server is left, #420).
+	 * On Forge 1.20.1 the game takes Create as the folder of jars {@code mods/create.txt} describes
+	 * ({@code --client-mods}) and the server takes Create's release jar ({@code --server-mods}).
 	 */
 	static void server(ClientGameTestContext context) {
 		try {
