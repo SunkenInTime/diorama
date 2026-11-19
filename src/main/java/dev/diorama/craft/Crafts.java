@@ -30,8 +30,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>A craft that stops and then leaves the client's view, because the player flew off without
  * it, stays on the map where it was left, and is saved with the map so it's still there next
- * time. It's dropped once the player comes back near and it isn't there, or once Create says the
- * train it was a carriage of has gone ({@link FarTrains}).
+ * time. It's dropped once the player comes back near and it isn't there, or, for a train's
+ * carriage, once Create says it stands somewhere else ({@link FarTrains}).
  */
 public final class Crafts {
 	/** Ticks between reading a live craft's blocks again, in case they changed. */
@@ -202,39 +202,28 @@ public final class Crafts {
 	}
 
 	/**
-	 * Drops the parked carriages no train stands in any more: Create says where every train is
-	 * while the full map is open, and one that has driven off since it was parked is drawn where it
-	 * is now. Also a train taken apart, whose blocks are back in the world.
+	 * Drops the parked carriages that have left: Create says where its trains are while the full
+	 * map is open, and a carriage that has driven off since it was parked is drawn where it is now.
+	 * A carriage Create gives no place for keeps its picture, as does anything that isn't one.
 	 */
 	private void trainsLeft() {
-		List<CreateTrains.Carriage> trains = CreateTrains.carriages(this.level.dimension().identifier().toString());
-		Iterator<Craft> it = this.crafts.values().iterator();
-		while (it.hasNext()) {
-			Craft craft = it.next();
-			if (!craft.parked || craft.blocks == null || !CreateTrains.isCarriage(craft.blocks.blocks())) {
+		String here = this.level.dimension().identifier().toString();
+		for (CreateTrains.Carriage carriage : CreateTrains.carriages()) {
+			Craft craft = this.crafts.get(carriage.craft());
+			if (craft == null || !craft.parked || craft.blocks == null || carriage.dimension().equals(here) && holds(craft, carriage)) {
 				continue;
 			}
-			boolean standing = false;
-			for (CreateTrains.Carriage carriage : trains) {
-				standing |= holds(craft, carriage);
-			}
-			if (!standing) {
-				this.worldChanged.accept(craft.box(craft.pose));
-				craft.close();
-				it.remove();
-				this.dirty = true;
-			}
+			this.worldChanged.accept(craft.box(craft.pose));
+			craft.close();
+			this.crafts.remove(carriage.craft());
+			this.dirty = true;
 		}
 	}
 
-	/** Whether a parked craft is drawn where this carriage of a far train stands, so the carriage needs no marker. */
+	/** Whether this carriage of a far train is parked on the map where it stands, so it needs no marker. */
 	boolean parkedAt(CreateTrains.Carriage carriage) {
-		for (Craft craft : this.crafts.values()) {
-			if (craft.parked && craft.blocks != null && holds(craft, carriage)) {
-				return true;
-			}
-		}
-		return false;
+		Craft craft = this.crafts.get(carriage.craft());
+		return craft != null && craft.parked && craft.blocks != null && holds(craft, carriage);
 	}
 
 	/** Whether both outer wheels of a carriage are in a craft's box where it was parked. */

@@ -1,25 +1,20 @@
 package dev.diorama.compat;
 
 import dev.diorama.Diorama;
-import dev.diorama.bake.CraftBlocks;
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
-import it.unimi.dsi.fastutil.ints.IntSet;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.WeakHashMap;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
@@ -59,14 +54,12 @@ public final class CreateTrains {
 	private static Method clientConfig;
 	private static Field showOverlay;
 	private static @Nullable Method configGet;
-	private static Class<?> bogeyBlock;
 	private static @Nullable Method animationTicks;
 	private static @Nullable Method animationPartialTicks;
 
 	/** Whether this is asking Create for places now, and Create's {@link #lastPacket} when it started. */
 	private static boolean requesting;
 	private static double askedAt;
-	private static final Map<CraftBlocks, Boolean> CARRIAGES = new WeakHashMap<>();
 
 	/**
 	 * Create's train map colours, by the train's colour index: the main colour of each of the 16
@@ -83,9 +76,10 @@ public final class CreateTrains {
 	/**
 	 * One carriage of a train: the places of its two outer wheels (the front of its first bogey,
 	 * the back of its last), moving between Create's last two packets, and whether the client has
-	 * its entity, which Diorama draws block for block.
+	 * its entity, which Diorama draws block for block. {@code craft} is the id the map keeps its
+	 * blocks under ({@link #craftId}), {@code dimension} the level it's in.
 	 */
-	public record Carriage(UUID train, int index, Component name, int rgb, Vec3 first, Vec3 second, boolean loaded) {
+	public record Carriage(UUID train, int index, UUID craft, String dimension, Component name, int rgb, Vec3 first, Vec3 second, boolean loaded) {
 		/** The middle of the two bogeys. */
 		public Vec3 middle() {
 			return this.first.add(this.second).scale(0.5);
@@ -117,7 +111,6 @@ public final class CreateTrains {
 				carriageIndex = carriageEntity.getField("carriageIndex");
 				clientConfig = Class.forName("com.simibubi.create.infrastructure.config.AllConfigs").getMethod("client");
 				showOverlay = clientConfig.getReturnType().getField("showTrainMapOverlay");
-				bogeyBlock = Class.forName("com.simibubi.create.content.trains.bogey.AbstractBogeyBlock");
 				try {
 					// The clock Create times its packets by, so carriages move as on Create's own maps.
 					Class<?> ticks = Class.forName("net.createmod.catnip.animation.AnimationTickHolder");
@@ -200,10 +193,48 @@ public final class CreateTrains {
 	}
 
 	/**
-	 * The carriages Create says are in {@code dimension} (a level's id, as {@code
-	 * minecraft:overworld}) this frame. Empty unless this is asking, and until Create has answered.
+	 * The id the map keeps a carriage's blocks under: made from its train and its place in it,
+	 * which Create tells every client, so a carriage parked on the map can be matched with the
+	 * place Create gives for it while its entity isn't loaded. The entity's own id is unknown then.
 	 */
+	public static UUID craftId(UUID train, int index) {
+		return UUID.nameUUIDFromBytes(("diorama:carriage:" + train + ":" + index).getBytes(StandardCharsets.UTF_8));
+	}
+
+	/** {@link #craftId} for a carriage's entity; null for any other entity, and without Create's train map. */
+	public static @Nullable UUID craftId(Entity entity) {
+		if (!ready() || !carriageEntity.isInstance(entity)) {
+			return null;
+		}
+		try {
+			return trainId.get(entity) instanceof UUID train ? craftId(train, carriageIndex.getInt(entity)) : null;
+		} catch (ReflectiveOperationException | RuntimeException e) {
+			fail(e);
+			return null;
+		}
+	}
+
+	/** The carriages Create says are in {@code dimension} (a level's id, as {@code minecraft:overworld}) this frame. */
 	public static List<Carriage> carriages(String dimension) {
+		List<Carriage> all = carriages();
+		if (all.isEmpty()) {
+			return all;
+		}
+		List<Carriage> out = new ArrayList<>();
+		for (Carriage carriage : all) {
+			if (carriage.dimension().equals(dimension)) {
+				out.add(carriage);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The carriages Create gives a place for this frame, in every dimension. Empty unless this is
+	 * asking. A carriage Create has no single dimension for (crossing a portal, or derailed with
+	 * its chunks unloaded) isn't in the list: where it is isn't known.
+	 */
+	public static List<Carriage> carriages() {
 		if (!requesting || failed) {
 			return List.of();
 		}
@@ -217,7 +248,7 @@ public final class CreateTrains {
 				double now = ((Number) animationTicks.invoke(null)).intValue() + ((Number) animationPartialTicks.invoke(null)).doubleValue();
 				time = Math.max(0, Math.min(1, (now - lastPacket.getDouble(null)) / PACKET_TICKS));
 			}
-			Set<Key> loaded = loaded(dimension);
+			Set<Key> loaded = loaded();
 			List<Carriage> out = new ArrayList<>();
 			for (Object train : ((Map<?, ?>) trains.get(railways)).values()) {
 				UUID id = (UUID) trainField.get(train);
@@ -230,14 +261,13 @@ public final class CreateTrains {
 				Component name = (Component) trainName.get(train);
 				int rgb = COLOURS[Math.floorMod(mapColorIndex.getInt(train), COLOURS.length)];
 				for (int i = 0; i < list.size() && i < dims.size(); i++) {
-					// No dimension: crossing a portal, or derailed in two at once.
-					if (!(dims.get(i) instanceof ResourceKey<?> key) || !key.identifier().toString().equals(dimension)) {
+					if (!(dims.get(i) instanceof ResourceKey<?> key)) {
 						continue;
 					}
 					Vec3 first = (Vec3) getPosition.invoke(entry, i, true, time);
 					Vec3 second = (Vec3) getPosition.invoke(entry, i, false, time);
 					boolean here = loaded.contains(new Key(id, i));
-					out.add(new Carriage(id, i, name, rgb, first, second, here));
+					out.add(new Carriage(id, i, craftId(id, i), key.identifier().toString(), name, rgb, first, second, here));
 				}
 			}
 			return out;
@@ -250,10 +280,10 @@ public final class CreateTrains {
 	private record Key(UUID train, int index) {
 	}
 
-	/** The carriages whose entities the client has in {@code dimension}. */
-	private static Set<Key> loaded(String dimension) throws ReflectiveOperationException {
+	/** The carriages whose entities the client has. */
+	private static Set<Key> loaded() throws ReflectiveOperationException {
 		ClientLevel level = Minecraft.getInstance().level;
-		if (level == null || !level.dimension().identifier().toString().equals(dimension)) {
+		if (level == null) {
 			return Set.of();
 		}
 		Set<Key> out = new HashSet<>();
@@ -263,25 +293,5 @@ public final class CreateTrains {
 			}
 		}
 		return out;
-	}
-
-	/** Whether these blocks are a train carriage's: Create's carriages carry their bogeys as blocks. */
-	public static boolean isCarriage(CraftBlocks blocks) {
-		if (!ready()) {
-			return false;
-		}
-		return CARRIAGES.computeIfAbsent(blocks, b -> {
-			IntSet seen = new IntOpenHashSet();
-			for (int i = 0; i < b.volume(); i++) {
-				int state = b.state(i);
-				if (state != 0 && seen.add(state)) {
-					BlockState blockState = Block.BLOCK_STATE_REGISTRY.byId(state);
-					if (blockState != null && bogeyBlock.isInstance(blockState.getBlock())) {
-						return true;
-					}
-				}
-			}
-			return false;
-		});
 	}
 }

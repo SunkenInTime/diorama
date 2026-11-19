@@ -203,6 +203,7 @@ final class CreateFarTrainTest {
 			// Zoomed far out the marker keeps a few pixels, so the train still shows.
 			look(context, stopped, 0.25);
 			context.waitTicks(40);
+			check(context, () -> FarTrains.drawn().size() == 1 ? null : "Zoomed far out, the markers drawn are " + FarTrains.drawn());
 			context.takeScreenshot(PREFIX + "6-far-stopped-zoomed-out");
 			look(context, stopped, 4);
 			context.waitTicks(10);
@@ -304,7 +305,7 @@ final class CreateFarTrainTest {
 			id[0] = null;
 			for (Entity entity : net.minecraft.client.Minecraft.getInstance().level.entitiesForRendering()) {
 				if (entity.getClass().getName().equals("com.simibubi.create.content.trains.entity.CarriageContraptionEntity") && !entity.isRemoved()) {
-					id[0] = entity.getUUID();
+					id[0] = CreateTrains.craftId(entity);
 				}
 			}
 			return present ? id[0] != null && MapSession.get().crafts().has(id[0]) : id[0] == null;
