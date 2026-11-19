@@ -134,6 +134,14 @@ public final class CreateTrains {
 	private static void fail(Throwable e) {
 		if (!failed) {
 			failed = true;
+			if (requesting && stopRequesting != null) {
+				// Create goes on taking the server's answers until it's told to stop.
+				try {
+					stopRequesting.invoke(null);
+				} catch (ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+					// Nothing more to try: the server stops sending by itself a second after the last ask.
+				}
+			}
 			requesting = false;
 			Diorama.LOGGER.warn("Couldn't read where Create's trains are; far trains won't show on the map", e);
 		}
