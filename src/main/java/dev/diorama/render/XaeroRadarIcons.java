@@ -71,27 +71,13 @@ public final class XaeroRadarIcons {
 	}
 
 	/**
-	 * An item as the icon. It holds the item, and makes the stack the radar draws the first time
-	 * it's asked for: a file in a mod's own jar is read in the game's first resource load, when
-	 * 26.x can't make a stack yet (an item gets its components as a world's data loads).
+	 * An item as the icon. It holds the item, and the radar makes the stack it draws as it draws
+	 * it: a file in a mod's own jar is read in the game's first resource load, when 26.x can't make
+	 * a stack yet (an item gets its components as a world's data loads, and each world gives its own).
 	 */
-	static final class ItemIcon implements Icon {
-		private final Item item;
-		private @Nullable ItemStack stack;
-
-		ItemIcon(Item item) {
-			this.item = item;
-		}
-
-		Item item() {
-			return this.item;
-		}
-
+	record ItemIcon(Item item) implements Icon {
 		ItemStack stack() {
-			if (this.stack == null) {
-				this.stack = new ItemStack(this.item);
-			}
-			return this.stack;
+			return new ItemStack(this.item);
 		}
 	}
 
