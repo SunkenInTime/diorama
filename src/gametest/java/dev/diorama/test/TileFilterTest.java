@@ -29,25 +29,30 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
  */
 final class TileFilterTest {
 	/**
-	 * A view to check: the GUI scale and zoom, the overview level it should draw, the mip level of
-	 * that the shader should read, and the most median difference per colour channel, out of 255,
-	 * once the light veil the fog leaves over mapped ground is taken out.
+	 * A view to check: the window's size, the GUI scale and zoom, the overview level it should draw,
+	 * the mip level of that the shader should read, and the most median difference per colour
+	 * channel, out of 255, once the light veil the fog leaves over mapped ground is taken out.
 	 */
-	private record Case(String name, int guiScale, double zoom, int lod, int mip, double mostError) {
+	private record Case(String name, int width, int height, int guiScale, double zoom, int lod, int mip, double mostError) {
 	}
 
 	/**
 	 * Each limit sits about halfway between what the shader leaves and what the GPU's own filter does,
-	 * on boat.dev's software renderer: 1.0 to 1.25 against 1.4, 1.9, 2.8 and 2.1.
+	 * on boat.dev's software renderer: 1.0 to 1.25 against 1.4, 1.9, 2.8 and 2.1. The wide view's
+	 * limit wasn't measured against the GPU's filter: it sits between those of the cases shrunk less
+	 * and more than its fourfold.
 	 */
 	private static final List<Case> CASES = List.of(
 		// The tile itself, shrunk by little and by more.
-		new Case("detailed-1.6", 3, 4 / 1.6 / 3, 0, 0, 1.2),
-		new Case("detailed-2.7", 3, 4 / 2.7 / 3, 0, 0, 1.6),
-		// Shrunk eightfold, read from mip level 2.
-		new Case("detailed-mip2", 1, 0.5, 0, 2, 1.9),
+		new Case("detailed-1.6", 1600, 900, 3, 4 / 1.6 / 3, 0, 0, 1.2),
+		new Case("detailed-2.7", 1600, 900, 3, 4 / 2.7 / 3, 0, 0, 1.6),
+		// Shrunk eightfold, read from mip level 2: in a window small enough to keep its detailed tiles loaded.
+		new Case("detailed-mip2", 640, 480, 1, 0.5, 0, 2, 1.9),
+		// The same view in a big window needs more detailed tiles than stay loaded, so it draws the
+		// first overview level, shrunk fourfold and read from mip level 1.
+		new Case("wide-mip1", 1600, 900, 1, 0.5, 1, 1, 1.75),
 		// Far enough out for overviews: one level finer than the coarsest that would do, as it fits.
-		new Case("overview", 3, 0.8 / 3, 1, 0, 1.55)
+		new Case("overview", 1600, 900, 3, 0.8 / 3, 1, 0, 1.55)
 	);
 
 	private TileFilterTest() {
@@ -74,6 +79,8 @@ final class TileFilterTest {
 		// is drawn without it.
 		context.runOnClient(mc -> MapViewport.hideFogForTests(true));
 		for (Case check : CASES) {
+			context.getInput().resizeWindow(check.width, check.height);
+			context.waitTicks(5);
 			DioramaClientTest.setGuiScale(context, check.guiScale);
 			context.setScreen(MapScreen::new);
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(mc.player.getX(), Projection.v(mc.player.getY(), mc.player.getZ()), check.zoom, TileKey.SURFACE));
@@ -105,6 +112,8 @@ final class TileFilterTest {
 			Settings.get().waypointsOnMap = waypoints;
 			MapViewport.hideFogForTests(false);
 		});
+		context.getInput().resizeWindow(1600, 900);
+		context.waitTicks(5);
 		DioramaClientTest.setGuiScale(context, scale);
 	}
 

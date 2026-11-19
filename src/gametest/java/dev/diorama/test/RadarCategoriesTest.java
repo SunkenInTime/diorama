@@ -156,7 +156,7 @@ final class RadarCategoriesTest {
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
 			if (mc.gui.screen() instanceof MapScreen screen) {
-				screen.lookAt(mc.player.getX(), dev.diorama.Projection.v(mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
+				screen.lookAt(dev.diorama.Projection.u(mc.player.getX(), mc.player.getZ()), dev.diorama.Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
 			}
 		});
 		DioramaClientTest.settle(context, 40);
@@ -313,7 +313,7 @@ final class RadarCategoriesTest {
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
 			if (mc.gui.screen() instanceof MapScreen screen) {
-				screen.lookAt(mc.player.getX(), dev.diorama.Projection.v(mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
+				screen.lookAt(dev.diorama.Projection.u(mc.player.getX(), mc.player.getZ()), dev.diorama.Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
 			}
 		});
 		context.waitTicks(40);
@@ -332,7 +332,7 @@ final class RadarCategoriesTest {
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> {
 			if (mc.gui.screen() instanceof MapScreen screen) {
-				screen.lookAt(mc.player.getX(), dev.diorama.Projection.v(mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
+				screen.lookAt(dev.diorama.Projection.u(mc.player.getX(), mc.player.getZ()), dev.diorama.Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 6.0, TileKey.SURFACE);
 			}
 		});
 		context.waitTicks(40);
