@@ -453,8 +453,8 @@ final class CreateFarTrainTest {
 					int r = p >> 16 & 0xFF;
 					int g = p >> 8 & 0xFF;
 					int blue = p & 0xFF;
-					// Black wool on the map: dark and grey, where shade under trees is dark and green.
-					if (r < 60 && g < 60 && blue < 70 && Math.abs(r - g) < 12) {
+					// Black wool on the map: near black and grey. Shade under trees is green, and the train's shadow on stone is lighter.
+					if (r < 45 && g < 45 && blue < 55 && Math.abs(r - g) < 12) {
 						sumX += x;
 						sumY += y;
 						count++;
