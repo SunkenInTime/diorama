@@ -279,6 +279,8 @@ final class PortalPinsTest {
 		});
 		int x = (room[0] + room[3]) / 2;
 		int z = (room[2] + room[5]) / 2;
+		// Peaceful for the stronghold's silverfish, and back at the end: later sections summon hostile mobs.
+		String difficulty = world.getServer().computeOnServer(server -> server.getWorldData().getDifficulty().name().toLowerCase(java.util.Locale.ROOT));
 		world.getServer().runCommand("difficulty peaceful");
 		world.getServer().runCommand("gamemode spectator @a");
 		// Overhead first: the room's chunks are loaded and on the map, and the player hasn't found it.
@@ -359,6 +361,7 @@ final class PortalPinsTest {
 
 		context.runOnClient(mc -> Settings.get().portalMarkers = false);
 		world.getServer().runCommand("gamemode " + mode + " @a");
+		world.getServer().runCommand("difficulty " + difficulty);
 		// Back where the player was: the tests after this one expect the place they'd have had.
 		world.getServer().runCommand("execute in " + from + " run tp @a " + start.getX() + " " + start.getY() + " " + start.getZ());
 		context.waitFor(mc -> mc.level != null && mc.level.dimension().identifier().toString().equals(from) && mc.gui.screen() == null
