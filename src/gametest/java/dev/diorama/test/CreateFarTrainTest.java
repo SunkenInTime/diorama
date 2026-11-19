@@ -12,13 +12,18 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
+import java.io.IOException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
+import net.fabricmc.fabric.api.client.gametest.v1.world.TestWorldSave;
+import net.minecraft.client.gui.screens.worldselection.WorldCreationUiState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -57,70 +62,16 @@ final class CreateFarTrainTest {
 		} catch (ClassNotFoundException e) {
 			throw new AssertionError("DIORAMA_TESTS=create-far-train needs Create 6 installed");
 		}
-		world.getServer().runCommand("time set noon");
-		context.waitFor(mc -> mc.player.onGround(), 600);
-		FacingTest.turnTo(context, Facing.NORTH);
-		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition()).offset(0, 0, 30);
-		int ground = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, at.getX(), at.getZ()));
-		int ox = at.getX();
-		int oz = at.getZ();
-		int bed = ground + 2;
-		// A raised stone bed under a straight east-west track, clear air above it.
-		clear(world, ox - HALF - 4, bed, oz - 8, ox + HALF + 4, bed + 14, oz + 10);
-		world.getServer().runCommand("fill " + (ox - HALF - 4) + " " + bed + " " + (oz - 8) + " " + (ox + HALF + 4) + " " + bed + " " + (oz + 10) + " smooth_stone");
-		world.getServer().runCommand("fill " + (ox - HALF - 4) + " " + (bed + 1) + " " + (oz - 1) + " " + (ox + HALF + 4) + " " + (bed + 1) + " " + (oz + 1) + " gravel");
-		int ty = bed + 2;
-		for (int x = ox - HALF; x <= ox + HALF; x++) {
-			world.getServer().runCommand("setblock " + x + " " + ty + " " + oz + " create:track[shape=xo]");
-		}
-		context.waitTicks(40);
-		// The station the train is put together at, in the middle, and near the east end one facing
-		// each way: the train drives to whichever it can stop at.
-		BlockPos home = new BlockPos(ox, ty, oz + 2);
-		station(world, home, Direction.AxisDirection.POSITIVE);
-		List<BlockPos> east = List.of(new BlockPos(ox + HALF - 10, ty, oz + 2), new BlockPos(ox + HALF - 20, ty, oz + 2));
-		station(world, east.get(0), Direction.AxisDirection.POSITIVE);
-		station(world, east.get(1), Direction.AxisDirection.NEGATIVE);
-		context.waitTicks(40);
-		// The carriage: a small bogey just east of the station, a wool body glued on top, controls facing east.
-		int bogeyX = ox + 1;
-		world.getServer().runCommand("setblock " + bogeyX + " " + (ty + 1) + " " + oz + " create:small_bogey[axis=x]");
-		int body = ty + 2;
-		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + body + " " + (oz - 1) + " " + (bogeyX + 3) + " " + body + " " + (oz + 1) + " white_wool");
-		world.getServer().runCommand("fill " + (bogeyX + 3) + " " + body + " " + (oz - 1) + " " + (bogeyX + 3) + " " + body + " " + (oz + 1) + " red_wool");
-		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + body + " " + (oz - 1) + " " + (bogeyX - 2) + " " + body + " " + (oz + 1) + " blue_wool");
-		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 1) + " " + (oz - 1) + " " + (bogeyX + 1) + " " + (body + 2) + " " + (oz - 1) + " orange_wool");
-		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 1) + " " + (oz + 1) + " " + (bogeyX + 1) + " " + (body + 2) + " " + (oz + 1) + " orange_wool");
-		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 3) + " " + (oz - 1) + " " + (bogeyX + 1) + " " + (body + 3) + " " + (oz + 1) + " black_wool");
-		world.getServer().runCommand("setblock " + (bogeyX + 2) + " " + (body + 1) + " " + oz + " create:controls[facing=east]");
-		world.getServer().runOnServer(server -> glue(server.overworld(), new AABB(bogeyX - 2, ty + 1, oz - 1, bogeyX + 4, body + 4, oz + 2)));
-		context.waitTicks(20);
-		UUID owner = context.computeOnClient(mc -> mc.player.getUUID());
-		world.getServer().runOnServer(server -> handle(server.overworld().getBlockEntity(home), "enterAssemblyMode",
-			MethodType.methodType(boolean.class, net.minecraft.server.level.ServerPlayer.class), (Object) null));
-		context.waitTicks(40);
-		String failed = world.getServer().computeOnServer(server -> {
-			Object be = server.overworld().getBlockEntity(home);
-			handle(be, "assemble", MethodType.methodType(void.class, UUID.class), owner);
-			Object exception = field(be, "lastException");
-			return exception == null ? null : String.valueOf(((Throwable) exception).getMessage());
-		});
-		if (failed != null) {
-			throw new AssertionError("Create's station didn't assemble the train: " + failed);
-		}
-		Object train = world.getServer().computeOnServer(server -> {
-			Map<?, ?> trains = (Map<?, ?>) field(field(null, type("com.simibubi.create.Create"), "RAILWAYS"), "trains");
-			return trains.isEmpty() ? null : trains.values().iterator().next();
-		});
-		if (train == null) {
-			throw new AssertionError("No train after assembly");
-		}
-		// Out of assembly mode, as the station's screen does once a train is built: a station still assembling blocks the way.
-		world.getServer().runOnServer(server -> handle(server.overworld().getBlockEntity(home), "exitAssemblyMode", MethodType.methodType(boolean.class)));
-		world.getServer().runCommand("kill @e[type=item]");
-		UUID trainId = world.getServer().computeOnServer(server -> (UUID) field(train, "id"));
-		String name = world.getServer().computeOnServer(server -> ((net.minecraft.network.chat.Component) field(train, "name")).getString());
-		Diorama.LOGGER.info("Create far train test: train {} \"{}\" assembled at {}", trainId, name, home);
+		Scene scene = build(context, world);
+		int ox = scene.ox();
+		int oz = scene.oz();
+		int ground = scene.ground();
+		int bed = scene.bed();
+		int body = scene.body();
+		List<BlockPos> east = scene.east();
+		Object train = scene.train();
+		UUID trainId = scene.trainId();
+		String name = scene.name();
 
 		// Beside the standing train, until the map has it block for block and it has stood long enough to stay.
 		int floor = bed + 1;
@@ -238,6 +189,268 @@ final class CreateFarTrainTest {
 			overlay(true);
 			context.setScreen(() -> null);
 			FacingTest.turnTo(context, Facing.NORTH);
+		}
+	}
+
+	/** The track, its stations and the train, as the checks find them. */
+	private record Scene(int ox, int oz, int ground, int bed, int body, List<BlockPos> east, Object train, UUID trainId, String name) {
+	}
+
+	/** Lays the track and its stations and puts the train together at the middle one, beside the player. */
+	private static Scene build(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("time set noon");
+		context.waitFor(mc -> mc.player.onGround(), 600);
+		FacingTest.turnTo(context, Facing.NORTH);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition()).offset(0, 0, 30);
+		int ground = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.MOTION_BLOCKING, at.getX(), at.getZ()));
+		int ox = at.getX();
+		int oz = at.getZ();
+		int bed = ground + 2;
+		// A raised stone bed under a straight east-west track, clear air above it.
+		clear(world, ox - HALF - 4, bed, oz - 8, ox + HALF + 4, bed + 14, oz + 10);
+		world.getServer().runCommand("fill " + (ox - HALF - 4) + " " + bed + " " + (oz - 8) + " " + (ox + HALF + 4) + " " + bed + " " + (oz + 10) + " smooth_stone");
+		world.getServer().runCommand("fill " + (ox - HALF - 4) + " " + (bed + 1) + " " + (oz - 1) + " " + (ox + HALF + 4) + " " + (bed + 1) + " " + (oz + 1) + " gravel");
+		int ty = bed + 2;
+		for (int x = ox - HALF; x <= ox + HALF; x++) {
+			world.getServer().runCommand("setblock " + x + " " + ty + " " + oz + " create:track[shape=xo]");
+		}
+		context.waitTicks(40);
+		// The station the train is put together at, in the middle, and near the east end one facing
+		// each way: the train drives to whichever it can stop at.
+		BlockPos home = new BlockPos(ox, ty, oz + 2);
+		station(world, home, Direction.AxisDirection.POSITIVE);
+		List<BlockPos> east = List.of(new BlockPos(ox + HALF - 10, ty, oz + 2), new BlockPos(ox + HALF - 20, ty, oz + 2));
+		station(world, east.get(0), Direction.AxisDirection.POSITIVE);
+		station(world, east.get(1), Direction.AxisDirection.NEGATIVE);
+		context.waitTicks(40);
+		// The carriage: a small bogey just east of the station, a wool body glued on top, controls facing east.
+		int bogeyX = ox + 1;
+		world.getServer().runCommand("setblock " + bogeyX + " " + (ty + 1) + " " + oz + " create:small_bogey[axis=x]");
+		int body = ty + 2;
+		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + body + " " + (oz - 1) + " " + (bogeyX + 3) + " " + body + " " + (oz + 1) + " white_wool");
+		world.getServer().runCommand("fill " + (bogeyX + 3) + " " + body + " " + (oz - 1) + " " + (bogeyX + 3) + " " + body + " " + (oz + 1) + " red_wool");
+		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + body + " " + (oz - 1) + " " + (bogeyX - 2) + " " + body + " " + (oz + 1) + " blue_wool");
+		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 1) + " " + (oz - 1) + " " + (bogeyX + 1) + " " + (body + 2) + " " + (oz - 1) + " orange_wool");
+		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 1) + " " + (oz + 1) + " " + (bogeyX + 1) + " " + (body + 2) + " " + (oz + 1) + " orange_wool");
+		world.getServer().runCommand("fill " + (bogeyX - 2) + " " + (body + 3) + " " + (oz - 1) + " " + (bogeyX + 1) + " " + (body + 3) + " " + (oz + 1) + " black_wool");
+		world.getServer().runCommand("setblock " + (bogeyX + 2) + " " + (body + 1) + " " + oz + " create:controls[facing=east]");
+		world.getServer().runOnServer(server -> glue(server.overworld(), new AABB(bogeyX - 2, ty + 1, oz - 1, bogeyX + 4, body + 4, oz + 2)));
+		context.waitTicks(20);
+		UUID owner = context.computeOnClient(mc -> mc.player.getUUID());
+		world.getServer().runOnServer(server -> handle(server.overworld().getBlockEntity(home), "enterAssemblyMode",
+			MethodType.methodType(boolean.class, net.minecraft.server.level.ServerPlayer.class), (Object) null));
+		context.waitTicks(40);
+		String failed = world.getServer().computeOnServer(server -> {
+			Object be = server.overworld().getBlockEntity(home);
+			handle(be, "assemble", MethodType.methodType(void.class, UUID.class), owner);
+			Object exception = field(be, "lastException");
+			return exception == null ? null : String.valueOf(((Throwable) exception).getMessage());
+		});
+		if (failed != null) {
+			throw new AssertionError("Create's station didn't assemble the train: " + failed);
+		}
+		Object train = world.getServer().computeOnServer(server -> {
+			Map<?, ?> trains = (Map<?, ?>) field(field(null, type("com.simibubi.create.Create"), "RAILWAYS"), "trains");
+			return trains.isEmpty() ? null : trains.values().iterator().next();
+		});
+		if (train == null) {
+			throw new AssertionError("No train after assembly");
+		}
+		// Out of assembly mode, as the station's screen does once a train is built: a station still assembling blocks the way.
+		world.getServer().runOnServer(server -> handle(server.overworld().getBlockEntity(home), "exitAssemblyMode", MethodType.methodType(boolean.class)));
+		world.getServer().runCommand("kill @e[type=item]");
+		UUID trainId = world.getServer().computeOnServer(server -> (UUID) field(train, "id"));
+		String name = world.getServer().computeOnServer(server -> ((net.minecraft.network.chat.Component) field(train, "name")).getString());
+		Diorama.LOGGER.info("Create far train test: train {} \"{}\" assembled at {}", trainId, name, home);
+		return new Scene(ox, oz, ground, bed, body, east, train, trainId, name);
+	}
+
+	/**
+	 * The same train on a real dedicated server (opt-in: {@code create-far-train-server}, with
+	 * Create on both sides: {@code --mods create --env DIORAMA_REAL_SERVER=1}). Nothing but a player
+	 * at a station's screen can put a train together there, so the train is built in a singleplayer
+	 * world as above and the server is started on a copy of that world, whose spawn is set far from
+	 * the train. The player joins where the server never sends them the train: the marker has to
+	 * stand where the train was left, from what Create's server sends alone. Beside the train it is
+	 * drawn block for block; far away again, and after leaving and joining again, the map keeps
+	 * that picture, made of the same blocks (run it with {@code --client-mods} naming a mod with
+	 * blocks of its own to have NeoForge or Forge number blocks another way once the server is left, #420).
+	 */
+	static void server(ClientGameTestContext context) {
+		try {
+			Class.forName("com.simibubi.create.compat.trainmap.TrainMapSyncClient");
+		} catch (ClassNotFoundException e) {
+			throw new AssertionError("DIORAMA_TESTS=create-far-train-server needs Create 6 installed");
+		}
+		String node = System.getenv("DIORAMA_NODE");
+		if (System.getenv("DIORAMA_REAL_SERVER") == null || node == null) {
+			throw new AssertionError("create-far-train-server needs a real server: run it with --mods create --env DIORAMA_REAL_SERVER=1");
+		}
+		int[] place = new int[5];
+		UUID[] trainId = {null};
+		String[] name = {null};
+		Vec3[] standing = {null};
+		TestWorldSave save;
+		try (TestSingleplayerContext world = context.worldBuilder()
+			.setUseConsistentSettings(false)
+			.adjustSettings(s -> {
+				s.setName("Diorama Far Train");
+				s.setSeed("diorama");
+				s.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE);
+			})
+			.create()) {
+			context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 100, 2400);
+			Scene scene = build(context, world);
+			standing[0] = serverMiddle(world, scene.train());
+			trainId[0] = scene.trainId();
+			name[0] = scene.name();
+			place[0] = scene.ox();
+			place[1] = scene.oz();
+			place[2] = scene.ground();
+			place[3] = scene.bed();
+			place[4] = scene.body();
+			// Where a player new to the server lands: far from the train.
+			world.getServer().runCommand("setworldspawn " + (scene.ox() + AWAY) + " " + (scene.ground() + 40) + " " + scene.oz());
+			world.getServer().runCommand("save-all flush");
+			context.waitTicks(40);
+			save = world.getWorldSave();
+		}
+		int ox = place[0];
+		int oz = place[1];
+		int ground = place[2];
+		int floor = place[3] + 1;
+		int body = place[4];
+		Path serverWorld = Path.of(System.getProperty("user.home"), "real-servers", node, "world");
+		copyWorld(save.getSaveDirectory(), serverWorld);
+		Facing savedFacing = context.computeOnClient(mc -> Projection.facing());
+		try (RealServer server = RealServer.start(false)) {
+			server.command("time set noon");
+			server.join(context);
+			String me = context.computeOnClient(mc -> mc.player.getScoreboardName());
+			context.waitFor(mc -> MapSession.get() != null, 2400);
+			int joinedAt = context.computeOnClient(mc -> mc.player.blockPosition().getX());
+			if (Math.abs(joinedAt - ox) < AWAY / 2) {
+				throw new AssertionError("The player joined at x " + joinedAt + ", only " + Math.abs(joinedAt - ox) + " blocks from the train at x " + ox);
+			}
+			FacingTest.turnTo(context, Facing.NORTH);
+
+			// Never near it on this server: the marker stands where the train was left.
+			openAt(context, standing[0], 4);
+			waitFor(context, "Create's server to say where the train is", () -> CreateTrains.known() && CreateTrains.carriages(overworld()).size() == 1 && FarTrains.drawn().size() == 1);
+			context.waitTicks(20);
+			check(context, () -> {
+				CreateTrains.Carriage carriage = CreateTrains.carriages(overworld()).get(0);
+				if (carriage.loaded() || !carriage.train().equals(trainId[0])) {
+					return "Far from the train, Create's carriage is " + carriage + ", not a far carriage of " + trainId[0];
+				}
+				Vec3 marker = FarTrains.drawn().get(0).carriage().middle();
+				return marker.distanceTo(standing[0]) <= 1 ? null : "The marker is at " + marker + ", the train was left at " + standing[0];
+			});
+			context.takeScreenshot(PREFIX + "server-1-far-never-seen");
+			hover(context, name[0], Facing.NORTH);
+			context.takeScreenshot(PREFIX + "server-2-far-hover");
+			context.getInput().setCursorPos(800, 895);
+			context.setScreen(() -> null);
+
+			// Beside it: block for block, no marker.
+			server.commandAndWait("tp " + me + " " + ox + " " + floor + " " + (oz + 8), "Teleported " + me, 120);
+			UUID craft = waitForCarriage(context, true);
+			context.waitTicks(160);
+			openAt(context, standing[0], 3);
+			waitForTile(context, standing[0]);
+			waitFor(context, "Create to see the loaded carriage", () -> CreateTrains.carriages(overworld()).size() == 1 && CreateTrains.carriages(overworld()).get(0).loaded());
+			context.waitTicks(20);
+			check(context, () -> FarTrains.drawn().isEmpty() ? null : "A marker is drawn on the train the map draws block for block: " + FarTrains.drawn());
+			context.takeScreenshot(PREFIX + "server-3-near");
+			String whole = AeronauticsServerTest.made(context, craft, PREFIX + "server-3-near");
+			if (whole == null) {
+				throw new AssertionError("Beside the train, the map draws no blocks for it");
+			}
+			// One of Create's own blocks in it, and its number while this server is joined.
+			net.minecraft.world.level.block.state.BlockState part = context.computeOnClient(mc -> {
+				dev.diorama.bake.CraftBlocks blocks = MapSession.get().crafts().shown(craft).blocks();
+				for (int cell = 0; cell < blocks.volume(); cell++) {
+					net.minecraft.world.level.block.state.BlockState state = net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.byId(blocks.state(cell));
+					if (blocks.state(cell) != 0 && net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("create")) {
+						return state;
+					}
+				}
+				throw new AssertionError("The map's train has none of Create's blocks: " + whole);
+			});
+			int joined = context.computeOnClient(mc -> net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.getId(part));
+			context.setScreen(() -> null);
+
+			// Far again: the picture stays where the train stands, and no marker goes on it.
+			server.commandAndWait("tp " + me + " " + (ox + AWAY) + " " + (ground + 40) + " " + oz, "Teleported " + me, 120);
+			waitForCarriage(context, false);
+			List<String> wrong = new ArrayList<>();
+			parked(context, craft, whole, standing[0], "server-4-far-parked", "far from the train again", wrong);
+
+			RealServer.leave(context);
+			int left = context.computeOnClient(mc -> net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.getId(part));
+			Diorama.LOGGER.info("Create far train test: a Create block's number was {} on the server and is {} after leaving{}", joined, left,
+				joined == left ? " (the same: this run doesn't test #420's renumbering)" : "");
+			server.join(context);
+			context.waitFor(mc -> MapSession.get() != null, 2400);
+			context.waitTicks(200);
+			parked(context, craft, whole, standing[0], "server-5-rejoined-far", "after joining again far from the train", wrong);
+			RealServer.leave(context);
+			if (!wrong.isEmpty()) {
+				throw new AssertionError("The train on a dedicated server is wrong:\n" + String.join("\n", wrong));
+			}
+		} finally {
+			context.setScreen(() -> null);
+			FacingTest.turnTo(context, savedFacing);
+			// The next real-server test makes its own world.
+			deleteTree(serverWorld);
+		}
+	}
+
+	/** Far from a train the map has a picture of: the picture is there, made of {@code whole}, with no marker on it. */
+	private static void parked(ClientGameTestContext context, UUID craft, String whole, Vec3 standing, String shot, String when, List<String> wrong) {
+		openAt(context, standing, 3);
+		waitForTile(context, standing);
+		waitFor(context, "Create's places for the far train", () -> CreateTrains.known() && !CreateTrains.carriages(overworld()).isEmpty());
+		context.waitTicks(40);
+		context.takeScreenshot(PREFIX + shot);
+		String now = AeronauticsServerTest.made(context, craft, PREFIX + shot);
+		if (!whole.equals(now)) {
+			wrong.add(when + " the map draws the train from " + now + "; beside it, it was " + whole);
+		}
+		List<FarTrains.Drawn> markers = context.computeOnClient(mc -> FarTrains.drawn());
+		if (!markers.isEmpty()) {
+			wrong.add(when + " a marker is drawn on the parked train: " + markers);
+		}
+		context.setScreen(() -> null);
+	}
+
+	private static void copyWorld(Path from, Path to) {
+		deleteTree(to);
+		try (java.util.stream.Stream<Path> files = Files.walk(from)) {
+			for (Path file : files.toList()) {
+				Path copy = to.resolve(from.relativize(file).toString());
+				if (Files.isDirectory(file)) {
+					Files.createDirectories(copy);
+				// Not the player's own file: the server would put them back beside the train.
+				} else if (!file.getFileName().toString().equals("session.lock") && !from.relativize(file).toString().startsWith("playerdata")) {
+					Files.copy(file, copy);
+				}
+			}
+		} catch (IOException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	private static void deleteTree(Path folder) {
+		if (!Files.exists(folder)) {
+			return;
+		}
+		try (java.util.stream.Stream<Path> files = Files.walk(folder)) {
+			for (Path file : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+				Files.delete(file);
+			}
+		} catch (IOException e) {
+			throw new AssertionError(e);
 		}
 	}
 
