@@ -396,11 +396,15 @@ final class CreateFarTrainTest {
 			context.waitFor(mc -> MapSession.get() != null, 2400);
 			context.waitTicks(200);
 			Path after = parked(context, craft, whole, standing[0], "server-5-rejoined-far", "after joining again far from the train", wrong);
-			// The picture read back from the file stands where the one kept in memory stood: the same
-			// view of the same place, with no mobs or players near enough to be on it.
-			double changed = changedAroundMiddle(before, after);
-			if (changed > 0.02) {
-				wrong.add("after joining again the map around the parked train differs from before leaving in " + Math.round(changed * 100) + "% of its pixels");
+			// The picture read back from the file stands where the one kept in memory stood: the
+			// train's black roof is in the same place in the same view. (The whole picture can't be
+			// compared: the train read back has no shadow on the ground until it's seen again.)
+			double[] roofBefore = roof(before);
+			double[] roofAfter = roof(after);
+			if (roofBefore == null || roofAfter == null) {
+				wrong.add("the parked train's black roof isn't in the middle of the map " + (roofBefore == null ? "before leaving" : "after joining again"));
+			} else if (Math.hypot(roofBefore[0] - roofAfter[0], roofBefore[1] - roofAfter[1]) > 2) {
+				wrong.add("after joining again the parked train's roof is at " + java.util.Arrays.toString(roofAfter) + " on the screen; before leaving it was at " + java.util.Arrays.toString(roofBefore));
 			}
 			RealServer.leave(context);
 			if (!wrong.isEmpty()) {
@@ -433,22 +437,31 @@ final class CreateFarTrainTest {
 		return picture;
 	}
 
-	/** The share of pixels that differ between two screenshots in the 240 by 160 pixels around their middle, where the map was centred on the train. */
-	private static double changedAroundMiddle(Path first, Path second) {
+	/**
+	 * The middle of the train's black wool roof in a screenshot centred on the train, in pixels, from
+	 * the near-black pixels in the 240 by 160 around the middle; null with too few to be the roof.
+	 */
+	private static double[] roof(Path screenshot) {
 		try {
-			java.awt.image.BufferedImage a = javax.imageio.ImageIO.read(first.toFile());
-			java.awt.image.BufferedImage b = javax.imageio.ImageIO.read(second.toFile());
-			int changed = 0;
-			for (int y = a.getHeight() / 2 - 80; y < a.getHeight() / 2 + 80; y++) {
-				for (int x = a.getWidth() / 2 - 120; x < a.getWidth() / 2 + 120; x++) {
-					int p = a.getRGB(x, y);
-					int q = b.getRGB(x, y);
-					if (Math.abs((p >> 16 & 0xFF) - (q >> 16 & 0xFF)) + Math.abs((p >> 8 & 0xFF) - (q >> 8 & 0xFF)) + Math.abs((p & 0xFF) - (q & 0xFF)) > 24) {
-						changed++;
+			java.awt.image.BufferedImage image = javax.imageio.ImageIO.read(screenshot.toFile());
+			double sumX = 0;
+			double sumY = 0;
+			int count = 0;
+			for (int y = image.getHeight() / 2 - 80; y < image.getHeight() / 2 + 80; y++) {
+				for (int x = image.getWidth() / 2 - 120; x < image.getWidth() / 2 + 120; x++) {
+					int p = image.getRGB(x, y);
+					int r = p >> 16 & 0xFF;
+					int g = p >> 8 & 0xFF;
+					int blue = p & 0xFF;
+					// Black wool on the map: dark and grey, where shade under trees is dark and green.
+					if (r < 60 && g < 60 && blue < 70 && Math.abs(r - g) < 12) {
+						sumX += x;
+						sumY += y;
+						count++;
 					}
 				}
 			}
-			return changed / (240.0 * 160.0);
+			return count < 200 ? null : new double[] {sumX / count, sumY / count};
 		} catch (IOException e) {
 			throw new AssertionError(e);
 		}
