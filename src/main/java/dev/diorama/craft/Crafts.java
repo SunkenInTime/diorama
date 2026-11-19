@@ -2,6 +2,7 @@ package dev.diorama.craft;
 
 import dev.diorama.Diorama;
 import dev.diorama.bake.BlockLooks;
+import dev.diorama.compat.CreateTrains;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
 import java.nio.file.Path;
@@ -29,7 +30,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>A craft that stops and then leaves the client's view, because the player flew off without
  * it, stays on the map where it was left, and is saved with the map so it's still there next
- * time. It's dropped once the player comes back near and it isn't there.
+ * time. It's dropped once the player comes back near and it isn't there, or once Create says the
+ * train it was a carriage of has gone ({@link FarTrains}).
  */
 public final class Crafts {
 	/** Ticks between reading a live craft's blocks again, in case they changed. */
@@ -45,6 +47,10 @@ public final class Crafts {
 	/** Ticks the player has to be near a parked craft that doesn't show up before it's dropped. */
 	private static final int GONE_AFTER = 100;
 	private static final int SAVE_EVERY = 1200;
+	/** Ticks between looking whether parked carriages still stand where Create says its trains are: as often as it says. */
+	private static final int TRAINS_EVERY = 5;
+	/** Blocks a train's wheel may be outside a parked craft's box and still be taken for standing in it. */
+	private static final int WHEEL_SLACK = 1;
 
 	/** Where crafts come from: a mod that moves built structures around the world. */
 	public interface Source {
@@ -186,10 +192,61 @@ public final class Crafts {
 				}
 			}
 		}
+		if (tick % TRAINS_EVERY == 0 && CreateTrains.known()) {
+			this.trainsLeft();
+		}
 		if (this.dirty && tick - this.savedAt >= SAVE_EVERY) {
 			this.savedAt = tick;
 			this.save(tick, false);
 		}
+	}
+
+	/**
+	 * Drops the parked carriages no train stands in any more: Create says where every train is
+	 * while the full map is open, and one that has driven off since it was parked is drawn where it
+	 * is now. Also a train taken apart, whose blocks are back in the world.
+	 */
+	private void trainsLeft() {
+		List<CreateTrains.Carriage> trains = CreateTrains.carriages(this.level.dimension().identifier().toString());
+		Iterator<Craft> it = this.crafts.values().iterator();
+		while (it.hasNext()) {
+			Craft craft = it.next();
+			if (!craft.parked || craft.blocks == null || !CreateTrains.isCarriage(craft.blocks.blocks())) {
+				continue;
+			}
+			boolean standing = false;
+			for (CreateTrains.Carriage carriage : trains) {
+				standing |= holds(craft, carriage);
+			}
+			if (!standing) {
+				this.worldChanged.accept(craft.box(craft.pose));
+				craft.close();
+				it.remove();
+				this.dirty = true;
+			}
+		}
+	}
+
+	/** Whether a parked craft is drawn where this carriage of a far train stands, so the carriage needs no marker. */
+	boolean parkedAt(CreateTrains.Carriage carriage) {
+		for (Craft craft : this.crafts.values()) {
+			if (craft.parked && craft.blocks != null && holds(craft, carriage)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether both outer wheels of a carriage are in a craft's box where it was parked. */
+	private static boolean holds(Craft craft, CreateTrains.Carriage carriage) {
+		int[] box = craft.box(craft.pose);
+		return within(box, carriage.first()) && within(box, carriage.second());
+	}
+
+	private static boolean within(int[] box, net.minecraft.world.phys.Vec3 at) {
+		return at.x >= box[0] - WHEEL_SLACK && at.x <= box[3] + 1 + WHEEL_SLACK
+			&& at.y >= box[1] - WHEEL_SLACK && at.y <= box[4] + 1 + WHEEL_SLACK
+			&& at.z >= box[2] - WHEEL_SLACK && at.z <= box[5] + 1 + WHEEL_SLACK;
 	}
 
 	private static double distance(double[] pose, double[] anchor) {
