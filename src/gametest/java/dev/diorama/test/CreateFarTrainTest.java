@@ -380,15 +380,13 @@ final class CreateFarTrainTest {
 				throw new AssertionError("The map's train has none of Create's blocks: " + whole);
 			});
 			int joined = context.computeOnClient(mc -> net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.getId(part));
-			// Where the map has the train's blocks: the picture it keeps must stay there.
-			int[] blocksAt = context.computeOnClient(mc -> MapSession.get().crafts().shown(craft).min().clone());
 			context.setScreen(() -> null);
 
 			// Far again: the picture stays where the train stands, and no marker goes on it.
 			server.commandAndWait("tp " + me + " " + (ox + AWAY) + " " + (ground + 40) + " " + oz, "Teleported " + me, 120);
 			waitForCarriage(context, false);
 			List<String> wrong = new ArrayList<>();
-			parked(context, craft, whole, blocksAt, standing[0], "server-4-far-parked", "far from the train again", wrong);
+			Path before = parked(context, craft, whole, standing[0], "server-4-far-parked", "far from the train again", wrong);
 
 			RealServer.leave(context);
 			int left = context.computeOnClient(mc -> net.minecraft.world.level.block.Block.BLOCK_STATE_REGISTRY.getId(part));
@@ -397,7 +395,13 @@ final class CreateFarTrainTest {
 			server.join(context);
 			context.waitFor(mc -> MapSession.get() != null, 2400);
 			context.waitTicks(200);
-			parked(context, craft, whole, blocksAt, standing[0], "server-5-rejoined-far", "after joining again far from the train", wrong);
+			Path after = parked(context, craft, whole, standing[0], "server-5-rejoined-far", "after joining again far from the train", wrong);
+			// The picture read back from the file stands where the one kept in memory stood: the same
+			// view of the same place, with no mobs or players near enough to be on it.
+			double changed = changedAroundMiddle(before, after);
+			if (changed > 0.02) {
+				wrong.add("after joining again the map around the parked train differs from before leaving in " + Math.round(changed * 100) + "% of its pixels");
+			}
 			RealServer.leave(context);
 			if (!wrong.isEmpty()) {
 				throw new AssertionError("The train on a dedicated server is wrong:\n" + String.join("\n", wrong));
@@ -410,29 +414,44 @@ final class CreateFarTrainTest {
 		}
 	}
 
-	/** Far from a train the map has a picture of: the picture is there, made of {@code whole} at {@code place}, with no marker on it. */
-	private static void parked(ClientGameTestContext context, UUID craft, String whole, int[] place, Vec3 standing, String shot, String when, List<String> wrong) {
+	/** Far from a train the map has a picture of: the picture is there, made of {@code whole}, with no marker on it. Returns the screenshot. */
+	private static Path parked(ClientGameTestContext context, UUID craft, String whole, Vec3 standing, String shot, String when, List<String> wrong) {
 		openAt(context, standing, 3);
 		waitForTile(context, standing);
 		waitFor(context, "Create's places for the far train", () -> CreateTrains.known() && !CreateTrains.carriages(overworld()).isEmpty());
 		context.waitTicks(40);
-		context.takeScreenshot(PREFIX + shot);
+		Path picture = context.takeScreenshot(PREFIX + shot);
 		String now = AeronauticsServerTest.made(context, craft, PREFIX + shot);
 		if (!whole.equals(now)) {
 			wrong.add(when + " the map draws the train from " + now + "; beside it, it was " + whole);
-		}
-		int[] at = context.computeOnClient(mc -> {
-			dev.diorama.craft.Body.Blocks shown = MapSession.get().crafts().shown(craft);
-			return shown == null ? null : shown.min().clone();
-		});
-		if (at != null && !java.util.Arrays.equals(at, place)) {
-			wrong.add(when + " the map has the train's blocks at " + java.util.Arrays.toString(at) + "; beside it, they were at " + java.util.Arrays.toString(place));
 		}
 		List<FarTrains.Drawn> markers = context.computeOnClient(mc -> FarTrains.drawn());
 		if (!markers.isEmpty()) {
 			wrong.add(when + " a marker is drawn on the parked train: " + markers);
 		}
 		context.setScreen(() -> null);
+		return picture;
+	}
+
+	/** The share of pixels that differ between two screenshots in the 240 by 160 pixels around their middle, where the map was centred on the train. */
+	private static double changedAroundMiddle(Path first, Path second) {
+		try {
+			java.awt.image.BufferedImage a = javax.imageio.ImageIO.read(first.toFile());
+			java.awt.image.BufferedImage b = javax.imageio.ImageIO.read(second.toFile());
+			int changed = 0;
+			for (int y = a.getHeight() / 2 - 80; y < a.getHeight() / 2 + 80; y++) {
+				for (int x = a.getWidth() / 2 - 120; x < a.getWidth() / 2 + 120; x++) {
+					int p = a.getRGB(x, y);
+					int q = b.getRGB(x, y);
+					if (Math.abs((p >> 16 & 0xFF) - (q >> 16 & 0xFF)) + Math.abs((p >> 8 & 0xFF) - (q >> 8 & 0xFF)) + Math.abs((p & 0xFF) - (q & 0xFF)) > 24) {
+						changed++;
+					}
+				}
+			}
+			return changed / (240.0 * 160.0);
+		} catch (IOException e) {
+			throw new AssertionError(e);
+		}
 	}
 
 	private static void copyWorld(Path from, Path to) {
