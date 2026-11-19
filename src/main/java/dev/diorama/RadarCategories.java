@@ -383,7 +383,8 @@ public final class RadarCategories {
 		List<Mob> mobs = new ArrayList<>();
 		for (EntityType<?> type : BuiltInRegistries.ENTITY_TYPE) {
 			String id = EntityType.getKey(type).toString();
-			if (!hasAttributes(type) && !type.builtInRegistryHolder().is(Radar.RADAR_SHOWN) || id.equals("minecraft:player") || id.equals("minecraft:armor_stand")) {
+			boolean mob = hasAttributes(type) && !id.equals("minecraft:player") && !id.equals("minecraft:armor_stand");
+			if (!mob && !type.builtInRegistryHolder().is(Radar.RADAR_SHOWN)) {
 				continue;
 			}
 			mobs.add(new Mob(id, type.getDescription()));
