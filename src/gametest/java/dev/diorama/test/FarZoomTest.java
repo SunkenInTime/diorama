@@ -274,7 +274,10 @@ final class FarZoomTest {
 			}
 			try (java.util.stream.Stream<Path> files = Files.list(dir)) {
 				for (Path file : files.toList()) {
-					bytes += Files.size(file);
+					// The map is open and still writing: a tile's .tmp file is renamed away as it's finished.
+					if (!file.getFileName().toString().endsWith(".tmp")) {
+						bytes += Files.size(file);
+					}
 				}
 			} catch (IOException e) {
 				throw new AssertionError(e);
