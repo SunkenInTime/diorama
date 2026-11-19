@@ -151,7 +151,7 @@ final class AeronauticsServerTest {
 	}
 
 	/** The blocks the map's picture of the ship is made from, by name with how many, or null with no ship on the map. */
-	private static String made(ClientGameTestContext context, UUID id, String stage) {
+	static String made(ClientGameTestContext context, UUID id, String stage) {
 		String[] made = {null};
 		for (int i = 0; i < 20 && made[0] == null; i++) {
 			made[0] = context.computeOnClient(mc -> {
@@ -172,7 +172,7 @@ final class AeronauticsServerTest {
 				context.waitTicks(20);
 			}
 		}
-		Diorama.LOGGER.info("Aeronautics server test: {}: the map's ship is made of {}", stage, made[0]);
+		Diorama.LOGGER.info("{}: the map's craft {} is made of {}", stage, id, made[0]);
 		return made[0];
 	}
 
