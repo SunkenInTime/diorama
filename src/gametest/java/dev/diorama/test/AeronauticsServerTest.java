@@ -19,6 +19,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * A Create Aeronautics airship left behind on a real server (opt-in: {@code aeronautics-server},
@@ -86,6 +87,18 @@ final class AeronauticsServerTest {
 			// Asked after each photo: the map makes its picture of a ship while it looks at it.
 			photo(context, "01-near", spot, 4);
 			String whole = made(context, id, "01-near");
+			// One of the ship's own blocks, and its number while this server is joined.
+			BlockState balloon = context.computeOnClient(mc -> {
+				CraftBlocks blocks = MapSession.get().crafts().shown(id).blocks();
+				for (int cell = 0; cell < blocks.volume(); cell++) {
+					BlockState state = Block.BLOCK_STATE_REGISTRY.byId(blocks.state(cell));
+					if (blocks.state(cell) != 0 && BuiltInRegistries.BLOCK.getKey(state.getBlock()).getNamespace().equals("aeronautics")) {
+						return state;
+					}
+				}
+				throw new AssertionError("The map's ship has none of the balloon it was built with: " + whole);
+			});
+			int joined = context.computeOnClient(mc -> Block.BLOCK_STATE_REGISTRY.getId(balloon));
 			if (whole == null) {
 				wrong.add("beside the ship, the map draws no blocks for it");
 			}
@@ -93,13 +106,21 @@ final class AeronauticsServerTest {
 			// Past what the server sends: the map keeps the ship where it was left.
 			server.commandAndWait("tp " + me + " " + x + " 150 " + (z + FAR), "Teleported " + me, 120);
 			context.waitTicks(400);
+			unsent(context, "after going " + FAR + " blocks away");
 			photo(context, "02-far", spot, 4);
 			expect(wrong, whole, made(context, id, "02-far"), "after going " + FAR + " blocks away");
 
 			RealServer.leave(context);
+			// What this test is for: out of the server, the game numbers the ship's blocks another way.
+			int left = context.computeOnClient(mc -> Block.BLOCK_STATE_REGISTRY.getId(balloon));
+			if (left == joined) {
+				throw new AssertionError("The game numbers blocks as the server does, so leaving changes nothing: run aeronautics-server with "
+					+ "--client-mods naming a mod with blocks of its own that the server won't have");
+			}
 			server.join(context);
 			context.waitFor(mc -> MapSession.get() != null, 2400);
 			context.waitTicks(400);
+			unsent(context, "after joining again " + FAR + " blocks away");
 			photo(context, "03-rejoined-far", spot, 4);
 			expect(wrong, whole, made(context, id, "03-rejoined-far"), "after joining again " + FAR + " blocks away");
 
@@ -113,6 +134,13 @@ final class AeronauticsServerTest {
 		}
 		if (!wrong.isEmpty()) {
 			throw new AssertionError("The airship on the map is wrong:\n" + String.join("\n", wrong));
+		}
+	}
+
+	/** The server mustn't be sending the ship: the map's then is the one it kept, which is what's being asked about. */
+	private static void unsent(ClientGameTestContext context, String when) {
+		if (!context.computeOnClient(mc -> ships(mc).isEmpty())) {
+			throw new AssertionError("The server still sends the ship " + when + ", so the map's isn't the one it kept");
 		}
 	}
 
