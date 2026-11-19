@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import com.google.common.collect.Iterables;
+import dev.diorama.Diorama;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.RadarCategories;
@@ -17,8 +18,11 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -114,6 +118,14 @@ public final class Radar {
 		}
 	}
 
+	/**
+	 * Entity types that aren't mobs and that their mod wants on the radar all the same, such as a
+	 * train: the entity type tag {@code diorama:radar_shown}, in the mod's own data. They follow the
+	 * passive mobs' settings, and get their picture from the mod's icon files as a mob does
+	 * ({@link XaeroRadarIcons}). The server sends its tags to the client, so the mod has to be on both.
+	 */
+	public static final TagKey<EntityType<?>> RADAR_SHOWN = TagKey.create(Registries.ENTITY_TYPE, Diorama.id("radar_shown"));
+
 	private Radar() {
 	}
 
@@ -131,7 +143,7 @@ public final class Radar {
 		if (entity instanceof Enemy) {
 			return Kind.HOSTILE;
 		}
-		if (entity instanceof Mob) {
+		if (entity instanceof Mob || entity.getType().builtInRegistryHolder().is(RADAR_SHOWN)) {
 			return Kind.PASSIVE;
 		}
 		return null;

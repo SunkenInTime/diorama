@@ -437,6 +437,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("tall-world")) {
 			TallWorldTest.run(context);
 		}
+		if (tests.contains("radar-tag")) {
+			RadarTagTest.run(context);
+		}
 		if (tests.contains("sub-maps")) {
 			subMaps(context);
 		}
@@ -7285,7 +7288,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
+	static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
 		context.runOnClient(mc -> {
 			LocalPlayer player = mc.player;
 			if (mc.gui.screen() instanceof MapScreen screen && player != null) {
