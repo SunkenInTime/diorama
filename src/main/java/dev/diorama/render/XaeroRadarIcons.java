@@ -29,6 +29,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -69,7 +70,29 @@ public final class XaeroRadarIcons {
 		DOT
 	}
 
-	record ItemIcon(ItemStack stack) implements Icon {
+	/**
+	 * An item as the icon. It holds the item, and makes the stack the radar draws the first time
+	 * it's asked for: a file in a mod's own jar is read in the game's first resource load, when
+	 * 26.x can't make a stack yet (an item gets its components as a world's data loads).
+	 */
+	static final class ItemIcon implements Icon {
+		private final Item item;
+		private @Nullable ItemStack stack;
+
+		ItemIcon(Item item) {
+			this.item = item;
+		}
+
+		Item item() {
+			return this.item;
+		}
+
+		ItemStack stack() {
+			if (this.stack == null) {
+				this.stack = new ItemStack(this.item);
+			}
+			return this.stack;
+		}
 	}
 
 	/** One mob's file: icons for the variant IDs Diorama can match (textures), and the default. */
@@ -144,7 +167,7 @@ public final class XaeroRadarIcons {
 			return basic.name().toLowerCase(java.util.Locale.ROOT);
 		}
 		if (icon instanceof ItemIcon item) {
-			return "item " + BuiltInRegistries.ITEM.getKey(item.stack().getItem());
+			return "item " + BuiltInRegistries.ITEM.getKey(item.item());
 		}
 		if (icon instanceof Sprite sprite) {
 			return (sprite.outlined ? "outlined_sprite " : sprite.flipped ? "sprite " : "normal_sprite ") + sprite.location + " " + sprite.w + "x" + sprite.h;
@@ -268,8 +291,8 @@ public final class XaeroRadarIcons {
 					problems.add("no item " + value.substring("item:".length()));
 					return Basic.DOT;
 				}
-				ItemStack stack = new ItemStack(item.get());
-				return stack.isEmpty() ? Basic.DOT : new ItemIcon(stack);
+				// Air is the one item whose stack is empty, with nothing to draw.
+				return item.get() == Items.AIR ? Basic.DOT : new ItemIcon(item.get());
 			case "normal_sprite", "outlined_sprite", "sprite":
 				// "sprite" is the form before normal_sprite. Xaero's still reads it, and draws its
 				// image upside down compared with normal_sprite's.
