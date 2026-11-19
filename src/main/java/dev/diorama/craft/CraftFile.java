@@ -4,6 +4,8 @@ import dev.diorama.Diorama;
 import dev.diorama.bake.CraftBlocks;
 import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -42,7 +44,8 @@ final class CraftFile {
 	 * indices. Filled copycats keep their material by cell.
 	 */
 	record Saved(UUID id, double[] pose, int[] size, String[] palette, int[] runs, int[] copycats) {
-		static Saved of(UUID id, double[] pose, Body.Blocks blocks) {
+		/** {@code states} is {@link CraftFile#states} of the blocks, taken when they were read. */
+		static Saved of(UUID id, double[] pose, Body.Blocks blocks, Int2ObjectMap<BlockState> states) {
 			CraftBlocks b = blocks.blocks();
 			Map<Integer, Integer> index = new HashMap<>();
 			List<String> palette = new ArrayList<>();
@@ -50,7 +53,7 @@ final class CraftFile {
 			int last = -1;
 			int length = 0;
 			for (int i = 0; i < b.volume(); i++) {
-				int p = paletteIndex(b.state(i), index, palette);
+				int p = paletteIndex(b.state(i), index, palette, states);
 				if (p == last) {
 					length++;
 					continue;
@@ -71,7 +74,7 @@ final class CraftFile {
 				int material = b.copycat(i);
 				if (material != 0) {
 					copycats.add(i);
-					copycats.add(paletteIndex(material, index, palette));
+					copycats.add(paletteIndex(material, index, palette, states));
 				}
 			}
 			return new Saved(
@@ -80,9 +83,9 @@ final class CraftFile {
 			);
 		}
 
-		private static int paletteIndex(int state, Map<Integer, Integer> index, List<String> palette) {
+		private static int paletteIndex(int state, Map<Integer, Integer> index, List<String> palette, Int2ObjectMap<BlockState> states) {
 			return index.computeIfAbsent(state, s -> {
-				BlockState blockState = Block.BLOCK_STATE_REGISTRY.byId(s);
+				BlockState blockState = states.get(s.intValue());
 				palette.add(blockState == null || blockState.isAir() ? "" : BlockStateParser.serialize(blockState));
 				return palette.size() - 1;
 			});
@@ -127,6 +130,23 @@ final class CraftFile {
 			}
 			return new Body.Blocks(new CraftBlocks(this.size[0], this.size[1], this.size[2], states, copycats), new int[3]);
 		}
+	}
+
+	/**
+	 * Which block state each id in a craft's grid stands for, as the game numbers them now. Taken
+	 * when the grid is read, in the world, and kept with it: NeoForge and Forge number states the
+	 * server's way while a server is joined and their own way again as it's left, which is when the
+	 * crafts are saved, so an id asked about then can name another block. Client thread.
+	 */
+	static Int2ObjectMap<BlockState> states(CraftBlocks blocks) {
+		Int2ObjectMap<BlockState> states = new Int2ObjectOpenHashMap<>();
+		for (int id : blocks.ids()) {
+			BlockState state = Block.BLOCK_STATE_REGISTRY.byId(id);
+			if (state != null) {
+				states.put(id, state);
+			}
+		}
+		return states;
 	}
 
 	static List<Saved> read(Path file) {
