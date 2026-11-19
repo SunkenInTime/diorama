@@ -112,6 +112,13 @@ public final class Settings {
 	public boolean legibleCaves = false;
 	public Frame minimapFrame = Frame.CLASSIC;
 	public Shape minimapShape = Shape.SQUARE;
+	/**
+	 * Whether the minimap keeps the way the map faces at the top, as Xaero's Minimap's Lock North.
+	 * Off, it turns with the player: the arrow points up and the map turns under it. On unless
+	 * the player says otherwise, where Xaero's is off: the map is a picture from one side, and
+	 * turned round its buildings are upside down.
+	 */
+	public boolean minimapLockNorth = true;
 
 	/** Which maps show the radar at all; what it shows is the same on both. */
 	public boolean radarOnMinimap = true;

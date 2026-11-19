@@ -83,10 +83,20 @@ public final class MapViewport {
 	 * Where and how big a map is drawn, and what part of the map it shows. A {@code round} view
 	 * shows only the circle filling it (the round minimap); a {@code follows} view is on the player,
 	 * so what's around its middle has to stay up to date (the minimap again).
+	 *
+	 * <p>A view with a {@code turn} shows the map turned that many radians clockwise about its
+	 * middle (the minimap that turns with the player). What lies on the ground is placed as if there
+	 * were none, with {@link #screenX(double)} and {@link #screenY(double)}, and drawn through
+	 * {@link #canvas}, which turns it; what stays upright, like an icon, is placed with
+	 * {@link #screenX(double, double)} and {@link #screenY(double, double)}.
 	 */
-	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round, boolean follows) {
+	public record View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round, boolean follows, float turn) {
 		public View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer) {
-			this(x, y, width, height, centerU, centerV, zoom, layer, false, false);
+			this(x, y, width, height, centerU, centerV, zoom, layer, false, false, 0);
+		}
+
+		public View(int x, int y, int width, int height, double centerU, double centerV, double zoom, int layer, boolean round, boolean follows) {
+			this(x, y, width, height, centerU, centerV, zoom, layer, round, follows, 0);
 		}
 
 		public double minU() {
@@ -103,6 +113,42 @@ public final class MapViewport {
 
 		public float screenY(double v) {
 			return (float) (this.y + this.height / 2.0 + (v - this.centerV) * this.zoom);
+		}
+
+		/** Where a point of the map is on screen, turned with the view. */
+		public float screenX(double u, double v) {
+			if (this.turn == 0) {
+				return this.screenX(u);
+			}
+			return (float) (this.x + this.width / 2.0 + ((u - this.centerU) * Math.cos(this.turn) - (v - this.centerV) * Math.sin(this.turn)) * this.zoom);
+		}
+
+		public float screenY(double u, double v) {
+			if (this.turn == 0) {
+				return this.screenY(v);
+			}
+			return (float) (this.y + this.height / 2.0 + ((u - this.centerU) * Math.sin(this.turn) + (v - this.centerV) * Math.cos(this.turn)) * this.zoom);
+		}
+
+		/**
+		 * The part of the map that has to be drawn to fill this view however it's turned: for a
+		 * square one, the square that holds it at every angle, about the same middle. A round view
+		 * shows the same circle at every angle, and a view that doesn't turn is its own.
+		 */
+		public View ground() {
+			if (this.turn == 0 || this.round) {
+				return this;
+			}
+			int reach = (int) Math.ceil(Math.hypot(this.width, this.height) / 2);
+			int padX = reach - this.width / 2;
+			int padY = reach - this.height / 2;
+			return new View(this.x - padX, this.y - padY, this.width + 2 * padX, this.height + 2 * padY, this.centerU, this.centerV, this.zoom, this.layer, false, this.follows, this.turn);
+		}
+
+		/** A canvas that draws what's placed on this view's ground turned as the view is. */
+		public MapCanvas canvas(GuiGraphicsExtractor graphics) {
+			MapCanvas canvas = MapCanvas.of(graphics);
+			return this.turn == 0 ? canvas : new TurnedCanvas(canvas, this.x + this.width / 2.0F, this.y + this.height / 2.0F, this.turn);
 		}
 	}
 
@@ -168,8 +214,10 @@ public final class MapViewport {
 	 * Same, with these {@link dev.diorama.bake.Overlays} bits drawn over the tiles, land claims if
 	 * {@code claims}, and {@code lit} drawn over the tiles but under those and the fog.
 	 */
-	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View view, int overlays, boolean claims, @Nullable Runnable lit) {
-		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
+	public void draw(GuiGraphicsExtractor graphics, MapLevel level, View frame, int overlays, boolean claims, @Nullable Runnable lit) {
+		graphics.enableScissor(frame.x(), frame.y(), frame.x() + frame.width(), frame.y() + frame.height());
+		// A turned square view shows ground from outside its own square.
+		View view = frame.ground();
 		boolean cave = view.layer() != TileKey.SURFACE;
 		// Behind the tiles, a colour from the fog that covers where there's no data, so the ragged
 		// edge of known ground blends into it: the fog, smoke under a roof, or the dark of caves.
@@ -183,18 +231,18 @@ public final class MapViewport {
 		if (this.opacity < 1) {
 			// Nothing to draw.
 		} else if (view.round()) {
-			MapCanvas.of(graphics).solid(Circle.in(view).disc(), background);
+			MapCanvas.of(graphics).solid(Circle.in(frame).disc(), background);
 		} else {
-			graphics.fill(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), background);
+			graphics.fill(frame.x(), frame.y(), frame.x() + frame.width(), frame.y() + frame.height(), background);
 		}
 
 		int alpha = Math.round(this.opacity * 255);
 		MapMemory memory = cave ? null : level.memory();
 		if (memory != null) {
-			memory.draw(MapCanvas.of(graphics), view, NightLook.dim(night, alpha), lodFor(level, view), tileSampling(sampling(view)));
+			memory.draw(view.canvas(graphics), view, NightLook.dim(night, alpha), lodFor(level, view), tileSampling(sampling(view)));
 		}
 		this.drawTiles(graphics, level, view, view.zoom() >= OVERLAY_ZOOM ? overlays : 0, claims, lit, night);
-		this.drawFog(graphics, level, view, night);
+		this.drawFog(graphics, level, view, frame, night);
 		graphics.disableScissor();
 	}
 
@@ -249,7 +297,8 @@ public final class MapViewport {
 	 */
 	public static Sampling sampling(View view) {
 		double screenPixelsPerPixel = view.zoom() * Minecraft.getInstance().getWindow().getGuiScale() / Projection.PIXELS_PER_UNIT;
-		return view.zoom() >= Projection.PIXELS_PER_UNIT || screenPixelsPerPixel >= CRISP_FROM ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
+		// Turned, the tiles' pixels lie at an angle to the screen's, and crisp ones would crawl as the view turns.
+		return view.turn() == 0 && (view.zoom() >= Projection.PIXELS_PER_UNIT || screenPixelsPerPixel >= CRISP_FROM) ? Sampling.TILE_CRISP : Sampling.TILE_SMOOTH;
 	}
 
 	/** How a tile's own pixels are sampled; what's drawn over them has no mip levels for the tile shader. */
@@ -313,7 +362,7 @@ public final class MapViewport {
 		int tv1 = (int) Math.floor(v1 / units);
 		Sampling sampling = sampling(view);
 		Sampling tiles = tileSampling(sampling);
-		MapCanvas canvas = MapCanvas.of(graphics);
+		MapCanvas canvas = view.canvas(graphics);
 		float size = (float) (units * view.zoom());
 		Circle circle = view.round() ? Circle.in(view) : null;
 		// White, as see-through as the map is: the tiles are multiplied by it.
@@ -495,7 +544,7 @@ public final class MapViewport {
 		fogHiddenForTests = hide;
 	}
 
-	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, float night) {
+	private void drawFog(GuiGraphicsExtractor graphics, MapLevel level, View view, View frame, float night) {
 		double viewW = view.width() / view.zoom();
 		double viewH = view.height() / view.zoom();
 		// Zoomed out past the detailed zoom, the fog's noise grows with the view so it keeps its
@@ -542,24 +591,25 @@ public final class MapViewport {
 		int dark = Math.round(night * 31);
 		int params = (scaleCode * 16 | quality) << 24 | (noiseU * 32 | veil) << 16 | (noiseV * 32 | dark) << 8 | fogCode;
 
-		MapCanvas canvas = MapCanvas.of(graphics);
+		MapCanvas canvas = view.canvas(graphics);
 		// The surface fog on Fast draws at full resolution, as it did before 0.8.0: its two layers'
 		// dither, drawn at half and scaled up, came out twice as coarse.
 		boolean fullSize = fast && !cave && !level.roofless();
-		if (!fullSize && this.drawFogLayer(canvas, view, originU, originV, span, params)) {
+		if (!fullSize && this.drawFogLayer(MapCanvas.of(graphics), canvas, view, originU, originV, span, params)) {
 			return;
 		}
 		if (view.round()) {
 			Circle.Quads disc = Circle.in(view).clip(view.x(), view.y(), view.x() + view.width(), view.y() + view.height(), mu0, mv0, mu1, mv1);
 			if (disc != null) {
-				canvas.fog(this.maskTexture, FogTextures.noise(), this.detailTexture, disc.corners(), disc.uvs(), view.x(), view.y(), view.width(), view.height(), params);
+				canvas.fog(this.maskTexture, FogTextures.noise(), this.detailTexture, disc.corners(), disc.uvs(), frame.x(), frame.y(), frame.width(), frame.height(), params);
 			}
 			return;
 		}
 		canvas.fog(
 			this.maskTexture, FogTextures.noise(), this.detailTexture,
-			view.x(), view.y(), view.width(), view.height(),
-			mu0, mv0, mu1, mv1,
+			new float[] {view.x(), view.y(), view.x(), view.y() + view.height(), view.x() + view.width(), view.y() + view.height(), view.x() + view.width(), view.y()},
+			new float[] {mu0, mv0, mu0, mv1, mu1, mv1, mu1, mv0},
+			frame.x(), frame.y(), frame.width(), frame.height(),
 			params
 		);
 	}
@@ -574,7 +624,7 @@ public final class MapViewport {
 	 * points of the map, and what's on screen moves with the map rather than being worked out afresh
 	 * at new points, which made the fog's thin edges change shape as the map moved.
 	 */
-	private boolean drawFogLayer(MapCanvas canvas, View view, double originU, double originV, double span, int params) {
+	private boolean drawFogLayer(MapCanvas straight, MapCanvas canvas, View view, double originU, double originV, double span, int params) {
 		double scale = Minecraft.getInstance().getWindow().getGuiScale() / 2.0;
 		// The view in layer texels, and a texel in map units.
 		double texelsW = view.width() * scale;
@@ -598,7 +648,7 @@ public final class MapViewport {
 		var world = Minecraft.getInstance().level;
 		LayerKey key = new LayerKey(this.fogSerial, params, width, height, u0, v0, u1, v1, world == null ? 0 : world.getGameTime());
 		if (!key.equals(this.layerKey) || this.fogLayer.texture() == null) {
-			if (!this.fogLayer.render(canvas, this.maskTexture, FogTextures.noise(), this.detailTexture, width, height, u0, v0, u1, v1, params | LAYER_CODE << 24)) {
+			if (!this.fogLayer.render(straight, this.maskTexture, FogTextures.noise(), this.detailTexture, width, height, u0, v0, u1, v1, params | LAYER_CODE << 24)) {
 				return false;
 			}
 			this.layerKey = key;

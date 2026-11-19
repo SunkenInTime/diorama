@@ -82,6 +82,7 @@ public final class SettingsScreen extends Screen {
 		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
 		minimap.toggle("minimap_shown", () -> s.minimap, v -> s.minimap = v);
 		minimap.toggle("compass", () -> s.compass, v -> s.compass = v);
+		minimap.toggle("lock_north", () -> s.minimapLockNorth, v -> s.minimapLockNorth = v);
 		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
 		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v, ServerRules.caveMapsAllowed() ? null : false);

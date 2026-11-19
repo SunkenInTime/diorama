@@ -159,8 +159,8 @@ public final class DrawingOverlay {
 		float[] sx = new float[n];
 		float[] sy = new float[n];
 		for (int k = 0; k < n; k++) {
-			sx[k] = view.screenX(drawing.shown()[k * 2]);
-			sy[k] = view.screenY(drawing.shown()[k * 2 + 1]);
+			sx[k] = view.screenX(drawing.shown()[k * 2], drawing.shown()[k * 2 + 1]);
+			sy[k] = view.screenY(drawing.shown()[k * 2], drawing.shown()[k * 2 + 1]);
 		}
 		if (drawing.kind == Drawing.Kind.AREA) {
 			if (n >= 3) {

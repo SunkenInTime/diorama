@@ -186,7 +186,7 @@ final class CraftPainter {
 	private void paint(GuiGraphicsExtractor graphics, MapViewport.View view, List<Drawn> drawn, List<Shade> shades, boolean surface, float opacity) {
 		int layer = view.layer();
 		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
-		MapCanvas canvas = MapCanvas.of(graphics);
+		MapCanvas canvas = view.canvas(graphics);
 		Circle circle = view.round() ? Circle.in(view) : null;
 		int alpha = Math.round(Math.max(0, Math.min(1, opacity)) * 255);
 		// Dimmed at night with the ground under them.

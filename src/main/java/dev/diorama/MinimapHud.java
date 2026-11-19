@@ -234,31 +234,39 @@ public final class MinimapHud implements HudElement {
 		int y = placed[1];
 		int size = placed[2];
 		int wantedLayer = settings.autoCaves && ServerRules.caveMapsAllowed() ? session.autoLayer(viewer) : TileKey.SURFACE;
-		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), wantedLayer), wantedLayer));
 		boolean round = settings.minimapShape == Settings.Shape.ROUND;
+		float yaw = Markers.onMap(viewer.getViewYRot(partialTick));
+		float turn = settings.minimapLockNorth ? 0 : turn(yaw);
+		double centerU = Projection.u(pos.x, pos.z);
+		double centerV = Projection.v(pos.x, pos.y, pos.z);
+		int layer = this.layerToShow(session.map(), new MapViewport.View(x, y, size, size, centerU, centerV, zoom(session.map(), wantedLayer), wantedLayer, false, false, turn).ground());
 		float opacity = settings.opacity();
 		float fadeIn = this.fadeStart < 0 ? 1 : (System.currentTimeMillis() - this.fadeStart) / (float) LAYER_FADE_MS;
 		if (fadeIn < 1) {
 			// So the two layers together stay as opaque as the minimap is set.
 			this.fading.opacity(opacity * (1 - fadeIn) / (1 - opacity * fadeIn));
-			this.fading.draw(graphics, session.map(), new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), this.fadingLayer), this.fadingLayer, round, true), 0, false, null);
+			this.fading.draw(graphics, session.map(), new MapViewport.View(x, y, size, size, centerU, centerV, zoom(session.map(), this.fadingLayer), this.fadingLayer, round, true, turn), 0, false, null);
 		} else {
 			this.fadeStart = -1;
 		}
 		float shownOpacity = opacity * Math.min(1, fadeIn);
 		this.viewport.opacity(shownOpacity);
 
-		MapViewport.View view = new MapViewport.View(x, y, size, size, Projection.u(pos.x, pos.z), Projection.v(pos.x, pos.y, pos.z), zoom(session.map(), layer), layer, round, true);
+		MapViewport.View view = new MapViewport.View(x, y, size, size, centerU, centerV, zoom(session.map(), layer), layer, round, true, turn);
+		// What lies on the ground is drawn over all the ground a turned minimap can show, and cut to the minimap.
+		MapViewport.View ground = view.ground();
 		this.viewport.draw(graphics, session.map(), view, 0, Settings.get().claims == Settings.ClaimsShown.ALWAYS,
-			() -> session.lights().draw(graphics, view, partialTick, shownOpacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
-		session.crafts().draw(graphics, view, partialTick, opacity);
+			() -> session.lights().draw(graphics, ground, partialTick, shownOpacity, ServerRules.radarAllowed() && settings.radarOnMinimap));
+		graphics.enableScissor(x, y, x + size, y + size);
+		session.crafts().draw(graphics, ground, partialTick, opacity);
 		if (settings.worldBorder == Settings.WorldBorderShown.ALWAYS) {
-			this.worldBorder.draw(graphics, font, view, mc.level, viewer);
+			this.worldBorder.draw(graphics, font, ground, mc.level, viewer);
 		}
 		DrawingStore drawings = DrawingStore.get();
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
-			this.drawings.draw(graphics, font, view, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);
+			this.drawings.draw(graphics, font, ground, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);
 		}
+		graphics.disableScissor();
 		// Over the map, since a resource pack's frame can reach in over its edge, and under what's marked on it.
 		MinimapFrames.draw(graphics, settings.minimapFrame, round, x, y, size);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() && settings.radarOnMinimap ? Radar.collect(view, partialTick, false) : List.of();
@@ -269,9 +277,14 @@ public final class MinimapHud implements HudElement {
 			WaypointOverlay.draw(graphics, view, WaypointOverlay.layout(view, near, false), false, null);
 		}
 		Radar.draw(graphics, view, blips, false, true);
-		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, Markers.onMap(viewer.getViewYRot(partialTick)), 5 * settings.arrowScale());
+		// On a minimap that turns, the arrow points up the screen, which is north on the map's picture.
+		Markers.player(graphics, x + size / 2.0F, y + size / 2.0F, settings.minimapLockNorth ? yaw : 180, 5 * settings.arrowScale());
 		if (settings.compass) {
-			this.compass(graphics, font, x, y, size, TextSize.scale(settings.minimapCompassSize));
+			if (settings.minimapLockNorth) {
+				this.compass(graphics, font, x, y, size, TextSize.scale(settings.minimapCompassSize));
+			} else {
+				this.turnedCompass(graphics, font, x, y, size, TextSize.scale(settings.minimapCompassSize), round, turn);
+			}
 		}
 		float textY = y + size + 4;
 		float left = x - 2;
@@ -387,6 +400,44 @@ public final class MinimapHud implements HudElement {
 	private static int x(Anchor anchor, int size, int width) {
 		int x = anchor.centered() ? (width - size) / 2 : anchor.right() ? width - anchor.dx() - size : anchor.dx();
 		return Math.max(MARGIN, Math.min(x, width - MARGIN - size));
+	}
+
+	/**
+	 * How far the map's picture is turned, clockwise in radians, for the way the player looks to
+	 * point up the screen. {@code yaw} is the look on the map ({@link Markers#onMap}). The picture
+	 * is shorter north to south than east to west, under the tilted camera, so this isn't the yaw
+	 * itself: it's the angle the look has on the picture.
+	 */
+	static float turn(float yaw) {
+		double radians = Math.toRadians(yaw);
+		return (float) (-Math.PI / 2 - Math.atan2(Math.cos(radians) * Projection.sin(), -Math.sin(radians)));
+	}
+
+	/**
+	 * The letters on a minimap that turns: each where its direction leaves the minimap, so they
+	 * travel round the frame as the player turns, along a square one's edges as on Xaero's Minimap.
+	 */
+	private void turnedCompass(GuiGraphicsExtractor graphics, Font font, int x, int y, int size, float text, boolean round, float turn) {
+		String[] letters = {"N", "E", "S", "W"};
+		int turns = Projection.facing().turns;
+		float half = size / 2.0F;
+		for (int i = 0; i < 4; i++) {
+			int w = font.width(letters[i]) + 3;
+			int h = 9;
+			// The edge the letter sits on when the minimap doesn't turn, as an angle clockwise from up, and the turn.
+			double angle = Math.floorMod(i - turns, 4) * Math.PI / 2 + turn;
+			double dx = Math.sin(angle);
+			double dy = -Math.cos(angle);
+			double reach = round ? 1 : Math.max(Math.abs(dx), Math.abs(dy));
+			float bx = (float) (x + half + dx / reach * (half - w * text / 2) - w * text / 2);
+			float by = (float) (y + half + dy / reach * (half - h * text / 2) - h * text / 2);
+			graphics.pose().pushMatrix();
+			graphics.pose().translate(TextSize.snap(bx), TextSize.snap(by));
+			graphics.pose().scale(text);
+			graphics.fill(0, 0, w, h, 0xA0101418);
+			graphics.text(font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
+			graphics.pose().popMatrix();
+		}
 	}
 
 	/** Letters on the frame, by which way the map faces. At another size each grows in from its edge. */
