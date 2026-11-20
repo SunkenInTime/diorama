@@ -53,6 +53,15 @@ public final class BiomeTints {
 		RESOLVERS[1] = foliage;
 		RESOLVERS[2] = dryFoliage;
 		RESOLVERS[WATER] = water;
+		generation++;
+	}
+
+	/** Changes whenever a resolver does, so tints blended before can tell they're stale. */
+	private static volatile int generation;
+
+	/** See {@link ChunkSnapshot#inheritTints}. */
+	public static int generation() {
+		return generation;
 	}
 
 	/** The snapshot's tints, blended now if no bake has needed them yet. Any thread. */
@@ -62,8 +71,9 @@ public final class BiomeTints {
 			// Two bakes may both blend; they read the same biomes, so either result will do.
 			// A turned view blends its chunk, and turns what that gives.
 			ChunkSnapshot chunk = snapshot.chunk();
+			int generation = generation();
 			tints = blend(chunk);
-			chunk.setTints(tints);
+			chunk.setTints(tints, generation);
 			if (chunk != snapshot) {
 				tints = snapshot.tints();
 			}

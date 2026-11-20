@@ -146,6 +146,18 @@ public final class MapLevel implements ChunkSource {
 	private final Map<TileKey, Dirty> dirty = new HashMap<>();
 	private final Map<TileKey, Double> wanted = new HashMap<>();
 	private final Set<TileKey> inFlight = new HashSet<>();
+	/**
+	 * For GPU bakes, which draw whole tiles: the spots a tile's store holds came from the live bake
+	 * scheduled as {@code sequence} (see {@link #bakes}), under that store and generation, with rays
+	 * from {@code startY}. While the next bake follows straight on, only its dirty blocks need picking.
+	 */
+	private record SpotsBasis(TileStore store, int generation, long sequence, int startY) {
+	}
+	private final Map<TileKey, SpotsBasis> spotsBasis = new java.util.concurrent.ConcurrentHashMap<>();
+	/** Live bakes scheduled per tile, counting up; see {@link SpotsBasis}. */
+	private final Map<TileKey, Long> bakes = new HashMap<>();
+	/** Baker threads' word on what a finished bake's spots started from, taken with its image. */
+	private final Map<TileKey, long[]> pickedFrom = new java.util.concurrent.ConcurrentHashMap<>();
 	private final ConcurrentLinkedQueue<TileImage> finished = new ConcurrentLinkedQueue<>();
 	/** Tiles drawn from the world's save, waiting for the render thread to take them. */
 	private final ConcurrentLinkedQueue<SavedTile> fromSave = new ConcurrentLinkedQueue<>();
@@ -581,6 +593,12 @@ public final class MapLevel implements ChunkSource {
 	 *     the whole chunk is new
 	 */
 	public void put(ChunkSnapshot snapshot, int @Nullable [] changed, int playerChunkX, int playerChunkZ) {
+		ChunkSnapshot before = this.chunks.get(snapshot.key());
+		if (before != null) {
+			// Before it's visible to bakes, so none blends what it can reuse.
+			snapshot.inheritTints(before);
+			snapshot.replacing(before);
+		}
 		this.chunks.put(snapshot.key(), snapshot);
 		if (changed == null && this.watchingLiveChunks) {
 			this.liveChunks.add(snapshot.key());
@@ -1036,6 +1054,9 @@ public final class MapLevel implements ChunkSource {
 	/** Takes a finished bake: shows it if a map still wants it, and saves it. */
 	private void bakeFinished(TileImage image) {
 		this.inFlight.remove(image.key());
+		long[] picked = this.pickedFrom.remove(image.key());
+		// Whatever the store ends up holding, only a live GPU bake that reached it is a basis.
+		this.spotsBasis.remove(image.key());
 		if (SLOT_STATS) {
 			this.slotReleased(image.key());
 		}
@@ -1064,6 +1085,7 @@ public final class MapLevel implements ChunkSource {
 			// Baked only to be saved; a map that wants it will bake it again.
 			if (this.store != null) {
 				this.store.baked(image);
+				this.keepSpotsBasis(image, picked);
 				this.pixelsMoved(image.key());
 			}
 			return;
@@ -1090,6 +1112,13 @@ public final class MapLevel implements ChunkSource {
 		this.coverageVersion++;
 		if (this.store != null && !this.savedOnly && !image.key().isCave() && image.key().lod() == 0) {
 			this.store.baked(image);
+			this.keepSpotsBasis(image, picked);
+		}
+	}
+
+	private void keepSpotsBasis(TileImage image, long @Nullable [] picked) {
+		if (picked != null && image.isFull() && this.store != null) {
+			this.spotsBasis.put(image.key(), new SpotsBasis(this.store, image.generation(), picked[0], (int) picked[1]));
 		}
 	}
 
@@ -1120,6 +1149,7 @@ public final class MapLevel implements ChunkSource {
 		}
 		this.pixelsMoved(key);
 		store.baked(image);
+		this.spotsBasis.remove(key);
 		return true;
 	}
 
@@ -1168,7 +1198,10 @@ public final class MapLevel implements ChunkSource {
 			: key.isCave() ? dev.diorama.render.gpu.GpuBakeCheck.CAVE : dev.diorama.render.gpu.GpuBakeCheck.SKY;
 		dev.diorama.render.gpu.GpuBakeCheck.Mode gpu = dev.diorama.render.gpu.GpuBakeCheck.mode(view, view != dev.diorama.render.gpu.GpuBakeCheck.SKY && fog, overlays != null);
 		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.GPU) {
-			this.bakeOnGpu(key, looks, generation, fog, overlays, store, saveTo);
+			long sequence = this.bakes.merge(key, 1L, Long::sum);
+			SpotsBasis basis = this.spotsBasis.get(key);
+			boolean follows = basis != null && store != null && basis.store() == store && basis.generation() == generation && basis.sequence() == sequence - 1;
+			this.bakeOnGpu(key, looks, generation, fog, overlays, store, saveTo, follows ? blocks : null, follows ? basis.startY() : Integer.MIN_VALUE, sequence);
 			return;
 		}
 		if (gpu == dev.diorama.render.gpu.GpuBakeCheck.Mode.CHECK) {
@@ -1206,7 +1239,8 @@ public final class MapLevel implements ChunkSource {
 	 * Falls back to tracing if the mesher failed or the GPU didn't draw it.
 	 */
 	private void bakeOnGpu(
-		TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, @Nullable TileStore saveTo
+		TileKey key, BlockLooks looks, int generation, boolean fog, @Nullable Overlays overlays, @Nullable TileStore store, @Nullable TileStore saveTo,
+		@Nullable BitSet dirtyBlocks, int savedStartY, long sequence
 	) {
 		BAKERS.execute(() -> {
 			try {
@@ -1232,7 +1266,8 @@ public final class MapLevel implements ChunkSource {
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
 							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
-						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
+						this.finished.add(result.pixels() == null ? this.withSpots(image, source, looks, fog, store).withGeneration(generation)
+							: this.withSpots(image, source, looks, fog, store, dirtyBlocks, savedStartY, sequence).withGeneration(generation));
 					} catch (Throwable t) {
 						logFailed("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
@@ -1313,6 +1348,21 @@ public final class MapLevel implements ChunkSource {
 			return image;
 		}
 		return image.withSpots(TileSpots.pick(image, source, looks, fog, store.spots(image.key())));
+	}
+
+	/**
+	 * The same for a GPU bake, picking only its dirty blocks again when the store's spots came from
+	 * the bake before it ({@link SpotsBasis}); what it started from goes with the image to
+	 * {@link #bakeFinished}.
+	 */
+	private TileImage withSpots(TileImage image, ChunkSource source, BlockLooks looks, boolean fog, @Nullable TileStore store,
+		@Nullable BitSet dirtyBlocks, int savedStartY, long sequence) {
+		if (store == null) {
+			return image;
+		}
+		TileSpots.Picked picked = TileSpots.pick(image, source, looks, fog, store.spots(image.key()), dirtyBlocks, savedStartY);
+		this.pickedFrom.put(image.key(), new long[]{sequence, picked.startY()});
+		return image.withSpots(picked.spots());
 	}
 
 	/**

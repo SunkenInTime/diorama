@@ -53,13 +53,141 @@ public final class TileSpots {
 		return known ? spots : null;
 	}
 
+	/** Spots worked out for a bake, and the height its rays started from. */
+	public record Picked(int @Nullable [] spots, int startY) {
+	}
+
+	/**
+	 * {@link #pick} for a full bake of which only {@code blocks} (indexed as the map's dirty blocks,
+	 * {@code blockY * (TILE_PIXELS / BLOCK) + blockX}) can have changed since {@code saved} was worked
+	 * out by the bake before, from the same chunks elsewhere and rays starting at {@code savedStartY}.
+	 * Every sample outside those blocks would come out as {@code saved} has it, so only the blocks
+	 * are picked again; anything else (no blocks, no saved spots, another start, builds above the top)
+	 * picks every sample, as {@link #pick} does.
+	 */
+	public static Picked pick(TileImage image, ChunkSource source, BlockLooks looks, boolean fogOfWar, int @Nullable [] saved,
+		java.util.@Nullable BitSet blocks, int savedStartY) {
+		if (!image.isFull() && image.patches().isEmpty()) {
+			return new Picked(null, Integer.MIN_VALUE);
+		}
+		TileKey key = image.key();
+		MapPick pick = new MapPick(source, looks, key, fogOfWar).passWhereSaved(saved);
+		if (blocks == null || saved == null || !image.isFull() || pick.startY() != savedStartY || pick.hasTall()) {
+			return new Picked(pick(image, key, pick, saved), pick.startY());
+		}
+		int[] spots = saved.clone();
+		int perRow = Projection.TILE_PIXELS / TileImage.BLOCK;
+		for (int b = blocks.nextSetBit(0); b >= 0; b = blocks.nextSetBit(b + 1)) {
+			pick(key, pick, spots, saved, (b % perRow) * PATCH_COLUMNS, (b / perRow) * TileImage.BLOCK, PATCH_COLUMNS, TileImage.BLOCK);
+		}
+		boolean known = false;
+		for (int i = 0; i < spots.length && !known; i++) {
+			known = spots[i] != UNKNOWN;
+		}
+		return new Picked(known ? spots : null, pick.startY());
+	}
+
+	private static int @Nullable [] pick(TileImage image, TileKey key, MapPick pick, int @Nullable [] saved) {
+		int[] spots = new int[COLUMNS * ROWS];
+		boolean known = false;
+		if (image.isFull()) {
+			known = pick(key, pick, spots, saved, 0, 0, COLUMNS, ROWS);
+		} else {
+			for (TileImage.Patch patch : image.patches()) {
+				known |= pick(key, pick, spots, saved, patchColumn(patch), patch.blockY() * TileImage.BLOCK, PATCH_COLUMNS, TileImage.BLOCK);
+			}
+		}
+		return known ? spots : null;
+	}
+
 	/** The first column under a patch. */
 	public static int patchColumn(TileImage.Patch patch) {
 		return patch.blockX() * PATCH_COLUMNS;
 	}
 
-	/** Fills in a rectangle of samples; returns whether any is known. */
+	/**
+	 * Fills in a rectangle of samples; returns whether any is known. In the sky view a column whose
+	 * chunks and saved spots are what they were when this tile's spots last picked it whole takes
+	 * those spots ({@link SpotColumns}); a whole pick keeps its columns for the next.
+	 */
 	private static boolean pick(TileKey key, MapPick pick, int[] spots, int @Nullable [] saved, int column0, int row0, int columns, int rows) {
+		SpotColumns.Settings settings = GpuMesher.REUSE && pick.columnOnly() ? SpotColumns.settings(pick, pick.looks()) : null;
+		if (settings == null) {
+			return pickRows(key, pick, spots, saved, column0, row0, columns, rows);
+		}
+		SpotColumns.Tile kept = SpotColumns.get(key, settings);
+		SpotColumns.Tile keep = row0 == 0 && rows == ROWS ? new SpotColumns.Tile(settings) : null;
+		int x0 = (int) Math.floor(key.minU());
+		boolean known = false;
+		for (int column = column0; column < column0 + columns; column++) {
+			int x = x0 + column;
+			SpotColumns.Column was = kept == null ? null : kept.columns[column];
+			Slabs.Run wasSpots = was == null ? null : was.spots;
+			Slabs.Run wasSaved = was == null ? null : was.saved;
+			if (was != null && SpotColumns.matches(was, pick, x, saved, column)) {
+				int[] slab = wasSpots.ints();
+				int at = wasSpots.offset;
+				boolean knownHere = false;
+				for (int row = row0; row < row0 + rows; row++) {
+					int i = row * COLUMNS + column;
+					spots[i] = slab[at + row];
+					knownHere |= spots[i] != UNKNOWN;
+				}
+				// Unless its arrays were written over while it was read: then the column is picked below.
+				if (Slabs.valid(wasSpots) && (wasSaved == null || Slabs.valid(wasSaved))) {
+					known |= knownHere;
+					if (keep != null) {
+						// Kept again, copied forward first if its arrays are about to leave the store's window.
+						Slabs.Run keptSpots = Slabs.renew(wasSpots);
+						Slabs.Run keptSaved = wasSaved == null ? null : Slabs.renew(wasSaved);
+						if (keptSpots != null && (wasSaved == null || keptSaved != null)) {
+							SpotColumns.Column kept2 = keptSpots == wasSpots && keptSaved == wasSaved ? was : was.with(keptSpots, keptSaved);
+							keep.columns[column] = kept2;
+							keep.add(kept2);
+						}
+					}
+					continue;
+				}
+			}
+			SpotColumns.Column made = keep == null ? null : new SpotColumns.Column();
+			int[] madeSpots = made == null ? null : MeshColumns.scratch(ROWS);
+			int z0 = Integer.MAX_VALUE;
+			int z1 = Integer.MIN_VALUE;
+			boolean unknown = false;
+			for (int row = row0; row < row0 + rows; row++) {
+				double v = v(key, row);
+				int i = row * COLUMNS + column;
+				spots[i] = switch (pick.pick(key.minU() + column + 0.5, v)) {
+					case MapPick.FOUND -> encode(pick.y, pick.z, v);
+					case MapPick.NOTHING -> NOTHING;
+					default -> saved == null ? UNKNOWN : saved[i];
+				};
+				known |= spots[i] != UNKNOWN;
+				if (made != null) {
+					madeSpots[row] = spots[i];
+					z0 = Math.min(z0, pick.lastZ);
+					z1 = Math.max(z1, pick.firstZ);
+					unknown |= pick.readUnknown;
+				}
+			}
+			if (made != null) {
+				// Kept before spotColumn, which packs in the same scratch array.
+				made.spots = Slabs.keep(madeSpots, 0, ROWS);
+				SpotColumns.depend(made, pick, x, z0, z1);
+				made.usesSaved = unknown;
+				made.saved = unknown ? MeshColumns.spotColumn(saved, column) : null;
+				keep.columns[column] = made;
+				keep.add(made);
+			}
+		}
+		if (keep != null) {
+			SpotColumns.put(key, keep);
+		}
+		return known;
+	}
+
+	/** The rectangle as picked row by row, every sample. */
+	private static boolean pickRows(TileKey key, MapPick pick, int[] spots, int @Nullable [] saved, int column0, int row0, int columns, int rows) {
 		boolean known = false;
 		for (int row = row0; row < row0 + rows; row++) {
 			double v = v(key, row);

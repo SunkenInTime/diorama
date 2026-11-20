@@ -1,6 +1,7 @@
 package dev.diorama.bake;
 
 import dev.diorama.Projection;
+import dev.diorama.data.ChunkSnapshot;
 import net.minecraft.core.BlockPos;
 import org.jspecify.annotations.Nullable;
 
@@ -41,6 +42,10 @@ public final class MapPick {
 	/** Where the last {@link #FOUND} pick stands; its x is the picked column. */
 	public int y;
 	public int z;
+	/** The last pick's first and last z, which bound the blocks it read, and whether one was in a chunk the map has no data for. */
+	int firstZ;
+	int lastZ;
+	boolean readUnknown;
 
 	/** A pick for map points in {@code tile}, which must be a level-0 tile. */
 	public MapPick(ChunkSource source, BlockLooks looks, TileKey tile, boolean fogOfWar) {
@@ -77,6 +82,36 @@ public final class MapPick {
 		this.tall = this.cave || this.roofless || fromWorldTop ? null : TallChunks.around(tile, source, this.startY);
 	}
 
+	/** Where this pick's rays start, and whether builds above the world's top move that per ray. */
+	public int startY() {
+		return this.startY;
+	}
+
+	public boolean hasTall() {
+		return this.tall != null;
+	}
+
+	/**
+	 * Whether a pick reads nothing but blocks of its own column along its ray, and the saved spots
+	 * where those are in chunks the map has no data for: the sky view outside a roof, from one height.
+	 */
+	boolean columnOnly() {
+		return !this.cave && !this.roofless && this.tall == null && !this.raised;
+	}
+
+	int limitY() {
+		return this.limitY;
+	}
+
+	Looks looks() {
+		return this.looks;
+	}
+
+	/** The chunk holding a column, as this pick reads it. */
+	@Nullable ChunkSnapshot snapshot(int x, int z) {
+		return this.reader.snapshot(x, z);
+	}
+
 	/**
 	 * Lets rays through chunks the map has no data for above where the saved tile's rays stood,
 	 * as the baker does (see {@link TileSpots#passedWhenSaved}). Sky view only.
@@ -111,6 +146,9 @@ public final class MapPick {
 		int bz = (int) Math.floor(z0);
 		double tMaxY = 1 / sin;
 		double tMaxZ = (z0 - bz) / cos;
+		this.firstZ = bz;
+		this.lastZ = bz;
+		this.readUnknown = false;
 		boolean skippingRock = this.cave || this.roofless;
 		CaveCut cut = this.raised ? new CaveCut(this.reader, this.base, x, (int) Math.floor((v + this.limitY * cos) / sin) - 2, x, bz + 1) : null;
 		while (by >= this.limitY && !(skippingRock && by < this.rockLimit)) {
@@ -127,7 +165,9 @@ public final class MapPick {
 				continue;
 			}
 			int id = this.reader.state(x, by, bz);
+			this.lastZ = bz;
 			if (id == VoxelReader.UNKNOWN) {
+				this.readUnknown = true;
 				if ((this.tall == null || by < this.tall.missingTop) && !TileSpots.passedWhenSaved(this.tile, this.savedSpots, x, by, bz)) {
 					return UNKNOWN;
 				}

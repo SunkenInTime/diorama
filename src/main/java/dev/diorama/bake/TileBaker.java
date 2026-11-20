@@ -302,6 +302,16 @@ public final class TileBaker {
 		return this.tall != null && y >= this.tall.missingTop;
 	}
 
+	/** Where {@link #passesMissing} starts, {@code Integer.MAX_VALUE} for nowhere. */
+	int passesMissingFrom() {
+		return this.tall == null ? Integer.MAX_VALUE : this.tall.missingTop;
+	}
+
+	/** The saved spots {@link #passedWhenSaved} reads, or null. */
+	int @Nullable [] savedSpots() {
+		return this.savedSpots;
+	}
+
 	float hazeR;
 	float hazeG;
 	float hazeB;
