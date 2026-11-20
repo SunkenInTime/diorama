@@ -311,6 +311,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("minimap-frames")) {
 				MinimapFrameTest.run(context, world);
 			}
+			if (tests.contains("minimap-turn")) {
+				MinimapTurnTest.run(context, world);
+			}
 			if (tests.contains("map-mouse-keys")) {
 				MapMouseKeysTest.run(context);
 			}

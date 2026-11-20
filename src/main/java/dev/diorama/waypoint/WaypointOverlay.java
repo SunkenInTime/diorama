@@ -53,8 +53,10 @@ public final class WaypointOverlay {
 			float halfW = Math.max(1, view.width() / 2.0F - inset);
 			float halfH = Math.max(1, view.height() / 2.0F - inset);
 			float radius = circle == null ? 0 : Math.max(1, circle.r - inset);
-			float x = view.screenX(Projection.u(waypoint.x + 0.5, waypoint.z + 0.5));
-			float y = view.screenY(Projection.v(waypoint.x + 0.5, waypoint.y, waypoint.z + 0.5));
+			double u = Projection.u(waypoint.x + 0.5, waypoint.z + 0.5);
+			double v = Projection.v(waypoint.x + 0.5, waypoint.y, waypoint.z + 0.5);
+			float x = view.screenX(u, v);
+			float y = view.screenY(u, v);
 			float dx = x - cx;
 			float dy = y - cy;
 			if (circle != null) {

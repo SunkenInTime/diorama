@@ -112,7 +112,10 @@ public final class SettingsScreen extends Screen {
 		// Side by side, so the tab stays short enough for a small screen.
 		minimap.choice("shape", Settings.Shape.values(), () -> s.minimapShape, v -> s.minimapShape = v);
 		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
-		minimap.lastTwoSideBySide();
+		// A button beside them and not a ninth checkbox: a fifth row of those doesn't fit a small screen.
+		minimap.cycle("lock_north", () -> s.minimapLockNorth ? 1 : 0, 2, i -> s.minimapLockNorth = i == 1,
+			i -> i == 1 ? net.minecraft.network.chat.CommonComponents.OPTION_ON : net.minecraft.network.chat.CommonComponents.OPTION_OFF);
+		minimap.lastThreeSideBySide();
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		Boolean radarSet = ServerRules.radarAllowed() ? null : false;
