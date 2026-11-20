@@ -581,6 +581,11 @@ public final class MapLevel implements ChunkSource {
 	 *     the whole chunk is new
 	 */
 	public void put(ChunkSnapshot snapshot, int @Nullable [] changed, int playerChunkX, int playerChunkZ) {
+		ChunkSnapshot before = this.chunks.get(snapshot.key());
+		if (before != null) {
+			// Before it's visible to bakes, so a bake can share what was worked out from the same blocks.
+			snapshot.replacing(before);
+		}
 		this.chunks.put(snapshot.key(), snapshot);
 		if (changed == null && this.watchingLiveChunks) {
 			this.liveChunks.add(snapshot.key());

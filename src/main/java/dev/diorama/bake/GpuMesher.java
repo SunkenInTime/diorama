@@ -64,6 +64,9 @@ public final class GpuMesher {
 	private GpuMesher() {
 	}
 
+	/** Whether the walk takes rows of nothing but open air in one step. Only for checking that meshes come out the same either way. */
+	public static boolean AIR_ROWS = true;
+
 	/**
 	 * Ints per face in a {@link Quads} list: cell, face, colour, occlusion, light, flags, then the
 	 * face's box as {@link ShapeFaces} packs it, two ints in 128ths of a block, then under a roof
@@ -352,336 +355,26 @@ public final class GpuMesher {
 		int fz0 = Integer.MAX_VALUE;
 		int fz1 = Integer.MIN_VALUE;
 
+		// In the sky view a row of cells that are all air, reached from above at its south end, is
+		// reached throughout and adds nothing but its extent: those come in one step. Per cell of
+		// the column's x, the height from which everything up is air (VoxelReader.openFrom).
+		boolean airRows = AIR_ROWS && !lit && !lifted && !fog && looks.kind[VoxelReader.AIR_ID] == BlockLooks.AIR;
+		int[] openFrom = airRows ? new int[zSpan] : null;
+		// Each column is walked by a method of its own: called a hundred and thirty times a mesh, it is
+		// compiled early, and a branch it hasn't seen yet costs one column in the interpreter, not a tile.
+		Walk walk = new Walk(mesh, helper, reader, source, looks, style, sin, cos, cot, startY, limitY, lit, fog, lifted, minV, maxV, x0, zBase, zSpan,
+			airRows, openFrom, aboveOpen, hereOpen, aboveRock, hereRock, aboveRockU, hereRockU, aboveRockN, hereRockN, rockIn, pieces,
+			aboveWater, hereWater, aboveFirstWater, hereFirstWater);
 		// One column more each side: the bake draws a pixel past the tile's edges for outlines.
 		for (int x = x0 - 1; x <= x1 && !mesh.empty; x++) {
-			// Where the rays start: open air above the tallest block, or inside rock at a cut.
-			java.util.Arrays.fill(aboveOpen, !lit);
-			java.util.Arrays.fill(aboveRock, lit);
-			java.util.Arrays.fill(aboveRockN, RockRays.ALL);
-			java.util.Arrays.fill(aboveWater, false);
-			java.util.Arrays.fill(aboveFirstWater, NO_WATER);
-			for (int y = startY - 1; y >= limitY; y--) {
-				int lo = zLow(minV, y, sin, cos);
-				int hi = zHigh(maxV, y, sin, cos);
-				java.util.Arrays.fill(hereOpen, false);
-				java.util.Arrays.fill(hereRock, false);
-				java.util.Arrays.fill(hereRockN, 0);
-				java.util.Arrays.fill(hereWater, false);
-				java.util.Arrays.fill(hereFirstWater, NO_WATER);
-				boolean any = false;
-				for (int z = hi; z >= lo; z--) {
-					int i = z - zBase;
-					boolean openAbove = aboveOpen[i];
-					boolean openSouth = z < hi && hereOpen[i + 1];
-					boolean rockAbove = aboveRock[i];
-					boolean rockSouth = z < hi && hereRock[i + 1];
-					boolean fromAbove = openAbove || rockAbove;
-					boolean fromSouth = openSouth || rockSouth;
-					if (!fromAbove && !fromSouth) {
-						continue;
-					}
-					int rockN = 0;
-					if (rockAbove || rockSouth) {
-						rockN = RockRays.enter(rockIn, aboveRockU[i], rockAbove ? aboveRockN[i] : 0, rockSouth ? hereRockU[i + 1] : null, rockSouth ? hereRockN[i + 1] : 0, y, z, cot);
-						if (rockN > RockRays.MAX) {
-							// More ranges than a cell keeps: rare enough to trace.
-							mesh.traceInstead = true;
-							rockN = RockRays.ALL;
-						}
-					}
-					int id = reader.state(x, y, z);
-					if (id == VoxelReader.UNKNOWN) {
-						if (!helper.passesMissing(y) && !helper.passedWhenSaved(x, y, z)) {
-							if (fromAbove) {
-								mesh.opaque.add(x, y, z, TOP, 0, 0, 0, UNKNOWN);
-							}
-							if (fromSouth) {
-								mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
-							}
-							continue;
-						}
-						id = VoxelReader.AIR_ID;
-					}
-					byte kind = looks.kind[id];
-					// Smaller than a cube (only solid and see-through blocks have shapes): a ray
-					// meets one of its boxes or goes on beside them, as TileBaker.enterShape.
-					int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? looks.shape[id] : 0;
-					if (lifted && rockN != 0 && kind != BlockLooks.SOLID && y + 1 < startY && reader.pocket(x, y, z)) {
-						// Under a roof a one-block pocket in the rock is rock to rays still in it, so
-						// buried lava springs don't speckle it; open rays meet what's there.
-						keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
-						any = true;
-						if (openAbove || openSouth) {
-							if (kind == BlockLooks.LAVA) {
-								if (openAbove) {
-									solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
-								}
-								if (openSouth) {
-									solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
-								}
-								mesh.lowestY = Math.min(mesh.lowestY, y);
-							} else if (kind == BlockLooks.AIR || (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) && shape == 0) {
-								hereOpen[i] = true;
-								if (fog) {
-									byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
-									byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
-									hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
-								}
-								if (kind != BlockLooks.AIR) {
-									// Roots, fungi, vines and fire in a gap: they tint only the open rays.
-									helper.albedo(id, x, z, true);
-									int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, kind == BlockLooks.PLANT ? 102 : 64);
-									if (openAbove) {
-										tintedFace(mesh.tinted, x, y, z, true, color, rockIn, rockN, cot, pieces);
-									}
-									if (openSouth) {
-										tintedFace(mesh.tinted, x, y, z, false, color, rockIn, rockN, cot, pieces);
-									}
-								}
-							} else {
-								// Water, or a see-through block smaller than a cube, in a pocket that rays
-								// of both kinds reach.
-								mesh.traceInstead = true;
-							}
-						}
-					} else if (shape != 0) {
-						ShapeFaces sh = looks.faces(shape);
-						int wet = looks.wetShape[id];
-						boolean passes = false;
-						boolean reached;
-						boolean traced = false;
-						boolean underside = false;
-						if (kind == BlockLooks.SOLID) {
-							if (rockN != 0) {
-								// Inside the rock below a cut, any solid block is rock.
-								keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
-								any = true;
-							}
-							reached = openAbove || openSouth;
-							if (reached && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
-								// The bottom of a ceiling: rays that have left the rock pass
-								// through it, as the tracer's do, so it doesn't float over the floor.
-								passes = true;
-								underside = true;
-								if (wet >= 0) {
-									// They'd come out in water.
-									mesh.traceInstead = true;
-								}
-							} else if (reached) {
-								mesh.lowestY = Math.min(mesh.lowestY, y);
-								// A piece on the cell's top or south side is met only by rays coming in that way, one
-								// inside the cell by rays from either, and none by rays still in the rock.
-								for (int b = 0; b < sh.top.length; b += 2) {
-									if (openAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1], rockIn, rockN, cot, pieces);
-									}
-								}
-								for (int b = 0; b < sh.south.length; b += 2) {
-									if (openSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
-										solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1], rockIn, rockN, cot, pieces);
-									}
-								}
-								// Rays that miss its boxes go on, even past one filling the floor: a ray coming in near
-								// the north side leaves before it gets down to the box.
-								passes = true;
-								if (wet >= 0 && rockN != 0 && (wet(reader, looks, x, y - 1, z) || wet(reader, looks, x, y, z - 1))) {
-									// Rays from the rock leave it dry, into water whose surface the next cell won't draw
-									// for them, as it's drawn here for the others.
-									traced = true;
-									mesh.traceInstead = true;
-								}
-							}
-						} else {
-							reached = fromAbove || fromSouth;
-							if (reached) {
-								// Only what a ray meets first in the cell: the tracer tints a ray once for
-								// the block it meets.
-								helper.albedo(id, x, z, true);
-								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 64);
-								int[][] seen = sh.seen(sin, cos);
-								for (int b = 0; b < seen[0].length; b += 2) {
-									if (fromAbove || ShapeFaces.inset(seen[0][b + 1], true)) {
-										mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, seen[0][b], seen[0][b + 1]);
-									}
-								}
-								for (int b = 0; b < seen[1].length; b += 2) {
-									if (fromSouth || ShapeFaces.inset(seen[1][b + 1], false)) {
-										mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, seen[1][b], seen[1][b + 1]);
-									}
-								}
-								passes = true;
-							}
-						}
-						if (passes) {
-							// Rays that miss the boxes go on through the cell.
-							hereOpen[i] = true;
-							any = true;
-							if (fog) {
-								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
-								byte c = openSouth ? hereFirstWater[i + 1] : NO_WATER;
-								hereFirstWater[i] = a == SEEN_WATER || c == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || c == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
-							}
-						}
-						if (reached && !traced && !underside && wet >= 0) {
-							int[] wetTop = sh.wetTop;
-							int[] wetSouth = sh.wetSouth;
-							if (kind == BlockLooks.SOLID && rockN != 0) {
-								wetTop = outsideRock(sh.wetTop, true, rockIn, rockN, y, z, cot, pieces);
-								wetSouth = outsideRock(sh.wetSouth, false, rockIn, rockN, y, z, cot, pieces);
-							}
-							// Waterlogged: in water from where the ray came into the cell, but dry
-							// where it meets the block right there.
-							waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
-								aboveWater, hereWater, hereFirstWater, lit, fog, wetTop, wetSouth);
-							if (sh.wetCut) {
-								// Rays that came in dry where the block is level with the water are in
-								// water again in the next cell, so that one draws its own surface; where
-								// this cell's water is drawn, it's nearer and wins.
-								hereWater[i] = false;
-							}
-						}
-						if (fog && hereRock[i] && hereOpen[i] && hereFirstWater[i] != NO_WATER) {
-							// The rays from the rock it lets through haven't been in water, the others
-							// have, here or before: one state for both doesn't hold.
-							mesh.traceInstead = true;
-						}
-					} else if (kind == BlockLooks.SOLID) {
-						if (rockN != 0) {
-							// Still in the rock below the cut.
-							keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
-							any = true;
-						}
-						if ((openAbove || openSouth) && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
-							// The bottom of a ceiling: rays that have left the rock pass
-							// through it, as the tracer's do, so it doesn't float over the floor.
-							hereOpen[i] = true;
-							any = true;
-							if (fog) {
-								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
-								byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
-								hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
-							}
-						} else {
-							if (openAbove) {
-								solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
-							}
-							if (openSouth) {
-								solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
-							}
-							mesh.lowestY = Math.min(mesh.lowestY, y);
-						}
-					} else if (kind == BlockLooks.LAVA) {
-						// Lava stops a ray whether it came through open space or out of the rock.
-						if (fromAbove) {
-							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
-						}
-						if (fromSouth) {
-							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
-						}
-						mesh.lowestY = Math.min(mesh.lowestY, y);
-					} else {
-						hereOpen[i] = true;
-						any = true;
-						if (fog) {
-							// Rays from above and from the south are different rays through the same
-							// cell; where they disagree, the seen one wins.
-							byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
-							byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
-							hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
-						}
-						if (kind == BlockLooks.WATER) {
-							waterCell(mesh, helper, reader, source, id, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
-								aboveWater, hereWater, hereFirstWater, lit, fog);
-						} else if (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) {
-							helper.albedo(id, x, z, true);
-							int weight = kind == BlockLooks.PLANT ? 102 : 64;
-							int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, weight);
-							if (fromAbove) {
-								mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0);
-							}
-							if (fromSouth) {
-								mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0);
-							}
-						}
-					}
-					if (y < fy0) {
-						fy0 = y;
-					}
-					if (y + 1 > fy1) {
-						fy1 = y + 1;
-					}
-					fx0 = Math.min(fx0, x);
-					fx1 = Math.max(fx1, x);
-					fz0 = Math.min(fz0, z);
-					fz1 = Math.max(fz1, z);
-				}
-				if (y == helper.rockLimit && y > limitY) {
-					// Rays still in the rock this far below the cut stop on the cut face, as the tracer's do.
-					for (int z = hi; z >= lo; z--) {
-						int i = z - zBase;
-						if (!hereRock[i]) {
-							continue;
-						}
-						if (hereOpen[i] && hereRockN[i] == RockRays.ALL) {
-							mesh.traceInstead = true;
-						} else if (hereOpen[i]) {
-							int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
-							for (int b = 0; b < n; b += 2) {
-								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
-							}
-						} else {
-							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT);
-						}
-						hereRock[i] = false;
-						hereRockN[i] = 0;
-					}
-				}
-				if (y == limitY) {
-					// Rays still going: they end at the view's limit, on the cut face or the void.
-					for (int z = hi; z >= lo; z--) {
-						int i = z - zBase;
-						if (hereRock[i] || hereOpen[i]) {
-							int open = fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
-							if (hereRock[i] && hereOpen[i] && hereRockN[i] != RockRays.ALL) {
-								// Out of a smaller block both reach: the cut face for rays still in the rock, the void
-								// for the others.
-								int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
-								for (int b = 0; b < n; b += 2) {
-									mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
-								}
-								n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, false);
-								for (int b = 0; b < n; b += 2) {
-									mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, open, pieces[b], pieces[b + 1]);
-								}
-							} else {
-								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, hereRock[i] ? (fog ? UNKNOWN : CUT) : open);
-							}
-						}
-					}
-				}
-				boolean[] t = aboveOpen;
-				aboveOpen = hereOpen;
-				hereOpen = t;
-				t = aboveRock;
-				aboveRock = hereRock;
-				hereRock = t;
-				double[][] ru = aboveRockU;
-				aboveRockU = hereRockU;
-				hereRockU = ru;
-				int[] rn = aboveRockN;
-				aboveRockN = hereRockN;
-				hereRockN = rn;
-				t = aboveWater;
-				aboveWater = hereWater;
-				hereWater = t;
-				byte[] w = aboveFirstWater;
-				aboveFirstWater = hereFirstWater;
-				hereFirstWater = w;
-				if (!any) {
-					break;
-				}
-			}
+			walk.column(x);
 		}
+		fx0 = walk.fx0;
+		fx1 = walk.fx1;
+		fy0 = walk.fy0;
+		fy1 = walk.fy1;
+		fz0 = walk.fz0;
+		fz1 = walk.fz1;
 		if (!lit || lifted) {
 			casters(mesh, helper, reader, looks, style, x0, x1, minV, maxV, source.minY());
 			if (fx0 <= fx1) {
@@ -704,6 +397,515 @@ public final class GpuMesher {
 		sortNearToFar(mesh.tinted, sin, cos);
 		mesh.buildNanos = System.nanoTime() - start;
 		return mesh;
+	}
+
+	/**
+	 * Walks one column of x of a mesh at a time: what {@link #build} works out once for the tile, the
+	 * rows of cell state the walk reuses from column to column, and the camera's faces' extent so far.
+	 */
+	private static final class Walk {
+		private final Mesh mesh;
+		private final TileBaker helper;
+		private final VoxelReader reader;
+		private final ChunkSource source;
+		private final BlockLooks looks;
+		private final MapStyle style;
+		private final double sin;
+		private final double cos;
+		private final double cot;
+		private final int startY;
+		private final int limitY;
+		private final boolean lit;
+		private final boolean fog;
+		private final boolean lifted;
+		private final double minV;
+		private final double maxV;
+		private final int x0;
+		private final int zBase;
+		private final int zSpan;
+		private final boolean airRows;
+		private final int @Nullable [] openFrom;
+		private final boolean[] aboveOpen;
+		private final boolean[] hereOpen;
+		private final boolean[] aboveRock;
+		private final boolean[] hereRock;
+		private final double[][] aboveRockU;
+		private final double[][] hereRockU;
+		private final int[] aboveRockN;
+		private final int[] hereRockN;
+		private final double[] rockIn;
+		private final int[] pieces;
+		private final boolean[] aboveWater;
+		private final boolean[] hereWater;
+		private final byte[] aboveFirstWater;
+		private final byte[] hereFirstWater;
+		int fx0 = Integer.MAX_VALUE;
+		int fx1 = Integer.MIN_VALUE;
+		int fy0 = Integer.MAX_VALUE;
+		int fy1 = Integer.MIN_VALUE;
+		int fz0 = Integer.MAX_VALUE;
+		int fz1 = Integer.MIN_VALUE;
+
+		Walk(Mesh mesh, TileBaker helper, VoxelReader reader, ChunkSource source, BlockLooks looks, MapStyle style, double sin, double cos, double cot, int startY, int limitY, boolean lit, boolean fog, boolean lifted, double minV, double maxV, int x0, int zBase, int zSpan, boolean airRows, int @Nullable [] openFrom, boolean[] aboveOpen, boolean[] hereOpen, boolean[] aboveRock, boolean[] hereRock, double[][] aboveRockU, double[][] hereRockU, int[] aboveRockN, int[] hereRockN, double[] rockIn, int[] pieces, boolean[] aboveWater, boolean[] hereWater, byte[] aboveFirstWater, byte[] hereFirstWater) {
+			this.mesh = mesh;
+			this.helper = helper;
+			this.reader = reader;
+			this.source = source;
+			this.looks = looks;
+			this.style = style;
+			this.sin = sin;
+			this.cos = cos;
+			this.cot = cot;
+			this.startY = startY;
+			this.limitY = limitY;
+			this.lit = lit;
+			this.fog = fog;
+			this.lifted = lifted;
+			this.minV = minV;
+			this.maxV = maxV;
+			this.x0 = x0;
+			this.zBase = zBase;
+			this.zSpan = zSpan;
+			this.airRows = airRows;
+			this.openFrom = openFrom;
+			this.aboveOpen = aboveOpen;
+			this.hereOpen = hereOpen;
+			this.aboveRock = aboveRock;
+			this.hereRock = hereRock;
+			this.aboveRockU = aboveRockU;
+			this.hereRockU = hereRockU;
+			this.aboveRockN = aboveRockN;
+			this.hereRockN = hereRockN;
+			this.rockIn = rockIn;
+			this.pieces = pieces;
+			this.aboveWater = aboveWater;
+			this.hereWater = hereWater;
+			this.aboveFirstWater = aboveFirstWater;
+			this.hereFirstWater = hereFirstWater;
+		}
+
+		/** Walks column {@code x}: its camera faces into the mesh. */
+		void column(int x) {
+			Mesh mesh = this.mesh;
+			TileBaker helper = this.helper;
+			VoxelReader reader = this.reader;
+			ChunkSource source = this.source;
+			BlockLooks looks = this.looks;
+			MapStyle style = this.style;
+			double sin = this.sin;
+			double cos = this.cos;
+			double cot = this.cot;
+			int startY = this.startY;
+			int limitY = this.limitY;
+			boolean lit = this.lit;
+			boolean fog = this.fog;
+			boolean lifted = this.lifted;
+			double minV = this.minV;
+			double maxV = this.maxV;
+			int x0 = this.x0;
+			int zBase = this.zBase;
+			int zSpan = this.zSpan;
+			boolean airRows = this.airRows;
+			int[] openFrom = this.openFrom;
+			boolean[] aboveOpen = this.aboveOpen;
+			boolean[] hereOpen = this.hereOpen;
+			boolean[] aboveRock = this.aboveRock;
+			boolean[] hereRock = this.hereRock;
+			double[][] aboveRockU = this.aboveRockU;
+			double[][] hereRockU = this.hereRockU;
+			int[] aboveRockN = this.aboveRockN;
+			int[] hereRockN = this.hereRockN;
+			double[] rockIn = this.rockIn;
+			int[] pieces = this.pieces;
+			boolean[] aboveWater = this.aboveWater;
+			boolean[] hereWater = this.hereWater;
+			byte[] aboveFirstWater = this.aboveFirstWater;
+			byte[] hereFirstWater = this.hereFirstWater;
+			int fx0 = this.fx0;
+			int fx1 = this.fx1;
+			int fy0 = this.fy0;
+			int fy1 = this.fy1;
+			int fz0 = this.fz0;
+			int fz1 = this.fz1;
+		boolean airRow = airRows;
+		if (airRow) {
+			int[] open = null;
+			for (int i = 0; i < zSpan; i++) {
+				int z = zBase + i;
+				if (i == 0 || (z & 15) == 0) {
+					open = reader.openFrom(x >> 4, z >> 4);
+				}
+				openFrom[i] = open == null ? Integer.MAX_VALUE : open[((z & 15) << 4) | (x & 15)];
+			}
+		}
+		// Where the rays start: open air above the tallest block, or inside rock at a cut.
+		java.util.Arrays.fill(aboveOpen, !lit);
+		java.util.Arrays.fill(aboveRock, lit);
+		java.util.Arrays.fill(aboveRockN, RockRays.ALL);
+		java.util.Arrays.fill(aboveWater, false);
+		java.util.Arrays.fill(aboveFirstWater, NO_WATER);
+		// The cells of the row above that rays reached, as indices: none below or past these can
+		// pass rays down. Every cell starts reached.
+		int aboveLo = 0;
+		int aboveHi = zSpan - 1;
+		for (int y = startY - 1; y >= limitY; y--) {
+			int hereLo = Integer.MAX_VALUE;
+			int hereHi = -1;
+			int lo = zLow(minV, y, sin, cos);
+			int hi = zHigh(maxV, y, sin, cos);
+			java.util.Arrays.fill(hereOpen, false);
+			java.util.Arrays.fill(hereRock, false);
+			java.util.Arrays.fill(hereRockN, 0);
+			java.util.Arrays.fill(hereWater, false);
+			java.util.Arrays.fill(hereFirstWater, NO_WATER);
+			boolean any = false;
+			if (airRow) {
+				// Until the first row that isn't all air from its south end on, which ends them.
+				airRow = aboveOpen[hi - zBase];
+				for (int i = lo - zBase; i <= hi - zBase && airRow; i++) {
+					airRow = openFrom[i] <= y;
+				}
+				if (airRow) {
+					java.util.Arrays.fill(hereOpen, lo - zBase, hi - zBase + 1, true);
+					hereLo = lo - zBase;
+					hereHi = hi - zBase;
+					any = true;
+					fy0 = Math.min(fy0, y);
+					fy1 = Math.max(fy1, y + 1);
+					fx0 = Math.min(fx0, x);
+					fx1 = Math.max(fx1, x);
+					fz0 = Math.min(fz0, lo);
+					fz1 = Math.max(fz1, hi);
+				}
+			}
+			// Cells south of what the row above reached can only be reached from the south, which
+			// starts nowhere; north of it, only along an unbroken run from the south.
+			for (int z = airRow ? lo - 1 : Math.min(hi, zBase + aboveHi); z >= lo; z--) {
+				int i = z - zBase;
+				if (i < aboveLo && !(z < hi && (hereOpen[i + 1] || hereRock[i + 1]))) {
+					break;
+				}
+				boolean openAbove = aboveOpen[i];
+				boolean openSouth = z < hi && hereOpen[i + 1];
+				boolean rockAbove = aboveRock[i];
+				boolean rockSouth = z < hi && hereRock[i + 1];
+				boolean fromAbove = openAbove || rockAbove;
+				boolean fromSouth = openSouth || rockSouth;
+				if (!fromAbove && !fromSouth) {
+					continue;
+				}
+				int rockN = 0;
+				if (rockAbove || rockSouth) {
+					rockN = RockRays.enter(rockIn, aboveRockU[i], rockAbove ? aboveRockN[i] : 0, rockSouth ? hereRockU[i + 1] : null, rockSouth ? hereRockN[i + 1] : 0, y, z, cot);
+					if (rockN > RockRays.MAX) {
+						// More ranges than a cell keeps: rare enough to trace.
+						mesh.traceInstead = true;
+						rockN = RockRays.ALL;
+					}
+				}
+				int id = reader.state(x, y, z);
+				if (id == VoxelReader.UNKNOWN) {
+					if (!helper.passesMissing(y) && !helper.passedWhenSaved(x, y, z)) {
+						if (fromAbove) {
+							mesh.opaque.add(x, y, z, TOP, 0, 0, 0, UNKNOWN);
+						}
+						if (fromSouth) {
+							mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
+						}
+						continue;
+					}
+					id = VoxelReader.AIR_ID;
+				}
+				byte kind = looks.kind[id];
+				// Smaller than a cube (only solid and see-through blocks have shapes): a ray
+				// meets one of its boxes or goes on beside them, as TileBaker.enterShape.
+				int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? looks.shape[id] : 0;
+				if (lifted && rockN != 0 && kind != BlockLooks.SOLID && y + 1 < startY && reader.pocket(x, y, z)) {
+					// Under a roof a one-block pocket in the rock is rock to rays still in it, so
+					// buried lava springs don't speckle it; open rays meet what's there.
+					keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
+					any = true;
+					if (openAbove || openSouth) {
+						if (kind == BlockLooks.LAVA) {
+							if (openAbove) {
+								solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
+							}
+							if (openSouth) {
+								solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
+							}
+							mesh.lowestY = Math.min(mesh.lowestY, y);
+						} else if (kind == BlockLooks.AIR || (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) && shape == 0) {
+							hereOpen[i] = true;
+							if (fog) {
+								byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+								byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+								hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+							}
+							if (kind != BlockLooks.AIR) {
+								// Roots, fungi, vines and fire in a gap: they tint only the open rays.
+								helper.albedo(id, x, z, true);
+								int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, kind == BlockLooks.PLANT ? 102 : 64);
+								if (openAbove) {
+									tintedFace(mesh.tinted, x, y, z, true, color, rockIn, rockN, cot, pieces);
+								}
+								if (openSouth) {
+									tintedFace(mesh.tinted, x, y, z, false, color, rockIn, rockN, cot, pieces);
+								}
+							}
+						} else {
+							// Water, or a see-through block smaller than a cube, in a pocket that rays
+							// of both kinds reach.
+							mesh.traceInstead = true;
+						}
+					}
+				} else if (shape != 0) {
+					ShapeFaces sh = looks.faces(shape);
+					int wet = looks.wetShape[id];
+					boolean passes = false;
+					boolean reached;
+					boolean traced = false;
+					boolean underside = false;
+					if (kind == BlockLooks.SOLID) {
+						if (rockN != 0) {
+							// Inside the rock below a cut, any solid block is rock.
+							keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
+							any = true;
+						}
+						reached = openAbove || openSouth;
+						if (reached && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+							// The bottom of a ceiling: rays that have left the rock pass
+							// through it, as the tracer's do, so it doesn't float over the floor.
+							passes = true;
+							underside = true;
+							if (wet >= 0) {
+								// They'd come out in water.
+								mesh.traceInstead = true;
+							}
+						} else if (reached) {
+							mesh.lowestY = Math.min(mesh.lowestY, y);
+							// A piece on the cell's top or south side is met only by rays coming in that way, one
+							// inside the cell by rays from either, and none by rays still in the rock.
+							for (int b = 0; b < sh.top.length; b += 2) {
+								if (openAbove || ShapeFaces.inset(sh.top[b + 1], true)) {
+									solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, sh.top[b], sh.top[b + 1], rockIn, rockN, cot, pieces);
+								}
+							}
+							for (int b = 0; b < sh.south.length; b += 2) {
+								if (openSouth || ShapeFaces.inset(sh.south[b + 1], false)) {
+									solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, sh.south[b], sh.south[b + 1], rockIn, rockN, cot, pieces);
+								}
+							}
+							// Rays that miss its boxes go on, even past one filling the floor: a ray coming in near
+							// the north side leaves before it gets down to the box.
+							passes = true;
+							if (wet >= 0 && rockN != 0 && (wet(reader, looks, x, y - 1, z) || wet(reader, looks, x, y, z - 1))) {
+								// Rays from the rock leave it dry, into water whose surface the next cell won't draw
+								// for them, as it's drawn here for the others.
+								traced = true;
+								mesh.traceInstead = true;
+							}
+						}
+					} else {
+						reached = fromAbove || fromSouth;
+						if (reached) {
+							// Only what a ray meets first in the cell: the tracer tints a ray once for
+							// the block it meets.
+							helper.albedo(id, x, z, true);
+							int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, 64);
+							int[][] seen = sh.seen(sin, cos);
+							for (int b = 0; b < seen[0].length; b += 2) {
+								if (fromAbove || ShapeFaces.inset(seen[0][b + 1], true)) {
+									mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0, seen[0][b], seen[0][b + 1]);
+								}
+							}
+							for (int b = 0; b < seen[1].length; b += 2) {
+								if (fromSouth || ShapeFaces.inset(seen[1][b + 1], false)) {
+									mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0, seen[1][b], seen[1][b + 1]);
+								}
+							}
+							passes = true;
+						}
+					}
+					if (passes) {
+						// Rays that miss the boxes go on through the cell.
+						hereOpen[i] = true;
+						any = true;
+						if (fog) {
+							byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+							byte c = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+							hereFirstWater[i] = a == SEEN_WATER || c == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || c == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+						}
+					}
+					if (reached && !traced && !underside && wet >= 0) {
+						int[] wetTop = sh.wetTop;
+						int[] wetSouth = sh.wetSouth;
+						if (kind == BlockLooks.SOLID && rockN != 0) {
+							wetTop = outsideRock(sh.wetTop, true, rockIn, rockN, y, z, cot, pieces);
+							wetSouth = outsideRock(sh.wetSouth, false, rockIn, rockN, y, z, cot, pieces);
+						}
+						// Waterlogged: in water from where the ray came into the cell, but dry
+						// where it meets the block right there.
+						waterCell(mesh, helper, reader, source, wet, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
+							aboveWater, hereWater, hereFirstWater, lit, fog, wetTop, wetSouth);
+						if (sh.wetCut) {
+							// Rays that came in dry where the block is level with the water are in
+							// water again in the next cell, so that one draws its own surface; where
+							// this cell's water is drawn, it's nearer and wins.
+							hereWater[i] = false;
+						}
+					}
+					if (fog && hereRock[i] && hereOpen[i] && hereFirstWater[i] != NO_WATER) {
+						// The rays from the rock it lets through haven't been in water, the others
+						// have, here or before: one state for both doesn't hold.
+						mesh.traceInstead = true;
+					}
+				} else if (kind == BlockLooks.SOLID) {
+					if (rockN != 0) {
+						// Still in the rock below the cut.
+						keepRock(hereRock, hereRockU, hereRockN, i, rockIn, rockN);
+						any = true;
+					}
+					if ((openAbove || openSouth) && (lifted || helper.depthLook) && reader.ceilingUnderside(x, y, z, helper.lid(x, z), limitY)) {
+						// The bottom of a ceiling: rays that have left the rock pass
+						// through it, as the tracer's do, so it doesn't float over the floor.
+						hereOpen[i] = true;
+						any = true;
+						if (fog) {
+							byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+							byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+							hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+						}
+					} else {
+						if (openAbove) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
+						}
+						if (openSouth) {
+							solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog, ShapeFaces.FULL_LO, ShapeFaces.FULL_HI, rockIn, rockN, cot, pieces);
+						}
+						mesh.lowestY = Math.min(mesh.lowestY, y);
+					}
+				} else if (kind == BlockLooks.LAVA) {
+					// Lava stops a ray whether it came through open space or out of the rock.
+					if (fromAbove) {
+						solidFace(mesh, helper, source, looks, style, id, x, y, z, true, kind, lit, fog);
+					}
+					if (fromSouth) {
+						solidFace(mesh, helper, source, looks, style, id, x, y, z, false, kind, lit, fog);
+					}
+					mesh.lowestY = Math.min(mesh.lowestY, y);
+				} else {
+					hereOpen[i] = true;
+					any = true;
+					if (fog) {
+						// Rays from above and from the south are different rays through the same
+						// cell; where they disagree, the seen one wins.
+						byte a = openAbove ? aboveFirstWater[i] : NO_WATER;
+						byte b = openSouth ? hereFirstWater[i + 1] : NO_WATER;
+						hereFirstWater[i] = a == SEEN_WATER || b == SEEN_WATER ? SEEN_WATER : a == UNSEEN_WATER || b == UNSEEN_WATER ? UNSEEN_WATER : NO_WATER;
+					}
+					if (kind == BlockLooks.WATER) {
+						waterCell(mesh, helper, reader, source, id, x, y, z, i, fromAbove, fromSouth, openAbove, openSouth,
+							aboveWater, hereWater, hereFirstWater, lit, fog);
+					} else if (kind == BlockLooks.PLANT || kind == BlockLooks.GLASS) {
+						helper.albedo(id, x, z, true);
+						int weight = kind == BlockLooks.PLANT ? 102 : 64;
+						int color = encode(helper.albedoR, helper.albedoG, helper.albedoB, weight);
+						if (fromAbove) {
+							mesh.tinted.add(x, y, z, TOP, color, 0, 0, 0);
+						}
+						if (fromSouth) {
+							mesh.tinted.add(x, y, z, SOUTH, color, 0, 0, 0);
+						}
+					}
+				}
+				if (y < fy0) {
+					fy0 = y;
+				}
+				if (y + 1 > fy1) {
+					fy1 = y + 1;
+				}
+				fx0 = Math.min(fx0, x);
+				fx1 = Math.max(fx1, x);
+				fz0 = Math.min(fz0, z);
+				fz1 = Math.max(fz1, z);
+				hereLo = Math.min(hereLo, i);
+				hereHi = Math.max(hereHi, i);
+			}
+			if (y == helper.rockLimit && y > limitY) {
+				// Rays still in the rock this far below the cut stop on the cut face, as the tracer's do.
+				for (int z = hi; z >= lo; z--) {
+					int i = z - zBase;
+					if (!hereRock[i]) {
+						continue;
+					}
+					if (hereOpen[i] && hereRockN[i] == RockRays.ALL) {
+						mesh.traceInstead = true;
+					} else if (hereOpen[i]) {
+						int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
+						for (int b = 0; b < n; b += 2) {
+							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
+						}
+					} else {
+						mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT);
+					}
+					hereRock[i] = false;
+					hereRockN[i] = 0;
+				}
+			}
+			if (y == limitY) {
+				// Rays still going: they end at the view's limit, on the cut face or the void.
+				for (int z = hi; z >= lo; z--) {
+					int i = z - zBase;
+					if (hereRock[i] || hereOpen[i]) {
+						int open = fog && hereFirstWater[i] != SEEN_WATER ? UNKNOWN : VOID;
+						if (hereRock[i] && hereOpen[i] && hereRockN[i] != RockRays.ALL) {
+							// Out of a smaller block both reach: the cut face for rays still in the rock, the void
+							// for the others.
+							int n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, true);
+							for (int b = 0; b < n; b += 2) {
+								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, fog ? UNKNOWN : CUT, pieces[b], pieces[b + 1]);
+							}
+							n = RockRays.pieces(pieces, 0, true, FLOOR_LO, FLOOR_HI, hereRockU[i], hereRockN[i], y, z, cot, false);
+							for (int b = 0; b < n; b += 2) {
+								mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, open, pieces[b], pieces[b + 1]);
+							}
+						} else {
+							mesh.opaque.add(x, y, z, FLOOR, 0, 0, 0, hereRock[i] ? (fog ? UNKNOWN : CUT) : open);
+						}
+					}
+				}
+			}
+			boolean[] t = aboveOpen;
+			aboveOpen = hereOpen;
+			hereOpen = t;
+			t = aboveRock;
+			aboveRock = hereRock;
+			hereRock = t;
+			double[][] ru = aboveRockU;
+			aboveRockU = hereRockU;
+			hereRockU = ru;
+			int[] rn = aboveRockN;
+			aboveRockN = hereRockN;
+			hereRockN = rn;
+			t = aboveWater;
+			aboveWater = hereWater;
+			hereWater = t;
+			byte[] w = aboveFirstWater;
+			aboveFirstWater = hereFirstWater;
+			hereFirstWater = w;
+			aboveLo = hereLo;
+			aboveHi = hereHi;
+			if (!any) {
+				break;
+			}
+		}
+			this.fx0 = fx0;
+			this.fx1 = fx1;
+			this.fy0 = fy0;
+			this.fy1 = fy1;
+			this.fz0 = fz0;
+			this.fz1 = fz1;
+		}
 	}
 
 	/** A water cell a ray reaches: its top or south face where the ray first enters water. */
@@ -1003,6 +1205,9 @@ public final class GpuMesher {
 		int cz1 = zHigh(maxV, mesh.topY, mesh.sin, mesh.cos) + reachZ;
 		int highest = Integer.MIN_VALUE;
 		for (int x = cx0; x <= cx1 && mesh.lowestY != Integer.MAX_VALUE; x++) {
+			// The chunk the last z was in and its caster faces: sixteen z a chunk.
+			int casterChunkZ = Integer.MIN_VALUE;
+			ChunkBakeData.CasterChunk casterChunk = null;
 			for (int z = cz0; z <= cz1; z++) {
 				ChunkSnapshot chunk = reader.snapshot(x, z);
 				if (chunk == null) {
@@ -1013,6 +1218,17 @@ public final class GpuMesher {
 				int top = Math.min(chunk.surface(x & 15, z & 15) + 1, mesh.topY + reachY);
 				if (lifted) {
 					top = Math.min(top, helper.lid(x, z) - 1);
+				} else {
+					if (z >> 4 != casterChunkZ) {
+						casterChunkZ = z >> 4;
+						casterChunk = reader.casterChunk(x >> 4, casterChunkZ, bottom);
+					}
+					if (casterChunk != null) {
+						int column = ((z & 15) << 4) | (x & 15);
+						highest = casters(mesh, looks, casterChunk.faces(), casterChunk.offsets()[column], casterChunk.offsets()[column + 1], x, z, top, bottom,
+							reader.minY(), highest);
+						continue;
+					}
 				}
 				long[] mayCast = null;
 				int castY = Integer.MIN_VALUE;
@@ -1067,6 +1283,51 @@ public final class GpuMesher {
 		mesh.casterZ1 = cz1 + 1;
 		mesh.casterY0 = bottom;
 		mesh.casterY1 = Math.max(highest, mesh.topY);
+	}
+
+	/**
+	 * Adds a column's caster faces from {@code top} down to {@code bottom}, from what {@link VoxelReader#casterChunk}
+	 * found ({@code faces} from {@code from} to {@code to}): the faces the scan above adds, in its order.
+	 * Returns the new {@code highest}.
+	 */
+	private static int casters(Mesh mesh, BlockLooks looks, int[] faces, int from, int to, int x, int z, int top, int bottom, int minY, int highest) {
+		Quads casters = mesh.casters;
+		for (int k = from; k < to; k++) {
+			int entry = faces[k];
+			int y = (entry >> 4) + minY;
+			int bits = entry & 15;
+			if (y < bottom) {
+				break;
+			}
+			if (bits == ChunkBakeData.SHAPE) {
+				int id = faces[++k];
+				if (y > top) {
+					continue;
+				}
+				int[] boxes = looks.faces(looks.shape[id]).boxes;
+				for (int b = 0; b < boxes.length; b += 2) {
+					casters.add(x, y, z, TOP, 0, 0, 0, 0, boxes[b], boxes[b + 1]);
+					casters.add(x, y, z, WEST, 0, 0, 0, 0, boxes[b], boxes[b + 1]);
+					casters.add(x, y, z, SOUTH, 0, 0, 0, 0, boxes[b], boxes[b + 1]);
+				}
+				highest = Math.max(highest, y + 1);
+				continue;
+			}
+			if (y > top) {
+				continue;
+			}
+			if ((bits & ChunkBakeData.TOP) != 0) {
+				casters.add(x, y, z, TOP, 0, 0, 0, 0);
+				highest = Math.max(highest, y + 1);
+			}
+			if ((bits & ChunkBakeData.WEST) != 0) {
+				casters.add(x, y, z, WEST, 0, 0, 0, 0);
+			}
+			if ((bits & ChunkBakeData.SOUTH) != 0) {
+				casters.add(x, y, z, SOUTH, 0, 0, 0, 0);
+			}
+		}
+		return highest;
 	}
 
 	/**

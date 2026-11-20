@@ -299,6 +299,151 @@ public final class VoxelReader {
 		return out;
 	}
 
+	/**
+	 * Whether bakes share what they work out from a chunk's blocks ({@link ChunkBakeData}). Only
+	 * for checking that they come out the same either way.
+	 */
+	public static boolean SHARED = true;
+
+	/**
+	 * The shadow caster faces of the chunk at these chunk coordinates as {@link GpuMesher}'s casters
+	 * find them, every column from the block above its top down to {@code bottom} at least, from what
+	 * an earlier bake found if it still holds, else scanned now. Null where the chunk is missing or
+	 * nothing is shared.
+	 */
+	ChunkBakeData.@Nullable CasterChunk casterChunk(int cx, int cz, int bottom) {
+		Decoded chunk = this.chunk(cx, cz);
+		if (chunk == null || chunk.shared == null || chunk.shared.shapes == null) {
+			return null;
+		}
+		ChunkBakeData.CasterChunk known = chunk.shared.casters;
+		if (known != null && known.downTo() <= bottom && (known.west() == null || known.west() == this.blocksToken(cx - 1, cz))
+			&& (known.south() == null || known.south() == this.blocksToken(cx, cz + 1))) {
+			return known;
+		}
+		// Tiles nearby reach down about as far: a little further now saves scanning it all again.
+		int downTo = Math.max(this.minY, Math.min(bottom, known == null ? bottom : known.downTo()) - 16);
+		int[] offsets = new int[257];
+		int[] faces = new int[1024];
+		int length = 0;
+		boolean west = false;
+		boolean south = false;
+		for (int column = 0; column < 256; column++) {
+			offsets[column] = length;
+			int x = (cx << 4) | (column & 15);
+			int z = (cz << 4) | (column >> 4);
+			long[] mayCast = null;
+			int castY = Integer.MIN_VALUE;
+			for (int y = chunk.snapshot.surface(column & 15, column >> 4) + 1; y >= downTo; y--) {
+				// As GpuMesher.casters: rock under rock casts nothing, which these bits skip.
+				if (y >> 4 != castY) {
+					castY = y >> 4;
+					mayCast = this.casterSection(cx, castY, cz);
+				}
+				int i = ((y & 15) << 8) | column;
+				if (mayCast != null && (mayCast[i >> 6] >>> i & 1) == 0) {
+					continue;
+				}
+				int solid = this.solid(x, y, z);
+				int bits;
+				int id = 0;
+				if (solid == 2) {
+					id = this.state(x, y, z);
+					if (id < 0 || this.shapes[id] == 0) {
+						continue;
+					}
+					bits = ChunkBakeData.SHAPE;
+				} else if (solid == 1) {
+					bits = 0;
+					if (this.solid(x, y + 1, z) != 1) {
+						bits |= ChunkBakeData.TOP;
+					}
+					west |= (x & 15) == 0;
+					if (this.solid(x - 1, y, z) != 1) {
+						bits |= ChunkBakeData.WEST;
+					}
+					south |= (z & 15) == 15;
+					if (this.solid(x, y, z + 1) != 1) {
+						bits |= ChunkBakeData.SOUTH;
+					}
+					if (bits == 0) {
+						continue;
+					}
+				} else {
+					continue;
+				}
+				if (length + 2 > faces.length) {
+					faces = java.util.Arrays.copyOf(faces, faces.length * 2);
+				}
+				faces[length++] = (y - this.minY) << 4 | bits;
+				if (bits == ChunkBakeData.SHAPE) {
+					faces[length++] = id;
+				}
+			}
+		}
+		offsets[256] = length;
+		ChunkBakeData.CasterChunk made = new ChunkBakeData.CasterChunk(downTo, offsets, java.util.Arrays.copyOf(faces, length),
+			west ? this.blocksToken(cx - 1, cz) : null, south ? this.blocksToken(cx, cz + 1) : null);
+		chunk.shared.casters = made;
+		return made;
+	}
+
+	/**
+	 * See {@link ChunkBakeData#openFrom}: for the chunk at these chunk coordinates as this job reads
+	 * it, per column {@code (z << 4) | x}, the lowest y from which every cell up is {@link Looks#AIR}
+	 * as {@link #state} reads it. Null where the chunk is missing or nothing is shared.
+	 */
+	int @Nullable [] openFrom(int chunkX, int chunkZ) {
+		Decoded chunk = this.chunk(chunkX, chunkZ);
+		if (chunk == null || chunk.shared == null) {
+			return null;
+		}
+		int[] open = chunk.shared.openFrom;
+		if (open == null) {
+			open = new int[256];
+			java.util.Arrays.fill(open, Integer.MIN_VALUE);
+			int left = 256;
+			byte[] kinds = this.kinds;
+			for (int index = chunk.sections.length - 1; index >= 0 && left > 0; index--) {
+				Section section = chunk.section(index);
+				if (section == AIR_SECTION) {
+					continue;
+				}
+				int y0 = (chunk.snapshot.minSectionY + index) << 4;
+				int[] ids = chunk.ids(index, this.unpacked);
+				for (int column = 0; column < 256; column++) {
+					if (open[column] != Integer.MIN_VALUE) {
+						continue;
+					}
+					for (int y = 15; y >= 0; y--) {
+						if (kinds[ids[(y << 8) | column]] != Looks.AIR) {
+							open[column] = y0 + y + 1;
+							left--;
+							break;
+						}
+					}
+				}
+			}
+			for (int column = 0; column < 256; column++) {
+				if (open[column] == Integer.MIN_VALUE) {
+					open[column] = this.minY;
+				}
+			}
+			chunk.shared.openFrom = open;
+		}
+		return open;
+	}
+
+	/** The {@link ChunkSnapshot#blocksToken} of a chunk as this job reads it, {@link ChunkBakeData#MISSING} where it has none. */
+	private Object blocksToken(int chunkX, int chunkZ) {
+		Decoded chunk = this.chunk(chunkX, chunkZ);
+		return chunk == null ? ChunkBakeData.MISSING : chunk.snapshot.blocksToken();
+	}
+
+	int minY() {
+		return this.minY;
+	}
+
 	/** A chunk this job has already read, without asking the source for one it hasn't: null then, or where it had none. */
 	private @Nullable Decoded peek(int chunkX, int chunkZ) {
 		int slot = ((chunkX & TABLE_MASK) << TABLE_BITS) | (chunkZ & TABLE_MASK);
@@ -382,7 +527,8 @@ public final class VoxelReader {
 		Decoded decoded = this.cache.get(key);
 		if (decoded == null && !this.cache.containsKey(key)) {
 			ChunkSnapshot snapshot = this.source.chunk(chunkX, chunkZ);
-			decoded = snapshot == null ? null : new Decoded(snapshot, this.looks);
+			decoded = snapshot == null ? null : new Decoded(snapshot, this.looks,
+				this.looks == null || this.kinds == null ? null : ChunkBakeData.of(snapshot, this.looks, this.kinds, this.shapes));
 			this.cache.put(key, decoded);
 		}
 		this.tableX[slot] = chunkX;
@@ -430,9 +576,13 @@ public final class VoxelReader {
 		/** See {@link VoxelReader#solidTop}; {@code Integer.MAX_VALUE} until worked out. */
 		int solidTop = Integer.MAX_VALUE;
 
-		Decoded(ChunkSnapshot snapshot, @Nullable Looks looks) {
+		/** What earlier bakes worked out from these blocks under these looks, shared with them; null where nothing is shared. */
+		final @Nullable ChunkBakeData shared;
+
+		Decoded(ChunkSnapshot snapshot, @Nullable Looks looks, @Nullable ChunkBakeData shared) {
 			this.snapshot = snapshot;
 			this.looks = looks;
+			this.shared = shared;
 			this.sections = new Section[snapshot.sectionCount()];
 			this.ids = new int[snapshot.sectionCount()][];
 			this.solid = new long[snapshot.sectionCount()][];
@@ -446,6 +596,15 @@ public final class VoxelReader {
 				return NOTHING_SOLID;
 			}
 			long[] mask = this.solid[index];
+			if (mask == null && this.shared != null) {
+				// Published after its partial mask, so that is there too, unless the data was emptied since.
+				long[] solid = this.shared.solid.get(index);
+				long[] partial = solid == null ? null : this.shared.partial.get(index);
+				if (partial != null) {
+					this.partial[index] = partial;
+					this.solid[index] = mask = solid;
+				}
+			}
 			if (mask == null) {
 				long[] partial = NOTHING_SOLID;
 				Section section = this.section(index);
@@ -517,6 +676,10 @@ public final class VoxelReader {
 				}
 				this.partial[index] = partial;
 				this.solid[index] = mask;
+				if (this.shared != null) {
+					this.shared.partial.set(index, partial);
+					this.shared.solid.set(index, mask);
+				}
 			}
 			return mask;
 		}
