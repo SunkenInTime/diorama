@@ -82,7 +82,6 @@ public final class SettingsScreen extends Screen {
 		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
 		minimap.toggle("minimap_shown", () -> s.minimap, v -> s.minimap = v);
 		minimap.toggle("compass", () -> s.compass, v -> s.compass = v);
-		minimap.toggle("lock_north", () -> s.minimapLockNorth, v -> s.minimapLockNorth = v);
 		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
 		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v, ServerRules.caveMapsAllowed() ? null : false);
@@ -113,7 +112,10 @@ public final class SettingsScreen extends Screen {
 		// Side by side, so the tab stays short enough for a small screen.
 		minimap.choice("shape", Settings.Shape.values(), () -> s.minimapShape, v -> s.minimapShape = v);
 		minimap.choice("frame", Settings.Frame.values(), () -> s.minimapFrame, v -> s.minimapFrame = v);
-		minimap.lastTwoSideBySide();
+		// A button beside them and not a ninth checkbox: a fifth row of those doesn't fit a small screen.
+		minimap.cycle("lock_north", () -> s.minimapLockNorth ? 1 : 0, 2, i -> s.minimapLockNorth = i == 1,
+			i -> i == 1 ? net.minecraft.network.chat.CommonComponents.OPTION_ON : net.minecraft.network.chat.CommonComponents.OPTION_OFF);
+		minimap.lastThreeSideBySide();
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		Boolean radarSet = ServerRules.radarAllowed() ? null : false;
@@ -388,15 +390,11 @@ public final class SettingsScreen extends Screen {
 			boolean tight = 22 + checkRows * 22 + rows * 24 + this.headings.size() * HEADING > area.height();
 			int rowStep = tight ? 22 : 24;
 			int y = area.top() + (tight ? 6 : 12);
-			// The Minimap tab's five rows of checkboxes still reach the buttons below on the smallest
-			// window: then the checkboxes, 17 pixels tall, sit a pixel apart.
-			boolean tighter = tight && 6 + checkRows * 20 + 3 + rows * 22 - 2 + this.headings.size() * HEADING > area.height();
-			int checkStep = tighter ? 18 : tight ? 20 : 22;
 			for (int i = 0; i < this.checkboxes.size(); i++) {
-				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * checkStep);
+				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * (tight ? 20 : 22));
 			}
 			if (!this.checkboxes.isEmpty()) {
-				y += checkRows * checkStep + (tight ? 3 : 10);
+				y += checkRows * (tight ? 20 : 22) + (tight ? 3 : 10);
 			}
 			for (int i = 0; i < this.wide.size(); i++) {
 				AbstractWidget widget = this.wide.get(i);
