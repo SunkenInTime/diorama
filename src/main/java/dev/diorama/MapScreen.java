@@ -9,6 +9,7 @@ import dev.diorama.bake.TileKey;
 import dev.diorama.compat.CreateTrains;
 import dev.diorama.craft.FarTrains;
 import dev.diorama.bake.TileSpots;
+import dev.diorama.compat.FtbChunks;
 import dev.diorama.data.SavedBiomes;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
@@ -134,6 +135,10 @@ public final class MapScreen extends Screen {
 	private boolean dragged;
 	/** The right-click menu, while it's open. */
 	private @Nullable MapMenu menu;
+	/** FTB chunk area select: start chunk while right-dragging, or null. */
+	private int @Nullable [] claimDragStart;
+	/** End chunk of the current right-drag claim selection. */
+	private int @Nullable [] claimDragEnd;
 	/** Whether the current mouse press started on the menu. */
 	private boolean pressOnMenu;
 	/** The button of the latest press, until it's released. */
@@ -224,6 +229,8 @@ public final class MapScreen extends Screen {
 		this.pressButton = -1;
 		this.pressOnMenu = false;
 		this.pressOnControl = false;
+		this.claimDragStart = null;
+		this.claimDragEnd = null;
 		Settings settings = Settings.get();
 		this.dimensionButton = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.nextDimension())
 			.size(20, 20).createNarration(n -> this.dimensionName().copy()).build());
@@ -624,6 +631,9 @@ public final class MapScreen extends Screen {
 			this.caret(graphics, this.sliceUp, false);
 			this.caret(graphics, this.sliceDown, true);
 		}
+		if (this.claimDragStart != null && this.claimDragEnd != null && this.lastView != null) {
+			this.drawClaimSelection(graphics, this.lastView, this.claimDragStart, this.claimDragEnd);
+		}
 		if (this.menu != null) {
 			// Over everything drawn so far, text included.
 			//? if >=1.21.6 {
@@ -881,6 +891,25 @@ public final class MapScreen extends Screen {
 			&& this.draw.release(this.lastView, this.font, this.dimension(), x, y, button, moved)) {
 			return true;
 		}
+		if (button == InputConstants.MOUSE_BUTTON_RIGHT && this.claimDragStart != null && this.claimDragEnd != null && moved) {
+			int[] from = this.claimDragStart;
+			int[] to = this.claimDragEnd;
+			this.claimDragStart = null;
+			this.claimDragEnd = null;
+			List<MapMenu.Item> items;
+			if (chunksInRectCount(from, to) > MAX_CLAIM_AREA) {
+				// A zoomed-out drag can span millions of chunks: nothing to list, and nothing FTB Chunks would take.
+				items = List.of(MapMenu.Item.info(Component.translatable("diorama.menu.area_too_big", MAX_CLAIM_AREA)));
+			} else {
+				items = this.chunkItems(chunksInRect(from, to));
+			}
+			if (!items.isEmpty()) {
+				this.menu = new MapMenu(items, this.font, x, y, this.width, this.height);
+			}
+			return true;
+		}
+		this.claimDragStart = null;
+		this.claimDragEnd = null;
 		if (moved) {
 			return true;
 		}
@@ -918,10 +947,12 @@ public final class MapScreen extends Screen {
 		}
 		CompletableFuture<MapLevel.Spot> spot = this.spotAt(screenX, screenY, true);
 		BlockPos rough = this.roughSpot(screenX, screenY);
+		// Taken now: a slow lookup may answer after the cursor has moved on.
+		int[] chunk = this.chunkAtScreen(screenX, screenY);
 		try {
 			// Where the chunks are gone, the spot comes off the disk, usually in a few milliseconds.
 			MapLevel.Spot found = spot.get(SPOT_WAIT_MS, TimeUnit.MILLISECONDS);
-			this.menu = new MapMenu(this.spotItems(found, rough), this.font, screenX, screenY, this.width, this.height);
+			this.menu = new MapMenu(this.spotItems(found, rough, chunk), this.font, screenX, screenY, this.width, this.height);
 		} catch (TimeoutException e) {
 			// A slow disk: say so until it answers, unless the menu has been closed or replaced by then.
 			MapMenu waiting = new MapMenu(List.of(MapMenu.Item.info(Component.translatable("diorama.menu.finding"))),
@@ -929,13 +960,13 @@ public final class MapScreen extends Screen {
 			this.menu = waiting;
 			spot.thenAcceptAsync(found -> {
 				if (this.menu == waiting) {
-					this.menu = new MapMenu(this.spotItems(found, rough), this.font, screenX, screenY, this.width, this.height);
+					this.menu = new MapMenu(this.spotItems(found, rough, chunk), this.font, screenX, screenY, this.width, this.height);
 				}
 			}, this.minecraft);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		} catch (ExecutionException e) {
-			this.menu = new MapMenu(this.spotItems(MapLevel.Spot.NOTHING, rough), this.font, screenX, screenY, this.width, this.height);
+			this.menu = new MapMenu(this.spotItems(MapLevel.Spot.NOTHING, rough, chunk), this.font, screenX, screenY, this.width, this.height);
 		}
 	}
 
@@ -995,7 +1026,7 @@ public final class MapScreen extends Screen {
 		return Projection.facing().worldPos(new BlockPos((int) Math.floor(u), y, (int) Math.floor(Projection.zAt(v, y))));
 	}
 
-	private List<MapMenu.Item> spotItems(MapLevel.Spot found, @Nullable BlockPos rough) {
+	private List<MapMenu.Item> spotItems(MapLevel.Spot found, @Nullable BlockPos rough, int @Nullable [] chunk) {
 		BlockPos spot = found.pos();
 		if (spot == null) {
 			List<MapMenu.Item> unknown = new ArrayList<>();
@@ -1007,6 +1038,10 @@ public final class MapScreen extends Screen {
 					unknown.add(MapMenu.Item.info(this.roughly(rough.getX(), rough.getZ())));
 				}
 				unknown.add(this.copyItem(rough.getX() + " " + rough.getZ()));
+			}
+			// Claiming doesn't need the ground to have been mapped.
+			if (chunk != null) {
+				unknown.addAll(this.chunkItems(chunk[0], chunk[1]));
 			}
 			return unknown;
 		}
@@ -1037,7 +1072,185 @@ public final class MapScreen extends Screen {
 				this.minecraft.gui.setScreen(null);
 			}
 		}));
+		Settings.ClaimsStyle claimStyle = Settings.get().claimsStyle == null ? Settings.ClaimsStyle.SURFACE : Settings.get().claimsStyle;
+		if (this.layer == TileKey.SURFACE && claimStyle == Settings.ClaimsStyle.SURFACE) {
+			items.addAll(this.chunkItems(x >> 4, z >> 4));
+		} else {
+			if (chunk != null) {
+				items.addAll(this.chunkItems(chunk[0], chunk[1]));
+			}
+		}
 		return items;
+	}
+
+	/**
+	 * What the player can do to one or more chunks with FTB Chunks. Chunk positions come from the
+	 * map projection under the cursor (not the 3D surface pick), so they line up with the claim
+	 * overlay. Nothing without FTB Chunks, and nothing on another dimension's map.
+	 */
+	private List<MapMenu.Item> chunkItems(int chunkX, int chunkZ) {
+		return this.chunkItems(java.util.List.of(new int[] {chunkX, chunkZ}));
+	}
+
+	private List<MapMenu.Item> chunkItems(java.util.Collection<int[]> chunks) {
+		if (this.otherDimension != null || this.minecraft.level == null || !FtbChunks.canRequest() || chunks.isEmpty()) {
+			return List.of();
+		}
+		java.util.List<int[]> list = new java.util.ArrayList<>(chunks);
+		int chunkX = list.get(0)[0];
+		int chunkZ = list.get(0)[1];
+		boolean multi = list.size() > 1;
+		// For a multi selection, offer claim/unclaim/load based on the area's contents.
+		boolean anyUnclaimed = false;
+		boolean anyOwn = false;
+		boolean anyForce = false;
+		boolean anyOwnNoForce = false;
+		for (int[] xz : list) {
+			Claims.Claim c = Claims.claim(this.minecraft.level.dimension(), xz[0], xz[1]);
+			if (c == null) {
+				anyUnclaimed = true;
+			} else if (c.owner() instanceof FtbChunks.Team team && FtbChunks.isOwn(team)) {
+				anyOwn = true;
+				if (c.forceLoaded()) {
+					anyForce = true;
+				} else {
+					anyOwnNoForce = true;
+				}
+			}
+		}
+		List<MapMenu.Item> items = new ArrayList<>();
+		if (multi) {
+			items.add(MapMenu.Item.info(Component.translatable("diorama.menu.chunks", list.size())));
+		} else {
+			items.add(MapMenu.Item.info(Component.translatable("diorama.menu.chunk", chunkX, chunkZ)));
+		}
+		if (anyUnclaimed) {
+			items.add(this.chunkItem("diorama.menu.claim_chunk", FtbChunks.Action.CLAIM, list));
+		}
+		if (anyOwn) {
+			items.add(this.chunkItem("diorama.menu.unclaim_chunk", FtbChunks.Action.UNCLAIM, list));
+		}
+		if (anyOwnNoForce) {
+			items.add(this.chunkItem("diorama.menu.enable_forceload", FtbChunks.Action.LOAD, list));
+		}
+		if (anyForce) {
+			items.add(this.chunkItem("diorama.menu.disable_forceload", FtbChunks.Action.UNLOAD, list));
+		}
+		if (items.size() <= 1) {
+			return List.of();
+		}
+		return items;
+	}
+
+	private MapMenu.Item chunkItem(String key, FtbChunks.Action action, java.util.Collection<int[]> chunks) {
+		java.util.List<int[]> copy = new java.util.ArrayList<>(chunks);
+		return MapMenu.Item.action(Component.translatable(key), true, () -> FtbChunks.request(action, copy));
+	}
+
+
+	private int claimProjectionY() {
+		if (this.layer != TileKey.SURFACE) {
+			return this.layer;
+		}
+		Settings.ClaimsStyle style = Settings.get().claimsStyle == null ? Settings.ClaimsStyle.SURFACE : Settings.get().claimsStyle;
+		if (style != Settings.ClaimsStyle.SURFACE) {
+			return USUAL_GROUND_Y;
+		}
+		return this.minecraft.player != null ? this.minecraft.player.getBlockY() : USUAL_GROUND_Y;
+	}
+
+	/** Highlights the FTB chunk rectangle being selected with a right-drag. */
+	private void drawClaimSelection(GuiGraphicsExtractor graphics, MapViewport.View view, int[] a, int[] b) {
+		int x0 = Math.min(a[0], b[0]);
+		int x1 = Math.max(a[0], b[0]);
+		int z0 = Math.min(a[1], b[1]);
+		int z1 = Math.max(a[1], b[1]);
+		int y = this.claimProjectionY();
+		// Four corners of the selection in world space → map u/v → screen.
+		double[][] corners = {
+			{x0 * 16.0, z0 * 16.0},
+			{(x1 + 1) * 16.0, z0 * 16.0},
+			{(x1 + 1) * 16.0, (z1 + 1) * 16.0},
+			{x0 * 16.0, (z1 + 1) * 16.0}
+		};
+		float minSx = Float.POSITIVE_INFINITY, minSy = Float.POSITIVE_INFINITY;
+		float maxSx = Float.NEGATIVE_INFINITY, maxSy = Float.NEGATIVE_INFINITY;
+		for (double[] c : corners) {
+			double u = Projection.u(c[0], c[1]);
+			double v = Projection.v(c[0], y, c[1]);
+			float sx = view.screenX(u);
+			float sy = view.screenY(v);
+			minSx = Math.min(minSx, sx);
+			minSy = Math.min(minSy, sy);
+			maxSx = Math.max(maxSx, sx);
+			maxSy = Math.max(maxSy, sy);
+		}
+		int left = (int) Math.floor(minSx);
+		int top = (int) Math.floor(minSy);
+		int right = (int) Math.ceil(maxSx);
+		int bottom = (int) Math.ceil(maxSy);
+		graphics.fill(left, top, right, bottom, 0x55FFFFFF);
+		graphics.fill(left, top, right, top + 1, 0xFFFFFFFF);
+		graphics.fill(left, bottom - 1, right, bottom, 0xFFFFFFFF);
+		graphics.fill(left, top, left + 1, bottom, 0xFFFFFFFF);
+		graphics.fill(right - 1, top, right, bottom, 0xFFFFFFFF);
+	}
+
+	/**
+	 * The chunk under a screen point from the map projection at a stable height (player Y, or the
+	 * cave slice), so claim actions match the claim overlay instead of a building face.
+	 */
+	private int @Nullable [] chunkAtScreen(double screenX, double screenY) {
+		MapViewport.View view = this.lastView;
+		if (view == null) {
+			return null;
+		}
+		double u = view.centerU() + (screenX - view.x() - view.width() / 2.0) / view.zoom();
+		double v = view.centerV() + (screenY - view.y() - view.height() / 2.0) / view.zoom();
+		Settings.ClaimsStyle style = Settings.get().claimsStyle == null ? Settings.ClaimsStyle.SURFACE : Settings.get().claimsStyle;
+		// In SURFACE mode, pick the exact 3D terrain block under the cursor so claims match the rendered ground!
+		if (this.layer == TileKey.SURFACE && style == Settings.ClaimsStyle.SURFACE) {
+			MapSession session = MapSession.get();
+			BlockLooks looks = BlockLooks.get();
+			if (session != null && looks != null) {
+				double rowV = TileSpots.rowMiddle(v);
+				TileKey tile = new TileKey(this.layer, (int) Math.floor(u / Projection.TILE_UNITS), (int) Math.floor(rowV / Projection.TILE_UNITS));
+				MapPick pick = new MapPick(session.map(), looks, tile, session.map().fogOfWar());
+				if (pick.pick(u, rowV) == MapPick.FOUND) {
+					BlockPos pos = Projection.facing().worldPos(new BlockPos((int) Math.floor(u), pick.y, pick.z));
+					return new int[] {pos.getX() >> 4, pos.getZ() >> 4};
+				}
+			}
+		}
+		int y = this.claimProjectionY();
+		double z = Projection.zAt(v, y);
+		Facing facing = Projection.facing();
+		int wx = (int) Math.floor(facing.worldX(u, z));
+		int wz = (int) Math.floor(facing.worldZ(u, z));
+		return new int[] {wx >> 4, wz >> 4};
+	}
+
+	/** The most chunks one right-drag selection may hold. */
+	private static final long MAX_CLAIM_AREA = 1024;
+
+	/** How many chunks the rectangle between two chunks holds, counted as a long so it can't overflow. */
+	private static long chunksInRectCount(int[] a, int[] b) {
+		return (Math.abs((long) a[0] - b[0]) + 1) * (Math.abs((long) a[1] - b[1]) + 1);
+	}
+
+	/** The chunks of the rectangle between two chunks; call only when {@link #chunksInRectCount} is within {@link #MAX_CLAIM_AREA}. */
+	private static java.util.List<int[]> chunksInRect(int[] a, int[] b) {
+		int x0 = Math.min(a[0], b[0]);
+		int x1 = Math.max(a[0], b[0]);
+		int z0 = Math.min(a[1], b[1]);
+		int z1 = Math.max(a[1], b[1]);
+		java.util.List<int[]> out = new java.util.ArrayList<>((int) chunksInRectCount(a, b));
+		for (int x = x0; x <= x1; x++) {
+			for (int z = z0; z <= z1; z++) {
+				out.add(new int[] {x, z});
+			}
+		}
+		return out;
 	}
 
 	/**
@@ -1142,6 +1355,16 @@ public final class MapScreen extends Screen {
 			if (this.lastView != null) {
 				this.draw.drag(this.lastView, this.font, this.dimension(), x, y);
 			}
+			return true;
+		}
+		// Right-drag selects an area of chunks for FTB Chunks (when available).
+		if (button == InputConstants.MOUSE_BUTTON_RIGHT && this.dragged && !this.draw.active()
+			&& this.otherDimension == null && FtbChunks.canRequest()) {
+			this.menu = null;
+			if (this.claimDragStart == null) {
+				this.claimDragStart = this.chunkAtScreen(this.pressX, this.pressY);
+			}
+			this.claimDragEnd = this.chunkAtScreen(x, y);
 			return true;
 		}
 		// While drawing, the right and middle buttons pan too.

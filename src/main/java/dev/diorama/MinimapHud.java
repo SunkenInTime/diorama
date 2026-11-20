@@ -1,5 +1,6 @@
 package dev.diorama;
 
+
 import dev.diorama.bake.TileKey;
 import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
@@ -226,9 +227,11 @@ public final class MinimapHud implements HudElement {
 		Vec3 pos = viewer.getPosition(partialTick);
 		Font font = mc.font;
 		List<InfoLine> info = this.infoLines(settings, viewer, mc);
-		float text = TextSize.scale(settings.minimapTextSize);
 		// Each line is the game's text and a pixel of its shadow, with a pixel between lines.
-		int infoHeight = (int) Math.ceil(info.size() * 10 * text);
+		int infoHeight = 0;
+		for (InfoLine line : info) {
+			infoHeight += (int) Math.ceil(10 * line.scale());
+		}
 		int[] placed = place(anchor, heldSize > 0 ? heldSize : wanted, heldSize <= 0, graphics.guiWidth(), graphics.guiHeight(), infoHeight, effects, bossBars);
 		int x = placed[0];
 		int y = placed[1];
@@ -290,19 +293,33 @@ public final class MinimapHud implements HudElement {
 		float left = x - 2;
 		float textRight = x + size + 2;
 		for (InfoLine line : info) {
-			float w = font.width(line.text()) * text;
-			// A line wider than the minimap grows away from the screen edge the minimap is placed by; it stays on screen while it fits.
-			// Centred on a whole GUI pixel, rounded down as the game's own text size always was.
-			float tx = anchor.centered() ? x + (float) Math.floor((size - w) / 2) : anchor.right() ? x + size - w : x;
+			float lineScale = line.scale();
+			boolean hasSwatch = line.swatchColor() != NO_SWATCH;
+			int swatchGap = hasSwatch ? 10 : 0;
+			float w = (font.width(line.text()) + swatchGap) * lineScale;
+			// Alignment: explicit setting, or follow the minimap corner (AUTO).
+			float tx;
+			Settings.MinimapTextAlign align = settings.minimapTextAlign == null ? Settings.MinimapTextAlign.AUTO : settings.minimapTextAlign;
+			if (align == Settings.MinimapTextAlign.LEFT || (align == Settings.MinimapTextAlign.AUTO && !anchor.centered() && !anchor.right())) {
+				tx = x;
+			} else if (align == Settings.MinimapTextAlign.RIGHT || (align == Settings.MinimapTextAlign.AUTO && !anchor.centered() && anchor.right())) {
+				tx = x + size - w;
+			} else {
+				tx = x + (float) Math.floor((size - w) / 2);
+			}
 			tx = TextSize.snap(Math.max(1, Math.min(tx, graphics.guiWidth() - 1 - w)));
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(tx, textY);
-			graphics.pose().scale(text);
-			graphics.text(font, line.text(), 0, 0, line.color(), true);
+			graphics.pose().scale(lineScale);
+			if (hasSwatch) {
+				graphics.fill(0, 0, 7, 7, 0xFF000000);
+				graphics.fill(1, 1, 6, 6, line.swatchColor());
+			}
+			graphics.text(font, line.text(), swatchGap, 0, line.color(), true);
 			graphics.pose().popMatrix();
 			left = Math.min(left, tx - 1);
 			textRight = Math.max(textRight, tx + w + 1);
-			textY += 10 * text;
+			textY += 10 * lineScale;
 		}
 		return new int[] {(int) Math.floor(left), y - 2, (int) Math.ceil(textRight), info.isEmpty() ? y + size + 2 : y + size + 4 + infoHeight, x, y, size, size + infoHeight};
 	}
@@ -479,25 +496,68 @@ public final class MinimapHud implements HudElement {
 	}
 
 	private List<InfoLine> infoLines(Settings settings, Entity viewer, Minecraft mc) {
-		List<InfoLine> lines = new ArrayList<>();
 		BlockPos pos = viewer.blockPosition();
-		if (settings.coordinates) {
-			lines.add(new InfoLine(pos.getX() + ", " + pos.getY() + ", " + pos.getZ(), INFO_COLOR));
+		// Size 0 hides that line (slider set to Off).
+		float coordsScale = settings.minimapCoordsSize > 0 ? TextSize.scale(settings.minimapCoordsSize) : 0;
+		float biomeScale = settings.minimapBiomeSize > 0 ? TextSize.scale(settings.minimapBiomeSize) : 0;
+		float claimScale = settings.minimapClaimSize > 0 ? TextSize.scale(settings.minimapClaimSize) : 0;
+		float timeScale = settings.minimapTimeSize > 0 ? TextSize.scale(settings.minimapTimeSize) : 0;
+
+		InfoLine coords = null;
+		if (coordsScale > 0) {
+			coords = new InfoLine(pos.getX() + ", " + pos.getY() + ", " + pos.getZ(), INFO_COLOR, coordsScale, NO_SWATCH);
 		}
-		if (settings.biome) {
-			mc.level.getBiome(pos).unwrapKey().ifPresent(key ->
-				lines.add(new InfoLine(Component.translatable(key.identifier().toLanguageKey("biome")).getString(), INFO_COLOR)));
+		InfoLine biome = null;
+		if (biomeScale > 0) {
+			var keyOpt = mc.level.getBiome(pos).unwrapKey();
+			if (keyOpt.isPresent()) {
+				biome = new InfoLine(Component.translatable(keyOpt.get().identifier().toLanguageKey("biome")).getString(), INFO_COLOR, biomeScale, NO_SWATCH);
+			}
 		}
-		if (settings.gameTime != Settings.GameTime.OFF) {
+		InfoLine claim = null;
+		if (claimScale > 0 && Claims.supported()) {
+			Claims.Claim c = Claims.claim(mc.level.dimension(), pos.getX() >> 4, pos.getZ() >> 4);
+			if (c != null) {
+				String name = c.name() == null || c.name().isEmpty() ? Component.translatable("diorama.minimap.claim_unknown").getString() : c.name();
+				String text = c.forceLoaded()
+					? Component.translatable("diorama.minimap.claim_forceload", name).getString()
+					: Component.translatable("diorama.minimap.claim", name).getString();
+				Settings.ClaimColorMode mode = settings.claimColorMode == null ? Settings.ClaimColorMode.BOTH : settings.claimColorMode;
+				int clanArgb = 0xFF000000 | (c.rgb() & 0xFFFFFF);
+				int textColor = (mode == Settings.ClaimColorMode.TEXT || mode == Settings.ClaimColorMode.BOTH)
+					? clanArgb
+					: (c.forceLoaded() ? 0xFF55FF55 : INFO_COLOR);
+				int swatch = (mode == Settings.ClaimColorMode.ICON || mode == Settings.ClaimColorMode.BOTH) ? clanArgb : NO_SWATCH;
+				claim = new InfoLine(text, textColor, claimScale, swatch);
+			}
+		}
+		InfoLine time = null;
+		if (settings.gameTime != Settings.GameTime.OFF && timeScale > 0) {
 			//? if <1.21.2 {
 			/*// Until 1.21.2 the client worked this out only when a level loaded.
 			mc.level.updateSkyBrightness();
 			*///?}
 			// The Overworld's clock in every dimension, as Xaero's Minimap reads it: the Nether and
 			// the End have no day of their own, and this is when the player's bed would work.
-			lines.add(new InfoLine(gameTime(settings.gameTime, mc.level.getOverworldClockTime()), mc.level.isDarkOutside() ? BED_TIME_COLOR : INFO_COLOR));
+			time = new InfoLine(gameTime(settings.gameTime, mc.level.getOverworldClockTime()), mc.level.isDarkOutside() ? BED_TIME_COLOR : INFO_COLOR, timeScale, NO_SWATCH);
 		}
-		return lines;
+
+		java.util.List<String> order = settings.minimapInfoOrder == null || settings.minimapInfoOrder.isEmpty()
+			? java.util.List.of("C", "B", "L", "T") : settings.minimapInfoOrder;
+		List<InfoLine> ordered = new ArrayList<>(4);
+		for (String kind : order) {
+			InfoLine line = switch (kind) {
+				case "C" -> coords;
+				case "B" -> biome;
+				case "L" -> claim;
+				case "T" -> time;
+				default -> null;
+			};
+			if (line != null) {
+				ordered.add(line);
+			}
+		}
+		return ordered;
 	}
 
 	/**
@@ -520,7 +580,10 @@ public final class MinimapHud implements HudElement {
 	}
 
 	/** A line under the minimap. */
-	private record InfoLine(String text, int color) {
+	/** An info line with no colour swatch. Not -1, which is opaque white, a colour a clan can have. */
+	private static final int NO_SWATCH = 0;
+
+	private record InfoLine(String text, int color, float scale, int swatchColor) {
 	}
 
 	/** Called as the game draws each boss bar, with the bar's top. */

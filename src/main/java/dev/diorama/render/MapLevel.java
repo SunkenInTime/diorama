@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import dev.diorama.Claims;
+import dev.diorama.Settings;
 import dev.diorama.Diorama;
 import dev.diorama.Facing;
 import dev.diorama.Projection;
@@ -204,7 +205,7 @@ public final class MapLevel implements ChunkSource {
 	private final ConcurrentLinkedQueue<PaintedClaims> paintedClaims = new ConcurrentLinkedQueue<>();
 
 	/** Claims painted for a tile, on its pixels as they were at {@code revision}. */
-	private record PaintedClaims(TileKey key, MapTile tile, Claims.Snapshot claims, int revision, int @Nullable [] pixels) {
+	private record PaintedClaims(TileKey key, MapTile tile, Claims.Snapshot claims, Settings.ClaimsStyle style, int revision, int @Nullable [] pixels) {
 	}
 
 	/** At most this many tiles' claims are painted at once, beside the bakes. */
@@ -943,7 +944,7 @@ public final class MapLevel implements ChunkSource {
 			this.claimsInFlight.remove(painted.key());
 			// Not for a tile evicted meanwhile, nor one put in its place.
 			if (this.tiles.get(painted.key()) == painted.tile() && !this.closed) {
-				painted.tile().paintClaims(painted.pixels(), painted.claims(), painted.revision());
+				painted.tile().paintClaims(painted.pixels(), painted.claims(), painted.style(), painted.revision());
 			}
 		}
 		if (this.trimStuck && System.currentTimeMillis() - this.lastTrimMs >= TRIM_RETRY_MS) {
@@ -1378,13 +1379,19 @@ public final class MapLevel implements ChunkSource {
 	 */
 	public @Nullable MapTexture claims(TileKey key, MapTile tile) {
 		TileStore store = this.store;
-		if (store == null || key.isCave()) {
+		if (store == null) {
+			return null;
+		}
+		Settings.ClaimsStyle style = currentClaimsStyle();
+		// SURFACE needs ground-chunk data (surface tiles). OUTLINE/WALLS also paint cave slices.
+		if (key.isCave() && style == Settings.ClaimsStyle.SURFACE) {
 			return null;
 		}
 		Claims.Snapshot claims = Claims.get();
 		Claims.Snapshot painted = tile.claimsPainted;
+		boolean styleChanged = tile.claimsPaintedStyle != style;
 		boolean moved = tile.claimsRevision != tile.pixelsRevision;
-		if (painted == claims && !moved) {
+		if (painted == claims && !styleChanged && !moved) {
 			return tile.claims();
 		}
 		// The chunks the tile could show, and the columns past its sides that its edges look at:
@@ -1399,13 +1406,14 @@ public final class MapLevel implements ChunkSource {
 		int cz0 = Math.min(facing.worldBlockZ(tx0, tz0), facing.worldBlockZ(tx1, tz1));
 		int cz1 = Math.max(facing.worldBlockZ(tx0, tz0), facing.worldBlockZ(tx1, tz1));
 		boolean near = claims.mayHaveAny(cx0, cz0, cx1, cz1);
-		boolean changed = painted == null ? near : claims.differsIn(painted, cx0, cz0, cx1, cz1);
+		boolean changed = (styleChanged && near) || (painted == null ? near : claims.differsIn(painted, cx0, cz0, cx1, cz1));
 		if (!changed && !(moved && near)) {
 			// Nothing claimed under this tile changed, and its pixels didn't, or nothing is claimed near it.
 			if (painted == null) {
-				tile.paintClaims(null, claims, tile.pixelsRevision);
+				tile.paintClaims(null, claims, style, tile.pixelsRevision);
 			} else {
 				tile.claimsPainted = claims;
+				tile.claimsPaintedStyle = style;
 				if (!near) {
 					tile.claimsRevision = tile.pixelsRevision;
 				}
@@ -1420,11 +1428,11 @@ public final class MapLevel implements ChunkSource {
 			BAKERS.execute(() -> {
 				int[] pixels = null;
 				try {
-					pixels = this.paintClaims(store, key, claims);
+					pixels = this.paintClaims(store, key, claims, style);
 				} catch (Throwable t) {
 					Diorama.LOGGER.error("Failed to paint the claims on tile {}", key, t);
 				}
-				this.paintedClaims.add(new PaintedClaims(key, tile, claims, revision, pixels));
+				this.paintedClaims.add(new PaintedClaims(key, tile, claims, style, revision, pixels));
 			});
 		}
 		return tile.claims();
@@ -1486,18 +1494,27 @@ public final class MapLevel implements ChunkSource {
 	/** For tests: the claims a tile shows by the current claims, painted on this thread; null for none. */
 	public int @Nullable [] claimPixels(TileKey key) {
 		TileStore store = this.store;
-		return store == null ? null : this.paintClaims(store, key, Claims.get());
+		return store == null ? null : this.paintClaims(store, key, Claims.get(), currentClaimsStyle());
 	}
 
 	/** A tile's claims, with its edge rows told apart from the tiles above and below it. Not on the render thread. */
-	private int @Nullable [] paintClaims(TileStore store, TileKey key, Claims.Snapshot claims) {
+	private int @Nullable [] paintClaims(TileStore store, TileKey key, Claims.Snapshot claims, Settings.ClaimsStyle style) {
+		if (style != Settings.ClaimsStyle.SURFACE) {
+			return ClaimPaint.paintFlat(key, claims, style);
+		}
 		byte[] chunks = store.chunks(key);
 		if (chunks == null) {
-			return null;
+			return ClaimPaint.paintFlat(key, claims, style);
 		}
 		TileKey north = new TileKey(key.layer(), key.tileU(), key.tileV() - 1, key.lod());
 		TileKey south = new TileKey(key.layer(), key.tileU(), key.tileV() + 1, key.lod());
-		return ClaimPaint.paint(key, chunks, store.chunks(north), store.chunks(south), claims);
+		return ClaimPaint.paint(key, chunks, store.chunks(north), store.chunks(south), claims, style);
+	}
+
+	/** The claim style the settings have now, SURFACE where none is saved. */
+	private static Settings.ClaimsStyle currentClaimsStyle() {
+		Settings.ClaimsStyle style = Settings.get().claimsStyle;
+		return style == null ? Settings.ClaimsStyle.SURFACE : style;
 	}
 
 	private void loadSaved(TileKey key, TileStore store) {

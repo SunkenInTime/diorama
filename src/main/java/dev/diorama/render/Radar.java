@@ -228,7 +228,7 @@ public final class Radar {
 		// pixel heads use whole screen pixels per texel and can come out bigger than their size.
 		Circle circle = view.round() ? Circle.in(view) : null;
 		// Names on the minimap are part of its text, so its Text size sizes them (#412). The map has no such setting.
-		float text = fullscreen ? 1 : TextSize.scale(settings.minimapTextSize);
+		float text = TextSize.scale(settings.radarTextSize);
 		IconBatch measure = circle == null ? null : IconBatch.measuring(graphics);
 		if (!players) {
 			List<ItemPicture> pictures = itemPictures(view, blips, fullscreen);
