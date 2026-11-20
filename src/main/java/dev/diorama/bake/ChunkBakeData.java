@@ -11,20 +11,21 @@ import org.jspecify.annotations.Nullable;
  * shadow casters reach over dozens of chunks the neighbouring tiles mesh too.
  *
  * <p>Everything here is a function of the chunk's blocks and the looks alone, or, for a caster
- * column on the chunk's west or south edge, of those and the blocks of the neighbour it reads,
- * which the column records by token. Entries are made whole and then published, so bakes on
+ * column on the chunk's west or south edge, of those and the blocks of the neighbours it reads,
+ * whose tokens the chunk's caster faces record. Entries are made whole and then published, so bakes on
  * several threads can share them; two bakes making the same entry make the same thing.
  *
  * <p>Only the {@link #KEPT} made last hold anything: the map keeps thousands of snapshots, and
- * masks for all of them would sit on the heap for good. An older one is emptied, and a bake that
- * comes to it works its entries out again, as for a chunk it never had.
+ * masks for all of them would sit on the heap for good. An older one is emptied and never handed out
+ * again: the next bake over its chunk makes a new one, which counts as the newest.
  */
 final class ChunkBakeData {
 	/** Stands for a neighbour the bake had no chunk for. */
 	static final Object MISSING = new Object();
 	/**
-	 * How many hold their entries at once: about the chunks a 16-chunk render distance loads, and at
-	 * most about fifty megabytes of masks where every section is mixed.
+	 * How many hold their entries at once: about the chunks a 16-chunk render distance loads. Where
+	 * every section is mixed that is about 26 MB of masks in a world 24 sections tall, more in taller
+	 * ones, plus caster faces.
 	 */
 	static final int KEPT = 1024;
 	/** Those made, oldest first. */
@@ -44,6 +45,8 @@ final class ChunkBakeData {
 	volatile int @Nullable [] openFrom;
 	/** The chunk's shadow caster faces, see {@link CasterChunk}; null until a bake needs them. */
 	volatile @Nullable CasterChunk casters;
+	/** Set once emptied: what bakes still write into it is dropped with it, not kept. */
+	private volatile boolean emptied;
 
 	private ChunkBakeData(Looks looks, byte[] kinds, int @Nullable [] shapes, int sections) {
 		this.looks = looks;
@@ -73,7 +76,7 @@ final class ChunkBakeData {
 			// One with and one without shapes: the tracer's readers tell smaller blocks apart, the map's picks don't.
 			if (now instanceof ChunkBakeData[] pair) {
 				ChunkBakeData found = pair[shapes == null ? 0 : 1];
-				if (found != null && found.looks == looks && found.kinds == kinds && found.shapes == shapes) {
+				if (found != null && !found.emptied && found.looks == looks && found.kinds == kinds && found.shapes == shapes) {
 					return found;
 				}
 			}
@@ -99,6 +102,7 @@ final class ChunkBakeData {
 
 	/** Drops every entry. A bake reading one at the time may still see it, which holds as it was. */
 	private void empty() {
+		this.emptied = true;
 		this.openFrom = null;
 		this.casters = null;
 		for (int i = 0; i < this.solid.length(); i++) {

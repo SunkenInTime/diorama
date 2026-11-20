@@ -522,7 +522,6 @@ public final class GpuMesher {
 			boolean lifted = this.lifted;
 			double minV = this.minV;
 			double maxV = this.maxV;
-			int x0 = this.x0;
 			int zBase = this.zBase;
 			int zSpan = this.zSpan;
 			boolean airRows = this.airRows;
@@ -951,7 +950,6 @@ public final class GpuMesher {
 			boolean fog = this.fog;
 			double minV = this.minV;
 			double maxV = this.maxV;
-			int x0 = this.x0;
 			int zBase = this.zBase;
 			int zSpan = this.zSpan;
 			int[] openFrom = this.openFrom;
