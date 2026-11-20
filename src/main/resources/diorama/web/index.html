@@ -17,15 +17,17 @@
 	canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 	#map { touch-action: none; cursor: grab; }
 	#map.dragging { cursor: grabbing; }
-	.bar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; flex-wrap: wrap; }
+	/* Above the empty-map message, which covers the whole page: under it the dimension tabs can't be clicked. */
+	.bar { position: fixed; z-index: 2; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; flex-wrap: wrap; }
 	.bar > * { pointer-events: auto; }
 	.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); }
 	.zoom { position: fixed; right: 12px; bottom: 12px; display: flex; flex-direction: column; overflow: hidden; }
 	button { appearance: none; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; }
 	.zoom button { width: 40px; height: 40px; font-size: 20px; }
 	.zoom button + button { border-top: 1px solid var(--line); }
-	.dims { display: flex; overflow: hidden; }
-	.dims button { padding: 8px 12px; color: var(--muted); }
+	/* Many dimensions don't fit: the row scrolls sideways instead of cutting the last ones off. */
+	.dims { display: flex; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; overscroll-behavior-x: contain; }
+	.dims button { flex: none; white-space: nowrap; padding: 8px 12px; color: var(--muted); }
 	.dims button.on { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 	.dims button + button { border-left: 1px solid var(--line); }
 	.follow { padding: 8px 12px; color: var(--muted); }
@@ -40,7 +42,10 @@
 	/* Who owns the land under the pointer, beside it. */
 	.claim { position: fixed; padding: 6px 10px; pointer-events: none; white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
 	.claim i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
-	.empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
+	/* pointer-events none: this covers the page, and the tabs and the map under it stay usable. */
+	.empty { position: fixed; inset: 0; pointer-events: none; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
+	/* On a narrow screen the tabs get a row of their own, the full width, so more of them show at once. */
+	@media (max-width: 600px) { .dims { flex: 1 1 100%; } }
 	button:focus-visible { outline: 2px solid #7aa7ff; outline-offset: -2px; }
 </style>
 </head>
@@ -523,18 +528,32 @@ function home(first) {
 	view.scale = map.live ? 2 : 1;
 }
 
-function buildDims() {
+function buildDims(reveal) {
 	const box = document.getElementById("dims");
+	// The list is built again every time the map is read: it stays where the player scrolled it.
+	const scrolled = box.scrollLeft;
 	box.innerHTML = "";
 	box.style.display = map.dimensions.length > 1 ? "flex" : "none";
 	for (const d of map.dimensions) {
 		const b = document.createElement("button");
 		b.textContent = nameOf(d.id);
 		b.className = dim && d.id === dim.id ? "on" : "";
-		b.onclick = () => { pick(d, false); buildDims(); saveHash(); };
+		b.onclick = () => { pick(d, false); buildDims(true); saveHash(); };
 		box.appendChild(b);
 	}
+	box.scrollLeft = scrolled;
+	// After a pick, the tab picked is brought into view if it's partly out of it.
+	const on = box.querySelector("button.on");
+	if (reveal && on) {
+		if (on.offsetLeft < box.scrollLeft) box.scrollLeft = on.offsetLeft;
+		else if (on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = on.offsetLeft + on.offsetWidth - box.clientWidth;
+	}
 }
+// A mouse wheel scrolls the tabs sideways.
+document.getElementById("dims").addEventListener("wheel", e => {
+	const box = e.currentTarget;
+	if (box.scrollWidth > box.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { box.scrollLeft += e.deltaY; e.preventDefault(); }
+}, { passive: false });
 
 function nameOf(id) {
 	const known = { "minecraft:overworld": "Overworld", "minecraft:the_nether": "Nether", "minecraft:the_end": "End" };
