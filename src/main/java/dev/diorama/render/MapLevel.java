@@ -1219,7 +1219,7 @@ public final class MapLevel implements ChunkSource {
 				ChunkSource source = this.sourceFor(store);
 				dev.diorama.bake.GpuMesher.Mesh mesh;
 				try {
-					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved));
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved), store != null);
 				} catch (BlockLooks.StatesRenumbered e) {
 					throw e;
 				} catch (Throwable t) {
@@ -1229,6 +1229,8 @@ public final class MapLevel implements ChunkSource {
 					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					return;
 				}
+				// Only the spots outlive the mesh: it is freed once drawn.
+				int[] meshSpots = mesh.spots;
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						if (!result.declined()) {
@@ -1238,8 +1240,8 @@ public final class MapLevel implements ChunkSource {
 							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
 							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
 						// The mesh's walk found the spots in the chunks the GPU drew; else they're picked now.
-						image = result.pixels() != null && mesh.spots != null
-							? (store == null ? image : image.withSpots(TileSpots.fromMesh(mesh.spots, store.spots(key))))
+						image = result.pixels() != null && meshSpots != null
+							? image.withSpots(TileSpots.fromMesh(meshSpots, store.spots(key)))
 							: this.withSpots(image, source, looks, fog, store);
 						this.finished.add(image.withGeneration(generation));
 					} catch (Throwable t) {
@@ -1305,9 +1307,9 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * What a bake reads chunks from. A tile to be saved gets its {@link TileSpots} too, in a second
-	 * pass, and both passes have to see the same chunks, or a block changed in between would save
-	 * pixels showing it with spots that don't.
+	 * What a bake reads chunks from. A tile to be saved gets its {@link TileSpots} too, from the
+	 * mesher's walk or in a second pass, which has to see the same chunks, or a block changed in
+	 * between would save pixels showing it with spots that don't.
 	 */
 	private ChunkSource sourceFor(@Nullable TileStore store) {
 		return store == null ? this : new PinnedSource(this);

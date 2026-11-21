@@ -299,15 +299,17 @@ public final class GpuMesher {
 	 * what the player has seen, and overlay bits are recorded when {@code overlays} isn't null.
 	 */
 	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays) {
-		return build(key, source, looks, fogOfWar, overlays, null);
+		return build(key, source, looks, fogOfWar, overlays, null, false);
 	}
 
 	/**
 	 * Same, with the saved tile's {@link TileSpots}: cells of chunks the map has no data for are
 	 * open where every saved ray through them stood lower (see {@link TileSpots#passedWhenSaved}),
-	 * as the tracer has them.
+	 * as the tracer has them. With {@code spots}, the mesh's {@link Mesh#spots} are worked out where
+	 * the sky view's walk can.
 	 */
-	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, int @Nullable [] savedSpots) {
+	public static Mesh build(TileKey key, ChunkSource source, BlockLooks looks, boolean fogOfWar, @Nullable Overlays overlays, int @Nullable [] savedSpots,
+		boolean spots) {
 		long start = System.nanoTime();
 		TileBaker helper = TileBaker.forMeshing(key, source, looks, fogOfWar, savedSpots);
 		VoxelReader reader = helper.reader;
@@ -381,7 +383,7 @@ public final class GpuMesher {
 		// The sky view walks every camera ray of a surface tile down to what it meets, as MapPick
 		// does for each spot: the walk finds them on the way. Rays starting over builds above an
 		// ordinary world's top start at heights of their own, which the pick works out alone.
-		if (sky && !mesh.empty && key.lod() == 0 && !helper.cave && source.roof() == ChunkSource.NO_ROOF && !helper.tallBuilds()) {
+		if (spots && sky && !mesh.empty && key.lod() == 0 && !helper.cave && source.roof() == ChunkSource.NO_ROOF && !helper.tallBuilds()) {
 			walk.spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
 			walk.unmet = new long[TileSpots.ROWS >> 6];
 		}
@@ -399,7 +401,23 @@ public final class GpuMesher {
 		fy1 = walk.fy1;
 		fz0 = walk.fz0;
 		fz1 = walk.fz1;
-		mesh.spots = walk.spots;
+		if (walk.spots != null) {
+			// Rays that pass a cell's edge too closely for the walk to say on which side MapPick has
+			// them, as it would: it steps from cell to cell, and rounds there its own way.
+			if (walk.rechecks > 0) {
+				MapPick pick = new MapPick(source, looks, key, fogOfWar).passWhereSaved(savedSpots);
+				for (int k = 0; k < walk.rechecks; k++) {
+					int i = walk.recheck[k];
+					double v = TileSpots.v(minV, i / TileSpots.COLUMNS);
+					walk.spots[i] = switch (pick.pick(key.minU() + i % TileSpots.COLUMNS + 0.5, v)) {
+						case MapPick.FOUND -> TileSpots.encode(pick.y, pick.z, v);
+						case MapPick.NOTHING -> TileSpots.NOTHING;
+						default -> TileSpots.UNKNOWN;
+					};
+				}
+			}
+			mesh.spots = walk.spots;
+		}
 		if (!lit || lifted) {
 			casters(mesh, helper, reader, looks, style, x0, x1, minV, maxV, source.minY());
 			if (fx0 <= fx1) {
@@ -468,6 +486,9 @@ public final class GpuMesher {
 		int @Nullable [] spots;
 		/** For {@link #skyColumn}: the rows whose ray in this column hasn't met anything yet, a bit per row. */
 		long @Nullable [] unmet;
+		/** For {@link #skyColumn}: the samples, as indices into {@link #spots}, left to MapPick; see {@link #meet}. */
+		int[] recheck = new int[16];
+		int rechecks;
 		/** For {@link #skyColumn}: the open cells of the row above and of this row, a bit per cell; made when first walked. */
 		private long @Nullable [] aboveBits;
 		private long @Nullable [] hereBits;
@@ -1084,7 +1105,7 @@ public final class GpuMesher {
 								mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
 							}
 							if (unmet != null) {
-								meet(unmet, this.spots, spotColumn, minV, sin, cos, y, z, true);
+								this.meet(unmet, spotColumn, minV, sin, cos, y, z, true);
 							}
 							carry = false;
 							i--;
@@ -1095,7 +1116,7 @@ public final class GpuMesher {
 					byte kind = looks.kind[id];
 					// MapPick stands on the first solid block, lava or water a ray reaches, whatever its shape.
 					if (unmet != null && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
-						meet(unmet, this.spots, spotColumn, minV, sin, cos, y, z, false);
+						this.meet(unmet, spotColumn, minV, sin, cos, y, z, false);
 					}
 					int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? looks.shape[id] : 0;
 					if (shape != 0) {
@@ -1243,33 +1264,49 @@ public final class GpuMesher {
 			this.fz0 = fz0;
 			this.fz1 = fz1;
 		}
-	}
 
-	/**
-	 * Gives the rays still going that cross cell {@code (y, z)} of a tile's column their spot: the
-	 * walk reaches cells in the order the rays do, so it is the first thing each meets. MapPick
-	 * stands on the block there, or answers unknown for a chunk the map has no data for.
-	 */
-	private static void meet(long[] unmet, int[] spots, int column, double minV, double sin, double cos, int y, int z, boolean unknown) {
-		// The ray at v crosses the cell where z * sin - (y + 1) * cos < v < (z + 1) * sin - y * cos.
-		double lo = z * sin - (y + 1) * cos;
-		double hi = (z + 1) * sin - y * cos;
-		int first = Math.max(0, (int) Math.floor((lo - minV) * Projection.PIXELS_PER_UNIT - 0.5) - 1);
-		int last = Math.min(TileSpots.ROWS - 1, (int) Math.ceil((hi - minV) * Projection.PIXELS_PER_UNIT - 0.5) + 1);
-		while (first <= last && !(TileSpots.v(minV, first) > lo)) {
-			first++;
-		}
-		while (last >= first && !(TileSpots.v(minV, last) < hi)) {
-			last--;
-		}
-		for (int row = first; row <= last; row++) {
-			long bit = 1L << row;
-			if ((unmet[row >> 6] & bit) != 0) {
+		/**
+		 * Gives the rays still going that cross cell {@code (y, z)} of a tile's column their spot: the
+		 * walk reaches cells in the order the rays do, so it is the first thing each meets. MapPick
+		 * stands on the block there, or answers unknown for a chunk the map has no data for. A ray
+		 * within {@link #EDGE} of the cell's edge is left to MapPick, which may round to either side.
+		 */
+		void meet(long[] unmet, int column, double minV, double sin, double cos, int y, int z, boolean unknown) {
+			int[] spots = this.spots;
+			// The ray at v crosses the cell where z * sin - (y + 1) * cos < v < (z + 1) * sin - y * cos.
+			double lo = z * sin - (y + 1) * cos;
+			double hi = (z + 1) * sin - y * cos;
+			int first = Math.max(0, (int) Math.floor((lo - minV) * Projection.PIXELS_PER_UNIT - 0.5) - 1);
+			int last = Math.min(TileSpots.ROWS - 1, (int) Math.ceil((hi - minV) * Projection.PIXELS_PER_UNIT - 0.5) + 1);
+			for (int row = first; row <= last; row++) {
+				long bit = 1L << row;
+				if ((unmet[row >> 6] & bit) == 0) {
+					continue;
+				}
+				double v = TileSpots.v(minV, row);
+				if (v <= lo - EDGE || v >= hi + EDGE) {
+					continue;
+				}
 				unmet[row >> 6] &= ~bit;
-				spots[row * TileSpots.COLUMNS + column] = unknown ? TileSpots.UNKNOWN : TileSpots.encode(y + 1, z, TileSpots.v(minV, row));
+				int i = row * TileSpots.COLUMNS + column;
+				if (v < lo + EDGE || v > hi - EDGE) {
+					if (this.rechecks == this.recheck.length) {
+						this.recheck = java.util.Arrays.copyOf(this.recheck, this.rechecks * 2);
+					}
+					this.recheck[this.rechecks++] = i;
+				} else {
+					spots[i] = unknown ? TileSpots.UNKNOWN : TileSpots.encode(y + 1, z, v);
+				}
 			}
 		}
 	}
+
+	/**
+	 * How close to a cell's edge, in map units, a ray is too close for the walk to say which side
+	 * MapPick takes: far out, coordinates in the millions leave doubles a few billionths apart, and
+	 * the pick's steps round on their own. Rows are a quarter unit apart, so few rays come this close.
+	 */
+	private static final double EDGE = 1e-6;
 
 	/** The highest set bit of {@code bits} from index {@code from} to {@code to}, or -1 if there is none. */
 	private static int highestBit(long[] bits, int from, int to) {
