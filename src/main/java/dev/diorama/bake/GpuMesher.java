@@ -213,7 +213,7 @@ public final class GpuMesher {
 		/** Rays start below the view's limit, so the tracer bakes nothing: every pixel unknown. */
 		public final boolean empty;
 		/**
-		 * The tile's {@link TileSpots} as the sky view's walk found them, with {@link TileSpots#UNKNOWN}
+		 * The tile's {@link TileSpots} as the sky view's walk found them, with {@link TileSpots#MISSING}
 		 * where a ray ran into a chunk the map has no data for; null where the walk didn't work them out.
 		 */
 		public int @Nullable [] spots;
@@ -412,7 +412,7 @@ public final class GpuMesher {
 					walk.spots[i] = switch (pick.pick(key.minU() + i % TileSpots.COLUMNS + 0.5, v)) {
 						case MapPick.FOUND -> TileSpots.encode(pick.y, pick.z, v);
 						case MapPick.NOTHING -> TileSpots.NOTHING;
-						default -> TileSpots.UNKNOWN;
+						default -> TileSpots.MISSING;
 					};
 				}
 			}
@@ -1295,7 +1295,7 @@ public final class GpuMesher {
 					}
 					this.recheck[this.rechecks++] = i;
 				} else {
-					spots[i] = unknown ? TileSpots.UNKNOWN : TileSpots.encode(y + 1, z, v);
+					spots[i] = unknown ? TileSpots.MISSING : TileSpots.encode(y + 1, z, v);
 				}
 			}
 		}

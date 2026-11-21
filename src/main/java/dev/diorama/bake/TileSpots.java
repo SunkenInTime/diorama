@@ -23,6 +23,11 @@ public final class TileSpots {
 	/** Nothing to stand on. */
 	public static final int NOTHING = 1 << 24;
 	private static final int SPOT = 2 << 24;
+	/**
+	 * In a mesh's {@link GpuMesher.Mesh#spots} only: the ray ran into a chunk the map has no data for,
+	 * where {@link #fromMesh} keeps the saved answer. {@link #UNKNOWN} there is a spot too far to encode.
+	 */
+	static final int MISSING = 3 << 24;
 	/** Columns under a patch: a patch is {@link TileImage#BLOCK} pixels square. */
 	public static final int PATCH_COLUMNS = TileImage.BLOCK / Projection.PIXELS_PER_UNIT;
 
@@ -60,8 +65,8 @@ public final class TileSpots {
 	public static int @Nullable [] fromMesh(int[] spots, int @Nullable [] saved) {
 		boolean known = false;
 		for (int i = 0; i < spots.length; i++) {
-			if (spots[i] == UNKNOWN && saved != null) {
-				spots[i] = saved[i];
+			if (spots[i] == MISSING) {
+				spots[i] = saved == null ? UNKNOWN : saved[i];
 			}
 			known |= spots[i] != UNKNOWN;
 		}
