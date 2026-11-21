@@ -22,7 +22,9 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import javax.imageio.ImageIO;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.jspecify.annotations.Nullable;
@@ -49,6 +51,12 @@ public final class JarModels {
 	/** Each asset path ("assets/ns/...") in the jars, and the jar it's in; the first jar listed wins. */
 	private final Map<String, ZipFile> assets = new HashMap<>();
 	private final List<ZipFile> jars = new ArrayList<>();
+	/**
+	 * Vanilla's block colours and the look of each state in them, for models that borrow
+	 * Minecraft's own textures, which only the client jar has. Null until {@link #useVanilla}.
+	 */
+	private @Nullable VanillaTable vanilla;
+	private int @Nullable [] vanillaLookOf;
 	private final Map<String, @Nullable JsonObject> json = new HashMap<>();
 	private final Map<String, float @Nullable []> textures = new HashMap<>();
 	private boolean warned;
@@ -93,6 +101,16 @@ public final class JarModels {
 		} catch (IOException e) {
 			Diorama.LOGGER.warn("Couldn't read {} for its block models", file, e);
 		}
+	}
+
+	/**
+	 * Lets models that use Minecraft's own textures (a grass slab on {@code minecraft:block/grass_block_top})
+	 * take those textures' colours from the vanilla table. {@code lookOf} is the table's look by state id.
+	 */
+	synchronized void useVanilla(VanillaTable table, int[] lookOf) {
+		this.vanilla = table;
+		this.vanillaLookOf = lookOf;
+		this.textures.clear();
 	}
 
 	/** How many jars had block assets, for the log. */
@@ -413,9 +431,75 @@ public final class JarModels {
 			} catch (IOException | RuntimeException e) {
 				avg = null;
 			}
+		} else if (location.namespace.equals("minecraft")) {
+			avg = this.vanillaTexture(location.path);
 		}
 		this.textures.put(name, avg);
 		return avg;
+	}
+
+	/** Texture name endings for a block's top, and for its sides. */
+	private static final String[] TOP_ENDINGS = {"_top", "_end", "_bottom"};
+	private static final String[] SIDE_ENDINGS = {"_side", "_front"};
+
+	/**
+	 * A Minecraft texture's average, which no jar on a server has, from the vanilla table: the
+	 * colour of the block the texture is named after. {@code block/dirt} is dirt's, {@code block/oak_log_top}
+	 * the top of oak_log, {@code block/grass_block_side} the side of grass_block and
+	 * {@code block/grass_block_side_overlay} the tinted part of that side. A face the game tints
+	 * (grass on top) comes out grey, for the model's own tint index to colour again. Null for a
+	 * texture no block is named after.
+	 */
+	private float @Nullable [] vanillaTexture(String path) {
+		if (this.vanilla == null || !path.startsWith("block/")) {
+			return null;
+		}
+		String name = path.substring("block/".length());
+		boolean overlay = name.endsWith("_overlay");
+		if (overlay) {
+			name = name.substring(0, name.length() - "_overlay".length());
+		}
+		boolean side = false;
+		VanillaTable.Look look = this.vanillaLook(name);
+		for (int i = 0; look == null && i < TOP_ENDINGS.length + SIDE_ENDINGS.length; i++) {
+			boolean sideEnding = i >= TOP_ENDINGS.length;
+			String ending = sideEnding ? SIDE_ENDINGS[i - TOP_ENDINGS.length] : TOP_ENDINGS[i];
+			if (name.endsWith(ending)) {
+				look = this.vanillaLook(name.substring(0, name.length() - ending.length()));
+				side = sideEnding;
+			}
+		}
+		if (look == null || look.kind() == Looks.AIR) {
+			return null;
+		}
+		int untinted = side ? look.side() : look.top();
+		int tinted = side ? look.sideTinted() : look.topTinted();
+		float weight = side ? look.sideTintWeight() : look.topTintWeight();
+		if (overlay) {
+			// Only the tinted part, as much of it as the table's weight says the overlay covers.
+			return weight <= 0 ? null : rgba(tinted, Math.min(1.0F, weight / Math.max(0.001F, 1.0F - weight)));
+		}
+		return rgba(weight >= 0.5F ? tinted : untinted, 1.0F);
+	}
+
+	/** The vanilla table's look of the default state of {@code minecraft:<name>}, or null. */
+	private VanillaTable.@Nullable Look vanillaLook(String name) {
+		try {
+			Block block = BuiltInRegistries.BLOCK.getOptional(Identifier.fromNamespaceAndPath("minecraft", name)).orElse(null);
+			if (block == null || this.vanillaLookOf == null) {
+				return null;
+			}
+			int id = Block.getId(block.defaultBlockState());
+			int index = id < this.vanillaLookOf.length ? this.vanillaLookOf[id] : -1;
+			return index < 0 ? null : this.vanilla.looks.get(index);
+		} catch (RuntimeException e) {
+			// Not a valid block name.
+			return null;
+		}
+	}
+
+	private static float[] rgba(int rgb, float alpha) {
+		return new float[] {(rgb >> 16 & 0xFF) / 255.0F, (rgb >> 8 & 0xFF) / 255.0F, (rgb & 0xFF) / 255.0F, alpha};
 	}
 
 	static float[] average(BufferedImage image) {
