@@ -1237,7 +1237,11 @@ public final class MapLevel implements ChunkSource {
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
 							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
-						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
+						// The mesh's walk found the spots in the chunks the GPU drew; else they're picked now.
+						image = result.pixels() != null && mesh.spots != null
+							? (store == null ? image : image.withSpots(TileSpots.fromMesh(mesh.spots, store.spots(key))))
+							: this.withSpots(image, source, looks, fog, store);
+						this.finished.add(image.withGeneration(generation));
 					} catch (Throwable t) {
 						logFailed("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));

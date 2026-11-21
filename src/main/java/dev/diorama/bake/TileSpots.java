@@ -53,6 +53,21 @@ public final class TileSpots {
 		return known ? spots : null;
 	}
 
+	/**
+	 * The answers for a full image from a mesh's {@link GpuMesher.Mesh#spots}: where a ray ran into
+	 * a chunk the map has no data for, the answer saved before stays, as {@link #pick} has it.
+	 */
+	public static int @Nullable [] fromMesh(int[] spots, int @Nullable [] saved) {
+		boolean known = false;
+		for (int i = 0; i < spots.length; i++) {
+			if (spots[i] == UNKNOWN && saved != null) {
+				spots[i] = saved[i];
+			}
+			known |= spots[i] != UNKNOWN;
+		}
+		return known ? spots : null;
+	}
+
 	/** The first column under a patch. */
 	public static int patchColumn(TileImage.Patch patch) {
 		return patch.blockX() * PATCH_COLUMNS;
@@ -126,7 +141,12 @@ public final class TileSpots {
 
 	/** The map v a sample answers for: the middle of its pixel row. */
 	private static double v(TileKey key, int row) {
-		return key.minV() + (row + 0.5) / Projection.PIXELS_PER_UNIT;
+		return v(key.minV(), row);
+	}
+
+	/** The v of a row's samples in a tile whose v starts at {@code minV}. */
+	static double v(double minV, int row) {
+		return minV + (row + 0.5) / Projection.PIXELS_PER_UNIT;
 	}
 
 	/**
@@ -194,7 +214,7 @@ public final class TileSpots {
 		return crossed;
 	}
 
-	private static int encode(int y, int z, double v) {
+	static int encode(int y, int z, double v) {
 		int back = (int) Math.floor(Projection.zAt(v, y)) - z;
 		if (back < 0 || back > 0xFF || y != (short) y) {
 			return UNKNOWN;

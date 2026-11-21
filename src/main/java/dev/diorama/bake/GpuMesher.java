@@ -212,6 +212,11 @@ public final class GpuMesher {
 		public final boolean cave;
 		/** Rays start below the view's limit, so the tracer bakes nothing: every pixel unknown. */
 		public final boolean empty;
+		/**
+		 * The tile's {@link TileSpots} as the sky view's walk found them, with {@link TileSpots#UNKNOWN}
+		 * where a ray ran into a chunk the map has no data for; null where the walk didn't work them out.
+		 */
+		public int @Nullable [] spots;
 		/** Something in view the GPU can't draw as the tracer does: trace the tile instead. */
 		public boolean traceInstead;
 		/** Solid and lava faces, faces of unknown chunks, and floors. */
@@ -373,6 +378,13 @@ public final class GpuMesher {
 		Walk walk = new Walk(mesh, helper, reader, source, looks, style, sin, cos, cot, startY, limitY, lit, fog, lifted, minV, maxV, x0, zBase, zSpan,
 			airRows, openFrom, aboveOpen, hereOpen, aboveRock, hereRock, aboveRockU, hereRockU, aboveRockN, hereRockN, rockIn, pieces,
 			aboveWater, hereWater, aboveFirstWater, hereFirstWater);
+		// The sky view walks every camera ray of a surface tile down to what it meets, as MapPick
+		// does for each spot: the walk finds them on the way. Rays starting over builds above an
+		// ordinary world's top start at heights of their own, which the pick works out alone.
+		if (sky && !mesh.empty && key.lod() == 0 && !helper.cave && source.roof() == ChunkSource.NO_ROOF && !helper.tallBuilds()) {
+			walk.spots = new int[TileSpots.COLUMNS * TileSpots.ROWS];
+			walk.unmet = new long[TileSpots.ROWS >> 6];
+		}
 		// One column more each side: the bake draws a pixel past the tile's edges for outlines.
 		for (int x = x0 - 1; x <= x1 && !mesh.empty; x++) {
 			if (sky) {
@@ -387,6 +399,7 @@ public final class GpuMesher {
 		fy1 = walk.fy1;
 		fz0 = walk.fz0;
 		fz1 = walk.fz1;
+		mesh.spots = walk.spots;
 		if (!lit || lifted) {
 			casters(mesh, helper, reader, looks, style, x0, x1, minV, maxV, source.minY());
 			if (fx0 <= fx1) {
@@ -451,6 +464,10 @@ public final class GpuMesher {
 		private final boolean[] hereWater;
 		private final byte[] aboveFirstWater;
 		private final byte[] hereFirstWater;
+		/** For {@link #skyColumn}: the tile's spots as it finds them, see {@link Mesh#spots}; null when not wanted. */
+		int @Nullable [] spots;
+		/** For {@link #skyColumn}: the rows whose ray in this column hasn't met anything yet, a bit per row. */
+		long @Nullable [] unmet;
 		/** For {@link #skyColumn}: the open cells of the row above and of this row, a bit per cell; made when first walked. */
 		private long @Nullable [] aboveBits;
 		private long @Nullable [] hereBits;
@@ -996,6 +1013,12 @@ public final class GpuMesher {
 				}
 				openFrom[i] = open == null ? Integer.MAX_VALUE : open[((z & 15) << 4) | (x & 15)];
 			}
+			// The spots of this column, if it is one of the tile's: every row's ray is still going.
+			int spotColumn = x - this.x0;
+			long[] unmet = this.spots != null && spotColumn >= 0 && spotColumn < TileSpots.COLUMNS ? this.unmet : null;
+			if (unmet != null) {
+				java.util.Arrays.fill(unmet, -1L);
+			}
 			// Rays start in open air above the tallest block: the row above the first is open throughout.
 			java.util.Arrays.fill(above, -1L);
 			java.util.Arrays.fill(here, 0L);
@@ -1060,6 +1083,9 @@ public final class GpuMesher {
 							if (openSouth) {
 								mesh.opaque.add(x, y, z, SOUTH, 0, 0, 0, UNKNOWN);
 							}
+							if (unmet != null) {
+								meet(unmet, this.spots, spotColumn, minV, sin, cos, y, z, true);
+							}
 							carry = false;
 							i--;
 							continue;
@@ -1067,6 +1093,10 @@ public final class GpuMesher {
 						id = VoxelReader.AIR_ID;
 					}
 					byte kind = looks.kind[id];
+					// MapPick stands on the first solid block, lava or water a ray reaches, whatever its shape.
+					if (unmet != null && (kind == BlockLooks.SOLID || kind == BlockLooks.LAVA || kind == BlockLooks.WATER)) {
+						meet(unmet, this.spots, spotColumn, minV, sin, cos, y, z, false);
+					}
 					int shape = kind == BlockLooks.SOLID || kind == BlockLooks.GLASS ? looks.shape[id] : 0;
 					if (shape != 0) {
 						ShapeFaces sh = looks.faces(shape);
@@ -1187,6 +1217,14 @@ public final class GpuMesher {
 					break;
 				}
 			}
+			if (unmet != null) {
+				// Rays that met nothing went on past the view's limit.
+				for (int w = 0; w < unmet.length; w++) {
+					for (long bits = unmet[w]; bits != 0; bits &= bits - 1) {
+						this.spots[((w << 6) + Long.numberOfTrailingZeros(bits)) * TileSpots.COLUMNS + spotColumn] = TileSpots.NOTHING;
+					}
+				}
+			}
 			// Leave both water rows false for the next column.
 			if (aboveWaterLo <= aboveWaterHi) {
 				java.util.Arrays.fill(aboveWater, aboveWaterLo, aboveWaterHi + 1, false);
@@ -1204,6 +1242,32 @@ public final class GpuMesher {
 			this.fy1 = fy1;
 			this.fz0 = fz0;
 			this.fz1 = fz1;
+		}
+	}
+
+	/**
+	 * Gives the rays still going that cross cell {@code (y, z)} of a tile's column their spot: the
+	 * walk reaches cells in the order the rays do, so it is the first thing each meets. MapPick
+	 * stands on the block there, or answers unknown for a chunk the map has no data for.
+	 */
+	private static void meet(long[] unmet, int[] spots, int column, double minV, double sin, double cos, int y, int z, boolean unknown) {
+		// The ray at v crosses the cell where z * sin - (y + 1) * cos < v < (z + 1) * sin - y * cos.
+		double lo = z * sin - (y + 1) * cos;
+		double hi = (z + 1) * sin - y * cos;
+		int first = Math.max(0, (int) Math.floor((lo - minV) * Projection.PIXELS_PER_UNIT - 0.5) - 1);
+		int last = Math.min(TileSpots.ROWS - 1, (int) Math.ceil((hi - minV) * Projection.PIXELS_PER_UNIT - 0.5) + 1);
+		while (first <= last && !(TileSpots.v(minV, first) > lo)) {
+			first++;
+		}
+		while (last >= first && !(TileSpots.v(minV, last) < hi)) {
+			last--;
+		}
+		for (int row = first; row <= last; row++) {
+			long bit = 1L << row;
+			if ((unmet[row >> 6] & bit) != 0) {
+				unmet[row >> 6] &= ~bit;
+				spots[row * TileSpots.COLUMNS + column] = unknown ? TileSpots.UNKNOWN : TileSpots.encode(y + 1, z, TileSpots.v(minV, row));
+			}
 		}
 	}
 
