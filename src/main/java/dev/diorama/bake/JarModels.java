@@ -441,6 +441,11 @@ public final class JarModels {
 	/** Texture name endings for a block's top, and for its sides. */
 	private static final String[] TOP_ENDINGS = {"_top", "_end", "_bottom"};
 	private static final String[] SIDE_ENDINGS = {"_side", "_front"};
+	/**
+	 * The coverage a see-through vanilla texture (glass) gives its face: under the 0.55 at which
+	 * {@link TableLooks} draws a solid block as glass, as the texture's own pixels would.
+	 */
+	private static final float SEE_THROUGH = 0.25F;
 
 	/**
 	 * A Minecraft texture's average, which no jar on a server has, from the vanilla table: the
@@ -479,7 +484,7 @@ public final class JarModels {
 			// Only the tinted part, as much of it as the table's weight says the overlay covers.
 			return weight <= 0 ? null : rgba(tinted, Math.min(1.0F, weight / Math.max(0.001F, 1.0F - weight)));
 		}
-		return rgba(weight >= 0.5F ? tinted : untinted, 1.0F);
+		return rgba(weight >= 0.5F ? tinted : untinted, look.kind() == Looks.GLASS ? SEE_THROUGH : 1.0F);
 	}
 
 	/** The vanilla table's look of the default state of {@code minecraft:<name>}, or null. */
