@@ -322,7 +322,7 @@ public final class VoxelReader {
 			return known;
 		}
 		// Tiles nearby reach down about as far: a little further now saves scanning it all again.
-		int downTo = Math.max(this.minY, Math.min(bottom, known == null ? bottom : known.downTo()) - 16);
+		int downTo = known != null && known.downTo() <= bottom ? known.downTo() : Math.max(this.minY, bottom - 16);
 		int[] offsets = new int[257];
 		int[] faces = new int[1024];
 		int length = 0;

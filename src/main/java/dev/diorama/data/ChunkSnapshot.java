@@ -620,7 +620,7 @@ public final class ChunkSnapshot {
 	 */
 	private Object blocksToken = new Object();
 	/** What bakes worked out from this snapshot's blocks, kept for the next bake; see {@code ChunkBakeData}. */
-	private final java.util.concurrent.atomic.AtomicReference<@Nullable Object> bakeData = new java.util.concurrent.atomic.AtomicReference<>();
+	private java.util.concurrent.atomic.AtomicReference<@Nullable Object> bakeData = new java.util.concurrent.atomic.AtomicReference<>();
 	/** The snapshot this one replaced, until the first bake that asks for a token compares the two. */
 	private volatile @Nullable ChunkSnapshot replaced;
 
@@ -661,7 +661,8 @@ public final class ChunkSnapshot {
 			before.compare();
 			if (this.sameBlocks(before)) {
 				this.blocksToken = before.blocksToken;
-				this.bakeData.set(before.bakeData.get());
+				// The same holder, so what either's bakes keep from here on serves both.
+				this.bakeData = before.bakeData;
 			}
 			// Published by this write: a bake that reads null reads the token as set here.
 			this.replaced = null;

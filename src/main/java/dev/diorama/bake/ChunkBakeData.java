@@ -45,10 +45,16 @@ final class ChunkBakeData {
 	volatile int @Nullable [] openFrom;
 	/** The chunk's shadow caster faces, see {@link CasterChunk}; null until a bake needs them. */
 	volatile @Nullable CasterChunk casters;
-	/** Set once emptied: what bakes still write into it is dropped with it, not kept. */
+	/** Set once emptied, which also takes it out of its {@link #holder}: nothing hands it out again. */
 	private volatile boolean emptied;
+	/**
+	 * The snapshots' holder it is kept in (see {@link ChunkSnapshot#bakeData}). Emptied, it leaves
+	 * that, so what a bake still writes into it, and the looks it was made under, go with the bake.
+	 */
+	private final java.util.concurrent.atomic.AtomicReference<@Nullable Object> holder;
 
-	private ChunkBakeData(Looks looks, byte[] kinds, int @Nullable [] shapes, int sections) {
+	private ChunkBakeData(java.util.concurrent.atomic.AtomicReference<@Nullable Object> holder, Looks looks, byte[] kinds, int @Nullable [] shapes, int sections) {
+		this.holder = holder;
 		this.looks = looks;
 		this.kinds = kinds;
 		this.shapes = shapes;
@@ -80,7 +86,7 @@ final class ChunkBakeData {
 					return found;
 				}
 			}
-			ChunkBakeData made = new ChunkBakeData(looks, kinds, shapes, snapshot.sectionCount());
+			ChunkBakeData made = new ChunkBakeData(holder, looks, kinds, shapes, snapshot.sectionCount());
 			ChunkBakeData[] pair = now instanceof ChunkBakeData[] old ? old.clone() : new ChunkBakeData[2];
 			if (pair[shapes == null ? 1 : 0] != null && pair[shapes == null ? 1 : 0].looks != looks) {
 				pair[shapes == null ? 1 : 0] = null;
@@ -100,7 +106,10 @@ final class ChunkBakeData {
 		}
 	}
 
-	/** Drops every entry. A bake reading one at the time may still see it, which holds as it was. */
+	/**
+	 * Drops every entry and leaves the holder. A bake reading one at the time may still see it, which
+	 * holds as it was; the next bake over the chunk makes a new one.
+	 */
 	private void empty() {
 		this.emptied = true;
 		this.openFrom = null;
@@ -108,6 +117,17 @@ final class ChunkBakeData {
 		for (int i = 0; i < this.solid.length(); i++) {
 			this.solid.set(i, null);
 			this.partial.set(i, null);
+		}
+		while (true) {
+			Object now = this.holder.get();
+			if (!(now instanceof ChunkBakeData[] pair) || pair[0] != this && pair[1] != this) {
+				return;
+			}
+			ChunkBakeData[] left = pair.clone();
+			left[pair[0] == this ? 0 : 1] = null;
+			if (this.holder.compareAndSet(now, left[0] == null && left[1] == null ? null : left)) {
+				return;
+			}
 		}
 	}
 
