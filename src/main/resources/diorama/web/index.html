@@ -17,15 +17,17 @@
 	canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 	#map { touch-action: none; cursor: grab; }
 	#map.dragging { cursor: grabbing; }
-	.bar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; flex-wrap: wrap; }
+	/* Above the empty-map message, which covers the whole page: under it the dimension tabs can't be clicked. */
+	.bar { position: fixed; z-index: 2; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px; pointer-events: none; flex-wrap: wrap; }
 	.bar > * { pointer-events: auto; }
 	.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); }
 	.zoom { position: fixed; right: 12px; bottom: 12px; display: flex; flex-direction: column; overflow: hidden; }
 	button { appearance: none; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; }
 	.zoom button { width: 40px; height: 40px; font-size: 20px; }
 	.zoom button + button { border-top: 1px solid var(--line); }
-	.dims { display: flex; overflow: hidden; }
-	.dims button { padding: 8px 12px; color: var(--muted); }
+	/* Many dimensions don't fit: the row scrolls sideways instead of cutting the last ones off. */
+	.dims { display: flex; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; overscroll-behavior-x: contain; }
+	.dims button { flex: none; white-space: nowrap; padding: 8px 12px; color: var(--muted); }
 	.dims button.on { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 	.dims button + button { border-left: 1px solid var(--line); }
 	.follow { padding: 8px 12px; color: var(--muted); }
@@ -40,13 +42,14 @@
 	/* Who owns the land under the pointer, beside it. */
 	.claim { position: fixed; padding: 6px 10px; pointer-events: none; white-space: nowrap; max-width: calc(100vw - 24px); overflow: hidden; text-overflow: ellipsis; }
 	.claim i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
-	.empty { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
+	/* pointer-events none: this covers the page, and the tabs and the map under it stay usable. */
+	.empty { position: fixed; inset: 0; pointer-events: none; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
 	button:focus-visible { outline: 2px solid #7aa7ff; outline-offset: -2px; }
 </style>
 </head>
 <body>
 <canvas id="map" aria-label="Map"></canvas>
-<div class="bar"><div class="dims panel" id="dims"></div><button class="follow panel on" id="follow" hidden aria-pressed="true" title="Keep the map centred on you. Turns off when you move the map.">Follow</button><div class="people panel" id="people" hidden><button id="peopleButton" aria-expanded="false"></button></div><ul class="panel" id="peopleList" hidden></ul></div>
+<div class="bar"><div class="dims panel" id="dims" tabindex="-1"></div><button class="follow panel on" id="follow" hidden aria-pressed="true" title="Keep the map centred on you. Turns off when you move the map.">Follow</button><div class="people panel" id="people" hidden><button id="peopleButton" aria-expanded="false"></button></div><ul class="panel" id="peopleList" hidden></ul></div>
 <div class="zoom panel"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">&minus;</button></div>
 <div class="where panel" id="where" hidden></div>
 <div class="claim panel" id="claim" hidden></div>
@@ -523,18 +526,39 @@ function home(first) {
 	view.scale = map.live ? 2 : 1;
 }
 
-function buildDims() {
+let tabShown = null;     // the dimension whose tab was last brought into view
+function buildDims(reveal) {
 	const box = document.getElementById("dims");
+	// The list is built again every time the map is read: it stays where the player scrolled it.
+	const scrolled = box.scrollLeft;
 	box.innerHTML = "";
 	box.style.display = map.dimensions.length > 1 ? "flex" : "none";
 	for (const d of map.dimensions) {
 		const b = document.createElement("button");
 		b.textContent = nameOf(d.id);
 		b.className = dim && d.id === dim.id ? "on" : "";
-		b.onclick = () => { pick(d, false); buildDims(); saveHash(); };
+		b.onclick = () => { pick(d, false); buildDims(true); saveHash(); };
 		box.appendChild(b);
 	}
+	box.scrollLeft = scrolled;
+	// After a pick, or a switch from a link or the player list, the tab is brought into view if it's partly out of it.
+	const on = box.querySelector("button.on");
+	const switched = dim && dim.id !== tabShown;
+	tabShown = dim ? dim.id : null;
+	if ((reveal || switched) && on) {
+		if (on.offsetLeft < box.scrollLeft) box.scrollLeft = on.offsetLeft;
+		else if (on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = on.offsetLeft + on.offsetWidth - box.clientWidth;
+	}
 }
+// A mouse wheel scrolls the tabs sideways.
+document.getElementById("dims").addEventListener("wheel", e => {
+	const box = e.currentTarget;
+	// Ctrl and the wheel is the browser's own zoom.
+	if (e.ctrlKey || box.scrollWidth <= box.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+	// Some mice report lines or pages instead of pixels.
+	box.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? box.clientWidth : 1);
+	e.preventDefault();
+}, { passive: false });
 
 function nameOf(id) {
 	const known = { "minecraft:overworld": "Overworld", "minecraft:the_nether": "Nether", "minecraft:the_end": "End" };
@@ -861,7 +885,8 @@ document.getElementById("out").onclick = () => { zoomAt(canvas.clientWidth / 2, 
 addEventListener("keydown", e => {
 	const step = 80 / view.scale;
 	const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-	if (moves[e.key]) { view.u += moves[e.key][0]; view.v += moves[e.key][1]; if (follow && map && map.live) setFollow(false); }
+	// preventDefault: with a tab focused, an arrow would scroll the tab row as well.
+	if (moves[e.key]) { e.preventDefault(); view.u += moves[e.key][0]; view.v += moves[e.key][1]; if (follow && map && map.live) setFollow(false); }
 	else if (e.key === "+" || e.key === "=") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 2);
 	else if (e.key === "-") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 0.5);
 	else return;
