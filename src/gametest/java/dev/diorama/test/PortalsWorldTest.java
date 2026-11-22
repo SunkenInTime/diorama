@@ -39,7 +39,6 @@ final class PortalsWorldTest {
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("weather clear");
-		world.getServer().runCommand("difficulty peaceful");
 		context.setScreen(() -> null);
 		context.waitFor(mc -> mc.player.onGround(), 600);
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
