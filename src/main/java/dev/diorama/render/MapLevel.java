@@ -581,6 +581,11 @@ public final class MapLevel implements ChunkSource {
 	 *     the whole chunk is new
 	 */
 	public void put(ChunkSnapshot snapshot, int @Nullable [] changed, int playerChunkX, int playerChunkZ) {
+		ChunkSnapshot before = this.chunks.get(snapshot.key());
+		if (before != null) {
+			// Before it's visible to bakes, so a bake can share what was worked out from the same blocks.
+			snapshot.replacing(before);
+		}
 		this.chunks.put(snapshot.key(), snapshot);
 		if (changed == null && this.watchingLiveChunks) {
 			this.liveChunks.add(snapshot.key());
@@ -1214,7 +1219,7 @@ public final class MapLevel implements ChunkSource {
 				ChunkSource source = this.sourceFor(store);
 				dev.diorama.bake.GpuMesher.Mesh mesh;
 				try {
-					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved));
+					mesh = dev.diorama.bake.GpuMesher.build(key, source, looks, fog, overlays, spotsOf(saved), store != null);
 				} catch (BlockLooks.StatesRenumbered e) {
 					throw e;
 				} catch (Throwable t) {
@@ -1224,6 +1229,8 @@ public final class MapLevel implements ChunkSource {
 					this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
 					return;
 				}
+				// Only the spots outlive the mesh: it is freed once drawn.
+				int[] meshSpots = mesh.spots;
 				dev.diorama.render.gpu.GpuTileBaker.submit(mesh, result -> BAKERS.execute(() -> {
 					try {
 						if (!result.declined()) {
@@ -1232,7 +1239,11 @@ public final class MapLevel implements ChunkSource {
 						TileImage image = result.pixels() == null
 							? TileBaker.bake(key, source, looks, null, fog, pixelsOf(saved), lightOf(saved), spotsOf(saved), overlays)
 							: TileBaker.gpuImage(key, result.pixels(), pixelsOf(saved), result.info(), result.blockLight(), lightOf(saved));
-						this.finished.add(this.withSpots(image, source, looks, fog, store).withGeneration(generation));
+						// The mesh's walk found the spots in the chunks the GPU drew; else they're picked now.
+						image = result.pixels() != null && meshSpots != null
+							? image.withSpots(TileSpots.fromMesh(meshSpots, store.spots(key)))
+							: this.withSpots(image, source, looks, fog, store);
+						this.finished.add(image.withGeneration(generation));
 					} catch (Throwable t) {
 						logFailed("Failed to finish GPU tile {}", key, t);
 						this.finished.add(TileImage.partial(key, List.of()).withGeneration(generation));
@@ -1296,9 +1307,9 @@ public final class MapLevel implements ChunkSource {
 	}
 
 	/**
-	 * What a bake reads chunks from. A tile to be saved gets its {@link TileSpots} too, in a second
-	 * pass, and both passes have to see the same chunks, or a block changed in between would save
-	 * pixels showing it with spots that don't.
+	 * What a bake reads chunks from. A tile to be saved gets its {@link TileSpots} too, from the
+	 * mesher's walk or in a second pass, which has to see the same chunks, or a block changed in
+	 * between would save pixels showing it with spots that don't.
 	 */
 	private ChunkSource sourceFor(@Nullable TileStore store) {
 		return store == null ? this : new PinnedSource(this);

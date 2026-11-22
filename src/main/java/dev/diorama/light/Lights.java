@@ -223,7 +223,7 @@ public final class Lights {
 		this.glows.values().forEach(Lights::drop);
 		this.glows.clear();
 		this.glows.putAll(kept);
-		MapCanvas canvas = MapCanvas.of(graphics);
+		MapCanvas canvas = view.canvas(graphics);
 		Circle circle = view.round() ? Circle.in(view) : null;
 		int tint = Math.round(Math.max(0, Math.min(1, opacity)) * 255) << 24 | 0xFFFFFF;
 		for (Shown shown : drawn) {

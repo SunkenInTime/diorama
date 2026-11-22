@@ -311,6 +311,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("minimap-frames")) {
 				MinimapFrameTest.run(context, world);
 			}
+			if (tests.contains("minimap-turn")) {
+				MinimapTurnTest.run(context, world);
+			}
 			if (tests.contains("map-mouse-keys")) {
 				MapMouseKeysTest.run(context);
 			}
@@ -370,6 +373,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("create-buried")) {
 				CreateBuriedTest.run(context, world);
+			}
+			if (tests.contains("create-far-train")) {
+				CreateFarTrainTest.run(context, world);
 			}
 			if (tests.contains("roof-caves")) {
 				RoofCavesTest.run(context, world);
@@ -434,6 +440,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("tall-world")) {
 			TallWorldTest.run(context);
 		}
+		if (tests.contains("radar-tag")) {
+			RadarTagTest.run(context);
+		}
 		if (tests.contains("sub-maps")) {
 			subMaps(context);
 		}
@@ -479,6 +488,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
+		}
+		if (tests.contains("aeronautics-server")) {
+			AeronauticsServerTest.run(context);
+		}
+		if (tests.contains("create-far-train-server")) {
+			CreateFarTrainTest.server(context);
 		}
 		if (tests.contains("web-map-players")) {
 			WebMapPlayersTest.run(context);
@@ -7279,7 +7294,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
-	private static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
+	static void lookAtPlayer(ClientGameTestContext context, double zoom, int layer) {
 		context.runOnClient(mc -> {
 			LocalPlayer player = mc.player;
 			if (mc.gui.screen() instanceof MapScreen screen && player != null) {

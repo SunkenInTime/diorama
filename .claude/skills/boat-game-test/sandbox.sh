@@ -76,7 +76,7 @@ dev=versions/$node/build/run/clientGameTest
 run=$dev
 with_mods=()
 mods=~/test-mods
-rm -rf "$mods" ~/test-server-mods
+rm -rf "$mods" ~/test-server-mods ~/test-client-mods
 # Unpacks a mods tgz from boat_run.py into a folder: its jars, and the ones urls.txt names downloaded.
 unpack_mods() {
 	mkdir -p "$2" ~/mod-cache && tar xzf "$1" -C "$2" || return 1
@@ -123,6 +123,12 @@ if [ -e ~/mods.tgz ]; then
 	if [ -n "${DIORAMA_REAL_SERVER:-}" ]; then
 		mkdir -p ~/test-server-mods && cp "$mods"/*.jar ~/test-server-mods/ || exit 1
 		export REAL_SERVER_MODS=~/test-server-mods
+	fi
+	# --client-mods: jars for the game only, beside the run's --mods: a mod the server doesn't have.
+	if [ -e ~/client-mods.tgz ]; then
+		unpack_mods ~/client-mods.tgz ~/test-client-mods || exit 1
+		mark "other mods in the game only: $(ls ~/test-client-mods | tr '\n' ' ')"
+		mv ~/test-client-mods/*.jar "$mods"/ || exit 1
 	fi
 fi
 rm -rf "$dev/screenshots" "$dev/crash-reports" "$dev/logs" "$run/screenshots" "$run/crash-reports" "$run/logs" ~/result ~/result.tgz ~/thread-dumps

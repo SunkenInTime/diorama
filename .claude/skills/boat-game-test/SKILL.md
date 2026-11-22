@@ -54,6 +54,12 @@ For a server mod the player doesn't have, `--server-mods` takes the same kinds o
 python .claude/skills/boat-game-test/boat_run.py 26.3 --tests chunky-border --server-mods chunky-border --env DIORAMA_REAL_SERVER=1
 ```
 
+For a mod the player has and the server doesn't, `--client-mods` takes the same kinds of items and puts them in the game only, beside `--mods`. NeoForge and Forge then number blocks the server's way while the player is joined and the game's own way after, which is how players with a mod added to a pack run.
+
+```
+python .claude/skills/boat-game-test/boat_run.py 1.21.1-neoforge --tests aeronautics-server --mods aeronautics --client-mods https://cdn.modrinth.com/data/GURcjz8O/versions/aQ7rY7ng/mcw-bridges-3.1.2-mc1.21.1neoforge.jar --env DIORAMA_REAL_SERVER=1 --type large
+```
+
 | Node | How the jars load |
 |---|---|
 | Fabric 26.x | The usual run, with Fabric Loader's `fabric.addMods` |

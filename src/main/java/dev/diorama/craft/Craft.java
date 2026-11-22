@@ -7,8 +7,11 @@ import dev.diorama.bake.CraftBlocks;
 import dev.diorama.bake.CraftShadow;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.render.gpu.MapTexture;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMaps;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import net.minecraft.world.level.block.state.BlockState;
 import org.jspecify.annotations.Nullable;
 
 /** One craft on the map: live, or parked where it was left. Client and render thread. */
@@ -16,6 +19,8 @@ final class Craft {
 	final UUID id;
 	@Nullable Body body;
 	Body.@Nullable Blocks blocks;
+	/** The block states the ids in {@link #blocks} stood for when they were read ({@link CraftFile#states}). */
+	Int2ObjectMap<BlockState> states = Int2ObjectMaps.emptyMap();
 	/** The body's {@link Body#version} when its blocks were last read, and the tick. */
 	long version;
 	long readAt;

@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import com.google.common.collect.Iterables;
+import dev.diorama.Diorama;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.RadarCategories;
@@ -17,8 +18,11 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -114,6 +118,14 @@ public final class Radar {
 		}
 	}
 
+	/**
+	 * Entity types that aren't mobs and that their mod wants on the radar all the same, such as a
+	 * train: the entity type tag {@code diorama:radar_shown}, in the mod's own data. They follow the
+	 * passive mobs' settings, and get their picture from the mod's icon files as a mob does
+	 * ({@link XaeroRadarIcons}). The server sends its tags to the client, so the mod has to be on both.
+	 */
+	public static final TagKey<EntityType<?>> RADAR_SHOWN = TagKey.create(Registries.ENTITY_TYPE, Diorama.id("radar_shown"));
+
 	private Radar() {
 	}
 
@@ -131,7 +143,7 @@ public final class Radar {
 		if (entity instanceof Enemy) {
 			return Kind.HOSTILE;
 		}
-		if (entity instanceof Mob) {
+		if (entity instanceof Mob || entity.getType().builtInRegistryHolder().is(RADAR_SHOWN)) {
 			return Kind.PASSIVE;
 		}
 		return null;
@@ -175,8 +187,10 @@ public final class Radar {
 			if (Math.abs(pos.y - selfY) > range && !TrackedPlayers.tracks(entity)) {
 				continue;
 			}
-			float x = view.screenX(Projection.u(pos.x, pos.z));
-			float y = view.screenY(Projection.v(pos.x, pos.y, pos.z));
+			double u = Projection.u(pos.x, pos.z);
+			double v = Projection.v(pos.x, pos.y, pos.z);
+			float x = view.screenX(u, v);
+			float y = view.screenY(u, v);
 			if (x < view.x() - margin || y < view.y() - margin || x > view.x() + view.width() + margin || y > view.y() + view.height() + margin) {
 				continue;
 			}
@@ -347,6 +361,11 @@ public final class Radar {
 			float top = view.screenY(pile.squareY * (size * 2.0) / view.zoom());
 			float cx = Math.max(left + columns * size / 2, Math.min(left + size * 2 - columns * size / 2, pile.x / pile.count));
 			float cy = Math.max(top + rows * size / 2, Math.min(top + size * 2 - rows * size / 2, pile.y / pile.count));
+			if (view.turn() != 0) {
+				// The ground's squares lie at an angle to the screen: the pile's middle as it is.
+				cx = pile.x / pile.count;
+				cy = pile.y / pile.count;
+			}
 			if (drawn + kinds > MAX_ITEM_PICTURES) {
 				pictures.add(new ItemPicture(pile.kinds.get(0), null, cx, cy, pile.kinds.get(0).size()));
 				continue;

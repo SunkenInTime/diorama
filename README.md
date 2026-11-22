@@ -83,6 +83,6 @@ Servers can limit Diorama with the same chat codes Xaero's Minimap uses. "Fair p
 
 Found a bug or want something added? [Open an issue](https://github.com/SunkenInTime/diorama/issues).
 
-Want to build Diorama yourself or help out? [Building and testing](docs/development.md) has the details.
+Want to build Diorama yourself? [Building and testing](docs/development.md) has the details. Sending a pull request? Read [Contributing](CONTRIBUTING.md) first: it asks for screenshots from the running game, one change per pull request, and the AI model's name if one wrote it.
 
 Diorama is under the [MIT license](LICENSE).

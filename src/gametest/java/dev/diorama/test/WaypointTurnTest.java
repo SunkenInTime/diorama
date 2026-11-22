@@ -99,6 +99,8 @@ final class WaypointTurnTest {
 			WaypointStore.get().remove(waypoint);
 		});
 		world.getServer().runCommand("tp @a " + (spawn.getX() + 0.5) + " " + spawn.getY() + " " + (spawn.getZ() + 0.5));
+		// Until the client has the move: the next section may read where the player is at once.
+		context.waitFor(mc -> mc.player.blockPosition().distManhattan(spawn) <= 2, 400);
 		fill(world, x - 24, floor, z - 23, x + 72, floor + 38, z - 23, "air");
 		fill(world, x - 5, floor, z - 23, x + 5, floor + 4, z + 3, "air");
 		if (!wrong.isEmpty()) {

@@ -145,6 +145,23 @@ Xaero's Minimap builds longer IDs for a few vanilla mobs (`...iron_golem.png%MED
 
 Ship the same files in your mod, under `src/main/resources/assets/xaerominimap/entity/icon/`. Players with Diorama or Xaero's Minimap then see your icons with no pack to install, and a resource pack can still replace them.
 
+### Entities that aren't mobs
+
+The radar shows players, dropped items and mobs. A vehicle or any other entity that isn't a mob stays off it unless your mod asks for it, by listing the entity type in the entity type tag `diorama:radar_shown`. Put this in your mod's data, at `data/diorama/tags/entity_type/radar_shown.json` (`tags/entity_types` before Minecraft 1.21):
+
+```json
+{
+  "values": [
+    "examplemod:locomotive",
+    "examplemod:coach"
+  ]
+}
+```
+
+Those entities then show on the minimap and the map while the player's game has them loaded, with the icon from your icon file, or as a dot without one. They follow the player's settings for passive mobs, and players can put them in a radar category of their own.
+
+The server sends its tags to the player's game, so the tag has to be on the server: your mod installed there, or a data pack with the same file.
+
 ## If an icon doesn't show
 
 - Check the file names and folders against the layout above. The definition file has to be named exactly like the mob, `grizzly_bear.json` for `alexsmobs:grizzly_bear`.

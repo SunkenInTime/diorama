@@ -387,6 +387,11 @@ public final class TileBaker {
 		this.savedSpots = this.lit || this.key.lod() != 0 ? null : spots;
 	}
 
+	/** Whether rays start over builds above an ordinary world's top, at heights of their own. */
+	boolean tallBuilds() {
+		return this.tall != null;
+	}
+
 	/** Whether every saved ray crossing block {@code (x, y, z)} passed through it; see {@link TileSpots#passedWhenSaved}. */
 	boolean passedWhenSaved(int x, int y, int z) {
 		return TileSpots.passedWhenSaved(this.key, this.savedSpots, x, y, z);

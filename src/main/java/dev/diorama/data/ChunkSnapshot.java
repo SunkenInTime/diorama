@@ -612,6 +612,105 @@ public final class ChunkSnapshot {
 		this.tints = tints;
 	}
 
+	/**
+	 * Stands for this snapshot's blocks: snapshots with the same token hold the same blocks, column
+	 * tops and copycats, so whatever is worked out from those alone holds for all of them. A snapshot
+	 * that replaces one with the same blocks (light updates take new ones all the time) takes over
+	 * its token (see {@link #replacing}); otherwise every snapshot has its own.
+	 */
+	private Object blocksToken = new Object();
+	/** What bakes worked out from this snapshot's blocks, kept for the next bake; see {@code ChunkBakeData}. */
+	private java.util.concurrent.atomic.AtomicReference<@Nullable Object> bakeData = new java.util.concurrent.atomic.AtomicReference<>();
+	/** The snapshot this one replaced, until the first bake that asks for a token compares the two. */
+	private volatile @Nullable ChunkSnapshot replaced;
+
+	/**
+	 * Notes that this snapshot replaces {@code before}. Comparing them takes a bake thread's time,
+	 * not the client thread's: the first token or bake data asked for compares them, and takes over
+	 * both when the blocks are the same. The one replaced takes over nothing more from its own
+	 * predecessor; whatever still holds it keeps a token of its own. Call before bakes can see this one.
+	 */
+	public void replacing(ChunkSnapshot before) {
+		before.replaced = null;
+		if (this.base == null && before.base == null) {
+			this.replaced = before;
+		}
+	}
+
+	public Object blocksToken() {
+		this.compare();
+		return this.blocksToken;
+	}
+
+	/** See {@link #blocksToken}; the holder of bake data shared with every snapshot of the same blocks. */
+	public java.util.concurrent.atomic.AtomicReference<@Nullable Object> bakeData() {
+		this.compare();
+		return this.bakeData;
+	}
+
+	/** Takes over what is the same as in the snapshot this one replaced, once. */
+	private void compare() {
+		if (this.replaced == null) {
+			return;
+		}
+		synchronized (this) {
+			ChunkSnapshot before = this.replaced;
+			if (before == null) {
+				return;
+			}
+			before.compare();
+			if (this.sameBlocks(before)) {
+				this.blocksToken = before.blocksToken;
+				// The same holder, so what either's bakes keep from here on serves both.
+				this.bakeData = before.bakeData;
+			}
+			// Published by this write: a bake that reads null reads the token as set here.
+			this.replaced = null;
+		}
+	}
+
+	/**
+	 * Whether {@code before} holds the same blocks: every section the same block or the same packed
+	 * palette indices with the same palette, the same column tops and no copycats.
+	 */
+	private boolean sameBlocks(ChunkSnapshot before) {
+		if (this.chunkX != before.chunkX || this.chunkZ != before.chunkZ
+			|| this.minSectionY != before.minSectionY || this.copycats != null || before.copycats != null
+			|| this.states.length != before.states.length || !java.util.Arrays.equals(this.surface, before.surface)) {
+			return false;
+		}
+		for (int i = 0; i < this.states.length; i++) {
+			if (this.uniform[i] != before.uniform[i]) {
+				return false;
+			}
+			PalettedContainer<BlockState> mine = this.states[i];
+			PalettedContainer<BlockState> theirs = before.states[i];
+			if (mine == theirs) {
+				continue;
+			}
+			if (mine == null || theirs == null || !samePacked(this.packed(i), before.packed(i))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean samePacked(@Nullable Packed a, @Nullable Packed b) {
+		if (a == null || b == null || a.storage().getBits() != b.storage().getBits() || a.storage().getSize() != b.storage().getSize()) {
+			return false;
+		}
+		int size = a.palette().getSize();
+		if (size != b.palette().getSize() || !java.util.Arrays.equals(a.storage().getRaw(), b.storage().getRaw())) {
+			return false;
+		}
+		for (int p = 0; p < size; p++) {
+			if (a.palette().valueFor(p) != b.palette().valueFor(p)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	/** Blended biome tints per column, as 0xRRGGBB, indexed {@code (z << 4) | x}. */
 	public record Tints(int[] grass, int[] foliage, int[] dryFoliage, int[] water) {
 	}
