@@ -28,6 +28,9 @@ public final class TableLooks extends Looks {
 		this.table = table;
 		this.jars = jars;
 		this.lookOf = table.lookByStateId();
+		if (jars != null) {
+			jars.useVanilla(table, this.lookOf);
+		}
 		// What a bake reads where a section's palette has no entry.
 		this.ensure(VoxelReader.AIR_ID);
 	}
