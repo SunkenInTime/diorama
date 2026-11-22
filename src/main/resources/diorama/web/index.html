@@ -26,7 +26,7 @@
 	.zoom button { width: 40px; height: 40px; font-size: 20px; }
 	.zoom button + button { border-top: 1px solid var(--line); }
 	/* Many dimensions don't fit: the row scrolls sideways instead of cutting the last ones off. */
-	.dims { display: flex; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; overscroll-behavior-x: contain; }
+	.dims { display: flex; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.25) transparent; overscroll-behavior-x: contain; }
 	.dims button { flex: none; white-space: nowrap; padding: 8px 12px; color: var(--muted); }
 	.dims button.on { color: var(--text); background: rgba(255, 255, 255, 0.08); }
 	.dims button + button { border-left: 1px solid var(--line); }
@@ -44,14 +44,12 @@
 	.claim i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
 	/* pointer-events none: this covers the page, and the tabs and the map under it stay usable. */
 	.empty { position: fixed; inset: 0; pointer-events: none; display: none; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
-	/* On a narrow screen the tabs get a row of their own, the full width, so more of them show at once. */
-	@media (max-width: 600px) { .dims { flex: 1 1 100%; } }
 	button:focus-visible { outline: 2px solid #7aa7ff; outline-offset: -2px; }
 </style>
 </head>
 <body>
 <canvas id="map" aria-label="Map"></canvas>
-<div class="bar"><div class="dims panel" id="dims"></div><button class="follow panel on" id="follow" hidden aria-pressed="true" title="Keep the map centred on you. Turns off when you move the map.">Follow</button><div class="people panel" id="people" hidden><button id="peopleButton" aria-expanded="false"></button></div><ul class="panel" id="peopleList" hidden></ul></div>
+<div class="bar"><div class="dims panel" id="dims" tabindex="-1"></div><button class="follow panel on" id="follow" hidden aria-pressed="true" title="Keep the map centred on you. Turns off when you move the map.">Follow</button><div class="people panel" id="people" hidden><button id="peopleButton" aria-expanded="false"></button></div><ul class="panel" id="peopleList" hidden></ul></div>
 <div class="zoom panel"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">&minus;</button></div>
 <div class="where panel" id="where" hidden></div>
 <div class="claim panel" id="claim" hidden></div>
@@ -528,6 +526,7 @@ function home(first) {
 	view.scale = map.live ? 2 : 1;
 }
 
+let tabShown = null;     // the dimension whose tab was last brought into view
 function buildDims(reveal) {
 	const box = document.getElementById("dims");
 	// The list is built again every time the map is read: it stays where the player scrolled it.
@@ -542,9 +541,11 @@ function buildDims(reveal) {
 		box.appendChild(b);
 	}
 	box.scrollLeft = scrolled;
-	// After a pick, the tab picked is brought into view if it's partly out of it.
+	// After a pick, or a switch from a link or the player list, the tab is brought into view if it's partly out of it.
 	const on = box.querySelector("button.on");
-	if (reveal && on) {
+	const switched = dim && dim.id !== tabShown;
+	tabShown = dim ? dim.id : null;
+	if ((reveal || switched) && on) {
 		if (on.offsetLeft < box.scrollLeft) box.scrollLeft = on.offsetLeft;
 		else if (on.offsetLeft + on.offsetWidth > box.scrollLeft + box.clientWidth) box.scrollLeft = on.offsetLeft + on.offsetWidth - box.clientWidth;
 	}
@@ -552,7 +553,11 @@ function buildDims(reveal) {
 // A mouse wheel scrolls the tabs sideways.
 document.getElementById("dims").addEventListener("wheel", e => {
 	const box = e.currentTarget;
-	if (box.scrollWidth > box.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) { box.scrollLeft += e.deltaY; e.preventDefault(); }
+	// Ctrl and the wheel is the browser's own zoom.
+	if (e.ctrlKey || box.scrollWidth <= box.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+	// Some mice report lines or pages instead of pixels.
+	box.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? box.clientWidth : 1);
+	e.preventDefault();
 }, { passive: false });
 
 function nameOf(id) {
@@ -880,7 +885,8 @@ document.getElementById("out").onclick = () => { zoomAt(canvas.clientWidth / 2, 
 addEventListener("keydown", e => {
 	const step = 80 / view.scale;
 	const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-	if (moves[e.key]) { view.u += moves[e.key][0]; view.v += moves[e.key][1]; if (follow && map && map.live) setFollow(false); }
+	// preventDefault: with a tab focused, an arrow would scroll the tab row as well.
+	if (moves[e.key]) { e.preventDefault(); view.u += moves[e.key][0]; view.v += moves[e.key][1]; if (follow && map && map.live) setFollow(false); }
 	else if (e.key === "+" || e.key === "=") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 2);
 	else if (e.key === "-") zoomAt(canvas.clientWidth / 2, canvas.clientHeight / 2, 0.5);
 	else return;
