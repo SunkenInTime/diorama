@@ -476,6 +476,14 @@ public final class WaypointStore {
 	}
 
 	/**
+	 * Whether a waypoint stands in the world as well as on the maps, where it's shown at all: every
+	 * one but the portal pins, which the player can keep to the maps.
+	 */
+	public static boolean inWorld(Waypoint waypoint) {
+		return !waypoint.kind.isPortal() || Settings.get().portalMarkersInWorld;
+	}
+
+	/**
 	 * Whether a waypoint is near enough to the player to show in the world and on the minimap, by
 	 * the waypoint distance setting; the map shows every waypoint. Deaths, temporary waypoints and
 	 * the bed show at any distance: there are only a few, and they're the ones players head back to.
