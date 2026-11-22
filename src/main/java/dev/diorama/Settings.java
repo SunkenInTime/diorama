@@ -167,6 +167,12 @@ public final class Settings {
 	public boolean bedMarkers = true;
 	/** Pins on the lit portals the map has found ({@link dev.diorama.waypoint.Portals}). */
 	public boolean portalMarkers = false;
+	/**
+	 * Whether those pins stand in the world too. Off, they stay on the maps: a world with a dozen
+	 * portals has a dozen pins ahead of the player, over the few places they're walking to. Xaero's
+	 * Minimap has the same kind of switch for its automatic pins, Deathpoints.
+	 */
+	public boolean portalMarkersInWorld = true;
 	public WaypointLabels waypointLabels = WaypointLabels.AUTO;
 	/** Which waypoints stand in a beam in the world, where they show there at all. */
 	public Beams waypointBeams = Beams.TEMPORARY;

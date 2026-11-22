@@ -170,6 +170,8 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
 		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
 		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
+		// Under Portal pins, in the cell seven checkboxes left free: the tab is no taller for it.
+		waypoints.toggle("portals_world", () -> s.portalMarkersInWorld, v -> s.portalMarkersInWorld = v);
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
 		// How big those labels are, beside what they say: the tab has no room for another row.
 		int[] labelSizes = TextSize.sizes();
