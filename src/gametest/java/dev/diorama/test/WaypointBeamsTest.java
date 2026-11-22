@@ -270,28 +270,28 @@ final class WaypointBeamsTest {
 	}
 
 	/** The height of the highest block at (x, z), which has to be loaded. */
-	private static int surface(ClientGameTestContext context, int x, int z) {
+	static int surface(ClientGameTestContext context, int x, int z) {
 		return context.computeOnClient(mc -> mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z)) - 1;
 	}
 
 	/** Stands the player in the block (x, y, z) on a block nobody can see, facing north at {@code pitch}. */
-	private static void stand(TestSingleplayerContext world, int x, int y, int z, int pitch) {
+	static void stand(TestSingleplayerContext world, int x, int y, int z, int pitch) {
 		world.getServer().runCommand("setblock " + x + " " + (y - 1) + " " + z + " minecraft:barrier");
 		world.getServer().runCommand("tp @a " + (x + 0.5) + " " + y + " " + (z + 0.5) + " 180 " + pitch);
 	}
 
 	/** Where on a screenshot points up a waypoint's beam are, above its trees: those that are on it. */
-	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot) {
+	static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot) {
 		return points(context, waypoint, shot, 16, 48, 4);
 	}
 
 	/** The same from {@code lowest} to {@code highest} blocks above the beam's foot, every {@code step}. */
-	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step) {
+	static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step) {
 		return points(context, waypoint, shot, lowest, highest, step, 3);
 	}
 
 	/** The same, where as few as {@code least} points on screen will do. */
-	private static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step, int least) {
+	static int[][] points(ClientGameTestContext context, Waypoint waypoint, BufferedImage shot, int lowest, int highest, int step, int least) {
 		List<int[]> points = new ArrayList<>();
 		for (int up = lowest; up <= highest; up += step) {
 			double y = waypoint.y + 1.0 + up;
@@ -314,7 +314,7 @@ final class WaypointBeamsTest {
 	 * A beam shows at most of its points: another waypoint's pin or label may cover a few. Without one,
 	 * none of them is the beam's colour.
 	 */
-	private static void expect(BufferedImage shot, int[][] points, Waypoint waypoint, boolean beam, String what) {
+	static void expect(BufferedImage shot, int[][] points, Waypoint waypoint, boolean beam, String what) {
 		int colour = WaypointBeams.coreColor(waypoint.color & 0xFFFFFF);
 		int found = 0;
 		StringBuilder seen = new StringBuilder();

@@ -7318,7 +7318,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** The open screen's widget whose label starts with this text. */
-	private static net.minecraft.client.gui.components.@Nullable AbstractWidget widget(Minecraft mc, String label) {
+	static net.minecraft.client.gui.components.@Nullable AbstractWidget widget(Minecraft mc, String label) {
 		java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
 		collectWidgets(mc.gui.screen(), widgets);
 		for (var widget : widgets) {
