@@ -249,7 +249,8 @@ public final class SharedChunks implements ChunkSave {
 		Map<Long, int[]> times = new HashMap<>();
 		synchronized (this.lock) {
 			for (Map.Entry<Long, Table> table : this.tables.entrySet()) {
-				times.put(table.getKey(), table.getValue().times().clone());
+				// A table's times never change once it's here: a newer table takes its place.
+				times.put(table.getKey(), table.getValue().times());
 			}
 		}
 		return times;

@@ -486,6 +486,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("shared-map-real")) {
 			SharedMapRealTest.run(context);
 		}
+		if (tests.contains("shared-idle")) {
+			SharedIdleTest.run(context);
+		}
 		if (tests.contains("web-map")) {
 			WebMapTest.run(context);
 		}

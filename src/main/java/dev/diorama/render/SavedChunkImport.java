@@ -68,6 +68,12 @@ public final class SavedChunkImport {
 	/** Waits this long into a level, so as not to compete with the game getting it ready. */
 	private static final long START_DELAY_MS = 5_000;
 	private static final long RESCAN_MS = 60_000;
+	/**
+	 * A listing asked for waits until the last one is this old. A server sends its regions' tables
+	 * one at a time, for minutes on a big world, and each asks for a listing: taken as they come,
+	 * every one of them had the fill go through all the regions it knew again (#451).
+	 */
+	private static final long ASKED_RESCAN_MS = 1_000;
 	private static final long SAVE_PROGRESS_MS = 10_000;
 	/**
 	 * How long a region waits after a live bake got in the way of one of its tiles. Around a busy
@@ -149,6 +155,10 @@ public final class SavedChunkImport {
 	private final Map<TileKey, Integer> drawn = new ConcurrentHashMap<>();
 	private int drawnCount;
 	private long drawNanos;
+	/** How many tiles the log has been told were drawn. */
+	private int loggedCount;
+	private volatile int listings;
+	private volatile int regionsListed;
 
 	private SavedChunkImport(MapLevel map, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
 		this.map = map;
@@ -286,6 +296,16 @@ public final class SavedChunkImport {
 		this.rescanAsked = true;
 	}
 
+	/** For tests: how many times the save has been listed. */
+	public int listings() {
+		return this.listings;
+	}
+
+	/** For tests: how many regions the last listing had. */
+	public int regionsListed() {
+		return this.regionsListed;
+	}
+
 	/** For tests: how many tiles were drawn from the save. */
 	public int drawnCount() {
 		return this.drawnCount;
@@ -416,13 +436,15 @@ public final class SavedChunkImport {
 			progress.mark(cx >> 5, cz >> 5, index(cx, cz), Progress.LIVE);
 		});
 		long now = System.currentTimeMillis();
-		if (now - this.lastScan >= RESCAN_MS || this.rescanAsked) {
+		if (now - this.lastScan >= (this.rescanAsked ? ASKED_RESCAN_MS : RESCAN_MS)) {
 			this.idle = false;
 			this.rescanAsked = false;
 			this.lastScan = now;
+			this.listings++;
 			this.scannedAt = this.save.now();
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
+			this.regionsListed = this.regions.size();
 			if (progress.back(this.regions)) {
 				// Before anything can leave this folder again: that note has to be the next one.
 				progress.saveIfChanged();
@@ -459,7 +481,9 @@ public final class SavedChunkImport {
 			this.source.clear();
 			if (this.pending.isEmpty() && !this.idle) {
 				this.idle = true;
-				if (this.drawnCount > 0) {
+				// Once for what it drew, not again after each listing that found nothing new.
+				if (this.drawnCount > this.loggedCount) {
+					this.loggedCount = this.drawnCount;
 					Diorama.LOGGER.info("Saved chunks: drew {} tiles, {} ms each", this.drawnCount, this.drawNanos / this.drawnCount / 1_000_000);
 				}
 			}
