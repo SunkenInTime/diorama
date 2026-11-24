@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -368,9 +369,15 @@ public final class WaypointStore {
 		return folder != null ? customKey(folder) : dimensionKey(waypoint.dimension);
 	}
 
-	/** The custom folders, in the order they were made. */
+	/**
+	 * The custom folders in name order, capitals or not, as Xaero's Minimap lists its waypoint sets
+	 * and as the waypoint list's Name order compares names: with many, the order they were made in
+	 * is one only their maker could find a folder in. The file keeps them as they were made.
+	 */
 	public List<String> customFolders() {
-		return List.copyOf(this.folders.custom);
+		List<String> sorted = new ArrayList<>(this.folders.custom);
+		sorted.sort(Comparator.<String, String>comparing(name -> name.toLowerCase(Locale.ROOT)).thenComparing(Comparator.naturalOrder()));
+		return List.copyOf(sorted);
 	}
 
 	/** The custom folder with this name, any case, as it's spelled; null if there's none. */
