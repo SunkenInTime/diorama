@@ -25,14 +25,13 @@ import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * Exporting the map as an image, through the screen as a player does: the Export button, the
- * Area box dragged bigger, panning beside it, a detail button, Save image, then Whole map, and the
- * same from the cave view. Each saved PNG is opened and checked against what the screen said it
- * would be.
+ * Area box dragged bigger, panning beside it, a detail button, Save image, then Whole map, the
+ * same from the cave view, and the box's corners typed. Each saved PNG is opened and checked
+ * against what the screen said it would be.
  */
 final class ImageExportTest {
 	private ImageExportTest() {
@@ -148,6 +147,169 @@ final class ImageExportTest {
 		noteMatchesMap(context, drawn);
 		context.setScreen(() -> null);
 		caveSlice(context);
+		corners(context, world);
+	}
+
+	/**
+	 * The box's corners typed in the sidebar (#454). On a level floor at the height the corners are
+	 * measured at, an area typed as two corners saves an image of those blocks and no others: the
+	 * floor is white inside the typed area with a red and a blue block in two of its corners, and
+	 * lime all around it. Dragging the box writes its corners back into the fields.
+	 */
+	private static void corners(ClientGameTestContext context, TestSingleplayerContext world) {
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		// The tight case for the sidebar: a 1280 x 720 window is 427 x 240 GUI pixels.
+		context.getInput().resizeWindow(1280, 720);
+		DioramaClientTest.setGuiScale(context, 3);
+		int[] player = context.computeOnClient(mc -> new int[] {mc.player.getBlockX(), mc.player.getBlockZ()});
+		int x1 = player[0] + 24;
+		int z1 = player[1] - 10;
+		int x2 = x1 + 24;
+		int z2 = z1 + 20;
+		// Nothing over the floor, or south of it where higher ground would be drawn over it. Cleared in
+		// slabs: a fill may change only so many blocks at once.
+		for (int y = 64; y < 134; y += 10) {
+			world.getServer().runCommand("fill " + (x1 - 4) + " " + y + " " + (z1 - 4) + " " + (x2 + 3) + " " + (y + 9) + " " + (z2 + 3 + 60) + " air");
+		}
+		world.getServer().runCommand("fill " + (x1 - 4) + " 63 " + (z1 - 4) + " " + (x2 + 3) + " 63 " + (z2 + 3) + " lime_concrete");
+		world.getServer().runCommand("fill " + x1 + " 63 " + z1 + " " + (x2 - 1) + " 63 " + (z2 - 1) + " white_concrete");
+		world.getServer().runCommand("setblock " + x1 + " 63 " + z1 + " red_concrete");
+		world.getServer().runCommand("setblock " + (x2 - 1) + " 63 " + (z2 - 1) + " blue_concrete");
+		// A drawing well away from the floor, so the sidebar has both its checkboxes above the fields.
+		Drawing far = context.computeOnClient(mc -> {
+			double v = Projection.v(64, z1 - 200);
+			Drawing made = new Drawing(Drawing.Kind.STROKE, mc.level.dimension().identifier().toString(), 0xFF000000 | LINE, new double[] {x1, v, x2, v}, "");
+			DrawingStore.get().add(made);
+			return made;
+		});
+		double floorTop = Projection.v(64, z1);
+		double floorBottom = Projection.v(64, z2);
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt((x1 + x2) / 2.0, (floorTop + floorBottom) / 2, 2.0, TileKey.SURFACE));
+		settle(context);
+		click(context, mc -> centre(((MapScreen) mc.gui.screen()).exportButton()), false);
+		context.waitTicks(3);
+		settle(context);
+		context.takeScreenshot("image-export-08-corners");
+
+		// Dragging the box moves both corners by the same whole blocks: 20 GUI pixels are 10 blocks at this zoom.
+		int[] before = typedCorners(context);
+		double[] box = box(context);
+		drag(context, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, 20, 0);
+		int[] moved = typedCorners(context);
+		if (moved[0] != before[0] + 10 || moved[2] != before[2] + 10 || moved[1] != before[1] || moved[3] != before[3]) {
+			throw new AssertionError("Dragging the box 10 blocks east didn't write that into the corner fields: "
+				+ java.util.Arrays.toString(before) + " -> " + java.util.Arrays.toString(moved));
+		}
+
+		// One corner typed a field at a time, the other pasted as Copy coordinates gives a place: x y z.
+		DioramaClientTest.typeInto(context, 0, Integer.toString(x1));
+		DioramaClientTest.typeInto(context, 1, Integer.toString(z1));
+		// Pasted into the field as it stands, number and all, wherever the cursor is in it: the paste
+		// is the corner, not part of the number.
+		click(context, mc -> centre(((ExportScreen) mc.gui.screen()).cornerField(2)), false);
+		for (int cursor = 0; cursor <= 2; cursor++) {
+			int at = cursor;
+			String[] pasted = context.computeOnClient(mc -> {
+				ExportScreen screen = (ExportScreen) mc.gui.screen();
+				screen.cornerField(2).setValue("15");
+				screen.cornerField(2).setCursorPosition(at);
+				screen.cornerField(2).setHighlightPos(at);
+				screen.cornerField(2).insertText("50 64.5 -25");
+				return new String[] {screen.cornerField(2).getValue(), screen.cornerField(3).getValue()};
+			});
+			if (!pasted[0].equals("50") || !pasted[1].equals("-25")) {
+				throw new AssertionError("50 64.5 -25 pasted at " + at + " of 15 made the corner " + pasted[0] + " " + pasted[1]);
+			}
+		}
+		context.runOnClient(mc -> ((ExportScreen) mc.gui.screen()).cornerField(2).insertText(x2 + " 71 " + z2));
+		context.waitTicks(2);
+		int[] typed = typedCorners(context);
+		if (!java.util.Arrays.equals(typed, new int[] {x1, z1, x2, z2})) {
+			throw new AssertionError("The corner fields read " + java.util.Arrays.toString(typed) + " after typing " + java.util.Arrays.toString(new int[] {x1, z1, x2, z2}));
+		}
+		// A field that isn't a number keeps Save image off until it's one again.
+		context.getInput().typeChars("k");
+		context.waitTicks(2);
+		if (context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).saveButton().active)) {
+			throw new AssertionError("Save image stayed on with a corner that isn't a number");
+		}
+		context.takeScreenshot("image-export-09-corners-invalid");
+		context.getInput().pressKey(InputConstants.KEY_BACKSPACE);
+		context.waitTicks(2);
+
+		// The mouse on the heading: what the corners are measured on.
+		double guiScale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		int headingY = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).cornerField(0).getY()) - 8;
+		context.getInput().setCursorPos(40 * guiScale, headingY * guiScale);
+		context.waitTicks(10);
+		context.takeScreenshot("image-export-10-corners-typed");
+
+		ImageExport.Area area = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
+		// The rows of pixels whose middles are on the typed blocks, four rows to a map unit.
+		long top = (long) Math.ceil(floorTop * 4 - 0.5);
+		long bottom = (long) Math.ceil(floorBottom * 4 - 0.5);
+		ImageExport.Area expected = new ImageExport.Area(0, x1 * 4L, top, (x2 - x1) * 4, (int) (bottom - top));
+		if (!expected.equals(area)) {
+			throw new AssertionError("Typed corners " + x1 + " " + z1 + " to " + x2 + " " + z2 + " plan " + area + ", not " + expected);
+		}
+		Path file = save(context);
+		BufferedImage image = read(file);
+		if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
+			throw new AssertionError(file.getFileName() + " isn't the " + area.width() + "x" + area.height() + " the screen said");
+		}
+		// Every pixel is the floor inside the corners. A block's edge can fall inside a row of pixels,
+		// so the top and bottom rows are in part the floor outside: at most half, as the area is the
+		// rows whose middles are inside, which the expected area above has checked.
+		int lime = 0;
+		int white = 0;
+		for (int y = 1; y < image.getHeight() - 1; y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				int rgb = image.getRGB(x, y);
+				int r = rgb >> 16 & 0xFF;
+				int g = rgb >> 8 & 0xFF;
+				int b = rgb & 0xFF;
+				lime += g > r * 1.4 && g > b * 1.5 ? 1 : 0;
+				// White concrete in the sun, or blue-grey in a tree's shadow; grass and dirt have the least blue.
+				white += b >= r - 10 && b >= g - 10 && r > b * 0.6 && g > b * 0.6 && b > 60 ? 1 : 0;
+			}
+		}
+		int inner = image.getWidth() * (image.getHeight() - 2);
+		System.out.println("IMAGE-EXPORT corners " + file.getFileName() + " " + image.getWidth() + "x" + image.getHeight() + " lime " + lime + " white " + white + " of " + inner);
+		if (lime > 0) {
+			throw new AssertionError(file.getFileName() + " has " + lime + " pixels of the lime floor outside the typed corners");
+		}
+		if (white < inner * 0.97) {
+			throw new AssertionError(file.getFileName() + " is the white floor inside the typed corners in only " + white + " of " + inner + " pixels");
+		}
+		// The red block is the first inside the first corner, the blue the last inside the second: 4 pixels
+		// across and 3 down, so the second row from the edge is all block wherever the edge falls in the first.
+		for (int i = 1; i <= 2; i++) {
+			int first = image.getRGB(i, 1);
+			int last = image.getRGB(image.getWidth() - 1 - i, image.getHeight() - 2);
+			if (!((first >> 16 & 0xFF) > (first >> 8 & 0xFF) * 1.5 && (first >> 16 & 0xFF) > (first & 0xFF) * 1.5)) {
+				throw new AssertionError(file.getFileName() + " doesn't start on the red block at the first typed corner: " + Integer.toHexString(first));
+			}
+			if (!((last & 0xFF) > (last >> 8 & 0xFF) * 1.5 && (last & 0xFF) > (last >> 16 & 0xFF) * 1.5)) {
+				throw new AssertionError(file.getFileName() + " doesn't end on the blue block at the second typed corner: " + Integer.toHexString(last));
+			}
+		}
+
+		context.runOnClient(mc -> DrawingStore.get().remove(far));
+		context.setScreen(() -> null);
+		context.getInput().resizeWindow(1600, 900);
+		DioramaClientTest.setGuiScale(context, scale);
+	}
+
+	/** The four corner fields as numbers: X and Z of one corner, then of the other. */
+	private static int[] typedCorners(ClientGameTestContext context) {
+		return context.computeOnClient(mc -> {
+			int[] typed = new int[4];
+			for (int i = 0; i < 4; i++) {
+				typed[i] = Integer.parseInt(((ExportScreen) mc.gui.screen()).cornerField(i).getValue());
+			}
+			return typed;
+		});
 	}
 
 	/**
@@ -582,7 +744,7 @@ final class ImageExportTest {
 		return context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).boxOnScreen());
 	}
 
-	private static double[] centre(Button button) {
+	private static double[] centre(net.minecraft.client.gui.components.AbstractWidget button) {
 		return new double[] {button.getX() + button.getWidth() / 2.0, button.getY() + button.getHeight() / 2.0};
 	}
 

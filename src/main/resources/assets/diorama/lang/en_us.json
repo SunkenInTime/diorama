@@ -97,6 +97,8 @@
 	"diorama.export.size_mb": "about %s MB",
 	"diorama.export.size_kb": "about %s KB",
 	"diorama.export.blocks": "%s × %s blocks",
+	"diorama.export.corners": "Corners at Y %s",
+	"diorama.export.corners_tip": "Block X and Z of two opposite corners, measured on ground at Y %s. The map is drawn at a tilt, so higher ground sits further up the image and lower ground further down.",
 	"diorama.export.too_big": "Over %s px on a side",
 	"diorama.export.save": "Save image",
 	"diorama.export.night": "Night",

@@ -978,7 +978,7 @@ public final class MapScreen extends Screen {
 	}
 
 	/** The height most ground is near, for a point the map knows nothing about. */
-	private static final int USUAL_GROUND_Y = 64;
+	static final int USUAL_GROUND_Y = 64;
 
 	/**
 	 * Roughly where a screen point is when the map can't say. The camera is tilted, so a point alone

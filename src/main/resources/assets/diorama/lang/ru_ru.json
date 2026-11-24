@@ -97,6 +97,8 @@
     "diorama.export.size_mb": "около %s МБ",
     "diorama.export.size_kb": "около %s КБ",
     "diorama.export.blocks": "%s × %s блоков",
+    "diorama.export.corners": "Углы на Y %s",
+    "diorama.export.corners_tip": "X и Z двух противоположных углов в блоках, отсчитанные по земле на высоте Y %s. Карта нарисована под наклоном, поэтому места повыше оказываются на изображении выше, а пониже — ниже.",
     "diorama.export.too_big": "Более %s пикс. по стороне",
     "diorama.export.save": "Сохранить",
 	"diorama.export.night": "Ночь",
