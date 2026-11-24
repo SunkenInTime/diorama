@@ -25,7 +25,6 @@ import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
@@ -206,8 +205,23 @@ final class ImageExportTest {
 		// One corner typed a field at a time, the other pasted as Copy coordinates gives a place: x y z.
 		DioramaClientTest.typeInto(context, 0, Integer.toString(x1));
 		DioramaClientTest.typeInto(context, 1, Integer.toString(z1));
-		// Pasted into the field as it stands, number and all: the paste is the corner, not part of the number.
+		// Pasted into the field as it stands, number and all, wherever the cursor is in it: the paste
+		// is the corner, not part of the number.
 		click(context, mc -> centre(((ExportScreen) mc.gui.screen()).cornerField(2)), false);
+		for (int cursor = 0; cursor <= 2; cursor++) {
+			int at = cursor;
+			String[] pasted = context.computeOnClient(mc -> {
+				ExportScreen screen = (ExportScreen) mc.gui.screen();
+				screen.cornerField(2).setValue("15");
+				screen.cornerField(2).setCursorPosition(at);
+				screen.cornerField(2).setHighlightPos(at);
+				screen.cornerField(2).insertText("50 64.5 -25");
+				return new String[] {screen.cornerField(2).getValue(), screen.cornerField(3).getValue()};
+			});
+			if (!pasted[0].equals("50") || !pasted[1].equals("-25")) {
+				throw new AssertionError("50 64.5 -25 pasted at " + at + " of 15 made the corner " + pasted[0] + " " + pasted[1]);
+			}
+		}
 		context.runOnClient(mc -> ((ExportScreen) mc.gui.screen()).cornerField(2).insertText(x2 + " 71 " + z2));
 		context.waitTicks(2);
 		int[] typed = typedCorners(context);
@@ -238,9 +252,6 @@ final class ImageExportTest {
 		ImageExport.Area expected = new ImageExport.Area(0, x1 * 4L, top, (x2 - x1) * 4, (int) (bottom - top));
 		if (!expected.equals(area)) {
 			throw new AssertionError("Typed corners " + x1 + " " + z1 + " to " + x2 + " " + z2 + " plan " + area + ", not " + expected);
-		}
-		if (area.width() != (x2 - x1) * 4 || area.x() != x1 * 4L) {
-			throw new AssertionError("The image isn't the typed blocks across at 4 px a block: " + area);
 		}
 		Path file = save(context);
 		BufferedImage image = read(file);

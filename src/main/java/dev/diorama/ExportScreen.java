@@ -91,7 +91,7 @@ public final class ExportScreen extends Screen {
 	private boolean cornersRead = true;
 	/** Set while the fields are being written from the box, which isn't typing. */
 	private boolean writing;
-	/** What each field last held, to tell what a change put into it. */
+	/** What each field last held: 1.20.1 calls a change when only the cursor moved. */
 	private final String[] cornerText = {"", "", "", ""};
 	/** Where the corner fields start, in GUI pixels down the sidebar. */
 	private int cornersY;
@@ -174,36 +174,45 @@ public final class ExportScreen extends Screen {
 		this.cornersRead = true;
 	}
 
-	/**
-	 * A corner field changed. Several numbers put in at once are a paste: "x z" or "x y z", as Copy
-	 * coordinates and chat give a place, become that corner whatever the field held, and four
-	 * become both.
-	 */
+	/** A corner field changed. */
 	private void typed(int field, String text) {
-		// 1.20.1 also says so when only the cursor moved.
 		if (this.writing || text.equals(this.cornerText[field])) {
 			return;
 		}
+		this.cornerText[field] = text;
+		this.readCorners();
+	}
+
+	/**
+	 * Text on its way into a corner field. Several numbers at once are a pasted place: "x z" or
+	 * "x y z", as Copy coordinates and chat give one, become that corner whatever the field held,
+	 * and four become both. Anything else goes into the field as typed.
+	 */
+	private boolean pasted(int field, String text) {
 		List<String> numbers = new java.util.ArrayList<>();
-		Matcher matcher = NUMBER.matcher(put(this.cornerText[field], text));
+		Matcher matcher = NUMBER.matcher(text);
 		while (matcher.find()) {
 			numbers.add(Long.toString((long) Math.floor(Double.parseDouble(matcher.group()))));
 		}
+		if (numbers.size() < 2 || numbers.size() > 4) {
+			return false;
+		}
 		int row = field / 2 * 2;
 		this.writing = true;
-		if (numbers.size() == 2 || numbers.size() == 3) {
-			this.corners[row].setValue(numbers.get(0));
-			this.corners[row + 1].setValue(numbers.get(numbers.size() - 1));
-		} else if (numbers.size() == 4) {
+		if (numbers.size() == 4) {
 			for (int i = 0; i < 4; i++) {
 				this.corners[i].setValue(numbers.get(i));
 			}
+		} else {
+			this.corners[row].setValue(numbers.get(0));
+			this.corners[row + 1].setValue(numbers.get(numbers.size() - 1));
 		}
 		this.writing = false;
 		for (int i = 0; i < 4; i++) {
 			this.cornerText[i] = this.corners[i].getValue();
 		}
 		this.readCorners();
+		return true;
 	}
 
 	/**
@@ -241,28 +250,6 @@ public final class ExportScreen extends Screen {
 		if (this.screenX(box[2]) < SIDEBAR || this.screenX(box[0]) > this.width || this.screenY(box[3]) < 0 || this.screenY(box[1]) > this.previewHeight()) {
 			this.fit(box);
 		}
-	}
-
-	/**
-	 * What a change put into a field: the text without what it keeps of the field as it was. Where
-	 * that could be cut more than one way (a 5 pasted beside a 5), the cut that starts and ends on a
-	 * number, as a pasted place does.
-	 */
-	private static String put(String was, String text) {
-		int length = text.length() - was.length();
-		String found = null;
-		for (int i = 0; length > 0 && i + length <= text.length(); i++) {
-			if (!(text.substring(0, i) + text.substring(i + length)).equals(was)) {
-				continue;
-			}
-			String put = text.substring(i, i + length);
-			if (NUMBER.matcher(put.trim()).lookingAt() && Character.isDigit(put.trim().charAt(put.trim().length() - 1))) {
-				return put;
-			}
-			found = found == null ? put : found;
-		}
-		// Typed over a selection: all of the text is new.
-		return found == null ? text : found;
 	}
 
 	private static @Nullable Integer parse(String text) {
@@ -325,23 +312,31 @@ public final class ExportScreen extends Screen {
 		}
 		// The corners, under whichever checkboxes there are: X and Z of one, then of the other.
 		this.cornersY = 108 + (this.drawings().isEmpty() ? 0 : 24) + (this.hasNight() ? 24 : 0);
-		// Resizing the window runs init() again: corners that don't read yet stay as typed.
-		String[] unread = this.cornersRead ? null : this.cornerText.clone();
+		// Resizing the window runs init() again: the corners stay as typed, in the order typed.
+		String[] kept = this.corners[0] == null ? null : this.cornerText.clone();
 		for (int i = 0; i < 4; i++) {
 			int field = i;
-			EditBox box = new EditBox(this.font, 14 + i % 2 * 52, this.cornersY + 11 + i / 2 * 18, 40, 16, Component.translatable(i % 2 == 0 ? "diorama.waypoint.x" : "diorama.waypoint.z"));
-			// Room for a pasted "x y z", or both corners.
-			box.setMaxLength(64);
+			EditBox box = new EditBox(this.font, 14 + i % 2 * 52, this.cornersY + 11 + i / 2 * 18, 40, 16, Component.translatable(i % 2 == 0 ? "diorama.waypoint.x" : "diorama.waypoint.z")) {
+				// Typing and pasting both come through here, a paste all at once.
+				@Override
+				public void insertText(String text) {
+					if (!ExportScreen.this.pasted(field, text)) {
+						super.insertText(text);
+					}
+				}
+			};
+			// Nothing in the world is longer than "-30000000".
+			box.setMaxLength(9);
 			box.setResponder(text -> this.typed(field, text));
 			box.visible = !this.whole;
 			this.corners[i] = this.addRenderableWidget(box);
 		}
 		this.writeCorners();
-		if (unread != null) {
+		if (kept != null) {
 			this.writing = true;
 			for (int i = 0; i < 4; i++) {
-				this.corners[i].setValue(unread[i]);
-				this.cornerText[i] = unread[i];
+				this.corners[i].setValue(kept[i]);
+				this.cornerText[i] = kept[i];
 			}
 			this.writing = false;
 			this.readCorners();
@@ -365,8 +360,16 @@ public final class ExportScreen extends Screen {
 		return this.whole ? this.explored : this.areaBox();
 	}
 
+	/** The levels a box can be saved at, finest first: those whose image is within {@link ImageExport#MAX_EDGE}. */
 	private List<Integer> levels(double[] box) {
-		return ImageExport.levels(box[0], box[1], box[2], box[3]);
+		List<Integer> levels = new java.util.ArrayList<>();
+		for (int lod = 0; lod <= ImageExport.COARSEST; lod++) {
+			ImageExport.Area area = this.area(box, lod);
+			if (Math.max(area.width(), area.height()) <= ImageExport.MAX_EDGE) {
+				levels.add(lod);
+			}
+		}
+		return levels;
 	}
 
 	/** The level the export will be saved at for this box. */
@@ -383,7 +386,14 @@ public final class ExportScreen extends Screen {
 				}
 			}
 		}
-		return ImageExport.defaultLevel(box[0], box[1], box[2], box[3]);
+		// The sharpest whose long side is within the default, else the coarsest there is.
+		for (int lod : levels) {
+			ImageExport.Area area = this.area(box, lod);
+			if (Math.max(area.width(), area.height()) <= ImageExport.DEFAULT_EDGE) {
+				return lod;
+			}
+		}
+		return levels.isEmpty() ? ImageExport.COARSEST : levels.get(levels.size() - 1);
 	}
 
 	/**
@@ -391,7 +401,10 @@ public final class ExportScreen extends Screen {
 	 * box is the pixels within it, so the image has no row or column of ground outside the corners.
 	 */
 	private ImageExport.Area area(double[] box) {
-		int lod = this.lod(box);
+		return this.area(box, this.lod(box));
+	}
+
+	private ImageExport.Area area(double[] box, int lod) {
 		return this.whole ? ImageExport.Area.ofUnits(lod, box[0], box[1], box[2], box[3]) : ImageExport.Area.within(lod, box[0], box[1], box[2], box[3]);
 	}
 
@@ -819,6 +832,7 @@ public final class ExportScreen extends Screen {
 			this.centerV -= dv;
 			return true;
 		}
+		int[] was = {this.x0, this.z0, this.x1, this.z1};
 		// The box moves by whole blocks from where the press found it, so it keeps its size as it's moved.
 		this.draggedX += du;
 		this.draggedZ += dv / Projection.sin();
@@ -846,7 +860,10 @@ public final class ExportScreen extends Screen {
 				this.z1 = Math.max(this.held[3] + blocksZ, this.held[1] + deep);
 			}
 		}
-		this.writeCorners();
+		// Only a box that moved: an edge held at its stop leaves what's typed alone.
+		if (this.x0 != was[0] || this.z0 != was[1] || this.x1 != was[2] || this.z1 != was[3]) {
+			this.writeCorners();
+		}
 		return true;
 	}
 
