@@ -168,8 +168,8 @@ final class ImageExportTest {
 		int z2 = z1 + 20;
 		// Nothing over the floor, or south of it where higher ground would be drawn over it. Cleared in
 		// slabs: a fill may change only so many blocks at once.
-		for (int y = 64; y < 104; y += 10) {
-			world.getServer().runCommand("fill " + (x1 - 4) + " " + y + " " + (z1 - 4) + " " + (x2 + 3) + " " + (y + 9) + " " + (z2 + 3 + 36) + " air");
+		for (int y = 64; y < 134; y += 10) {
+			world.getServer().runCommand("fill " + (x1 - 4) + " " + y + " " + (z1 - 4) + " " + (x2 + 3) + " " + (y + 9) + " " + (z2 + 3 + 60) + " air");
 		}
 		world.getServer().runCommand("fill " + (x1 - 4) + " 63 " + (z1 - 4) + " " + (x2 + 3) + " 63 " + (z2 + 3) + " lime_concrete");
 		world.getServer().runCommand("fill " + x1 + " 63 " + z1 + " " + (x2 - 1) + " 63 " + (z2 - 1) + " white_concrete");
@@ -205,12 +205,9 @@ final class ImageExportTest {
 		// One corner typed a field at a time, the other pasted as Copy coordinates gives a place: x y z.
 		DioramaClientTest.typeInto(context, 0, Integer.toString(x1));
 		DioramaClientTest.typeInto(context, 1, Integer.toString(z1));
-		click(context, mc -> middle(((ExportScreen) mc.gui.screen()).cornerField(2)), false);
-		context.runOnClient(mc -> {
-			net.minecraft.client.gui.components.EditBox field = ((ExportScreen) mc.gui.screen()).cornerField(2);
-			field.setValue("");
-			field.insertText(x2 + " 71 " + z2);
-		});
+		// Pasted into the field as it stands, number and all: the paste is the corner, not part of the number.
+		click(context, mc -> centre(((ExportScreen) mc.gui.screen()).cornerField(2)), false);
+		context.runOnClient(mc -> ((ExportScreen) mc.gui.screen()).cornerField(2).insertText(x2 + " 71 " + z2));
 		context.waitTicks(2);
 		int[] typed = typedCorners(context);
 		if (!java.util.Arrays.equals(typed, new int[] {x1, z1, x2, z2})) {
@@ -234,7 +231,10 @@ final class ImageExportTest {
 		context.takeScreenshot("image-export-10-corners-typed");
 
 		ImageExport.Area area = context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).plannedArea());
-		ImageExport.Area expected = ImageExport.Area.ofUnits(0, x1, floorTop, x2, floorBottom);
+		// The rows of pixels whose middles are on the typed blocks, four rows to a map unit.
+		long top = (long) Math.ceil(floorTop * 4 - 0.5);
+		long bottom = (long) Math.ceil(floorBottom * 4 - 0.5);
+		ImageExport.Area expected = new ImageExport.Area(0, x1 * 4L, top, (x2 - x1) * 4, (int) (bottom - top));
 		if (!expected.equals(area)) {
 			throw new AssertionError("Typed corners " + x1 + " " + z1 + " to " + x2 + " " + z2 + " plan " + area + ", not " + expected);
 		}
@@ -246,25 +246,26 @@ final class ImageExportTest {
 		if (image == null || image.getWidth() != area.width() || image.getHeight() != area.height()) {
 			throw new AssertionError(file.getFileName() + " isn't the " + area.width() + "x" + area.height() + " the screen said");
 		}
-		// A row of the image isn't a whole block's edge, so the top and bottom rows may be the floor outside.
+		// Every pixel is the floor inside the corners. A block's edge can fall inside a row of pixels,
+		// which is then at least half the white floor: lime is what's mostly the floor outside.
 		int lime = 0;
 		int white = 0;
-		for (int y = 1; y < image.getHeight() - 1; y++) {
+		for (int y = 0; y < image.getHeight(); y++) {
 			for (int x = 0; x < image.getWidth(); x++) {
 				int rgb = image.getRGB(x, y);
 				int r = rgb >> 16 & 0xFF;
 				int g = rgb >> 8 & 0xFF;
 				int b = rgb & 0xFF;
-				lime += g > r * 1.25 && g > b * 1.5 ? 1 : 0;
+				lime += g > r * 1.4 && g > b * 1.5 ? 1 : 0;
 				white += Math.abs(r - g) < 24 && Math.abs(g - b) < 24 && r > 90 ? 1 : 0;
 			}
 		}
-		int inner = image.getWidth() * (image.getHeight() - 2);
+		int inner = image.getWidth() * image.getHeight();
 		System.out.println("IMAGE-EXPORT corners " + file.getFileName() + " " + image.getWidth() + "x" + image.getHeight() + " lime " + lime + " white " + white + " of " + inner);
 		if (lime > 0) {
 			throw new AssertionError(file.getFileName() + " has " + lime + " pixels of the lime floor outside the typed corners");
 		}
-		if (white < inner * 0.95) {
+		if (white < inner * 0.9) {
 			throw new AssertionError(file.getFileName() + " is the white floor inside the typed corners in only " + white + " of " + inner + " pixels");
 		}
 		// The red block is the first inside the first corner, the blue the last inside the second: 4 pixels across, 3 down.
@@ -293,10 +294,6 @@ final class ImageExportTest {
 			}
 			return typed;
 		});
-	}
-
-	private static double[] middle(net.minecraft.client.gui.components.AbstractWidget widget) {
-		return new double[] {widget.getX() + widget.getWidth() / 2.0, widget.getY() + widget.getHeight() / 2.0};
 	}
 
 	/**
@@ -731,7 +728,7 @@ final class ImageExportTest {
 		return context.computeOnClient(mc -> ((ExportScreen) mc.gui.screen()).boxOnScreen());
 	}
 
-	private static double[] centre(Button button) {
+	private static double[] centre(net.minecraft.client.gui.components.AbstractWidget button) {
 		return new double[] {button.getX() + button.getWidth() / 2.0, button.getY() + button.getHeight() / 2.0};
 	}
 

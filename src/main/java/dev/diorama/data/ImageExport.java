@@ -66,6 +66,20 @@ public final class ImageExport {
 			return new Area(lod, x0, y0, (int) Math.max(1, x1 - x0), (int) Math.max(1, y1 - y0));
 		}
 
+		/**
+		 * The pixels whose middles are within map units {@code (u0, v0)} to {@code (u1, v1)} at a
+		 * level: an edge that falls inside a pixel goes to whichever side holds more of it, so no row
+		 * or column of the image is wholly outside the units asked for.
+		 */
+		public static Area within(int lod, double u0, double v0, double u1, double v1) {
+			double perUnit = Projection.PIXELS_PER_UNIT / (double) (1 << lod);
+			long x0 = (long) Math.ceil(Math.min(u0, u1) * perUnit - 0.5);
+			long y0 = (long) Math.ceil(Math.min(v0, v1) * perUnit - 0.5);
+			long x1 = (long) Math.ceil(Math.max(u0, u1) * perUnit - 0.5);
+			long y1 = (long) Math.ceil(Math.max(v0, v1) * perUnit - 0.5);
+			return new Area(lod, x0, y0, (int) Math.max(1, x1 - x0), (int) Math.max(1, y1 - y0));
+		}
+
 		/** Map units across one pixel. */
 		public double unitsPerPixel() {
 			return (double) (1 << this.lod) / Projection.PIXELS_PER_UNIT;
