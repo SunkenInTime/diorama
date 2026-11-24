@@ -97,6 +97,8 @@
     "diorama.export.size_mb": "каля %s МБ",
     "diorama.export.size_kb": "каля %s КБ",
     "diorama.export.blocks": "%s × %s блокаў",
+    "diorama.export.corners": "Вуглы на Y %s",
+    "diorama.export.corners_tip": "X і Z двух супрацьлеглых вуглоў у блоках, адлічаныя па зямлі на вышыні Y %s. Мапа намалявана пад нахілам, таму мясціны вышэй аказваюцца на выяве вышэй, а ніжэй — ніжэй.",
     "diorama.export.too_big": "Больш за %s пікс. з боку",
     "diorama.export.save": "Захаваць",
 	"diorama.export.night": "Ноч",
