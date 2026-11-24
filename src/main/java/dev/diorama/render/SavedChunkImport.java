@@ -158,6 +158,7 @@ public final class SavedChunkImport {
 	/** How many tiles the log has been told were drawn. */
 	private int loggedCount;
 	private volatile int listings;
+	private volatile int regionsListed;
 
 	private SavedChunkImport(MapLevel map, ChunkSave save, Consumer<List<Portals.Spot>> portals) {
 		this.map = map;
@@ -300,6 +301,11 @@ public final class SavedChunkImport {
 		return this.listings;
 	}
 
+	/** For tests: how many regions the last listing had. */
+	public int regionsListed() {
+		return this.regionsListed;
+	}
+
 	/** For tests: how many tiles were drawn from the save. */
 	public int drawnCount() {
 		return this.drawnCount;
@@ -438,6 +444,7 @@ public final class SavedChunkImport {
 			this.scannedAt = this.save.now();
 			Map<Long, int[]> before = this.regions;
 			this.regions = this.save.scan();
+			this.regionsListed = this.regions.size();
 			if (progress.back(this.regions)) {
 				// Before anything can leave this folder again: that note has to be the next one.
 				progress.saveIfChanged();

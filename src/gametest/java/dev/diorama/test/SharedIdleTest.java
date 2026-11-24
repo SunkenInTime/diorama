@@ -28,10 +28,17 @@ final class SharedIdleTest {
 	static void run(ClientGameTestContext context) {
 		int regions = Integer.parseInt(System.getenv().getOrDefault("SHARED_IDLE_REGIONS", "2000"));
 		int seconds = Integer.parseInt(System.getenv().getOrDefault("SHARED_IDLE_SECONDS", "200"));
-		plant(regions);
 		List<String> results = new ArrayList<>();
 		long listed;
-		double megabytes;
+		double elapsed;
+		double perListing;
+		int known;
+		// Once to make the world, so the region files go where this version keeps the overworld's.
+		try (RealServer server = RealServer.start(true)) {
+			// The overworld's region folder is made with its first saved chunk.
+			server.commandAndWait("save-all flush", "Saved the game", 600);
+			plant(server, regions);
+		}
 		try (RealServer server = RealServer.start(true)) {
 			server.join(context);
 			context.waitFor(mc -> ShareClient.sharing() && MapSession.get() != null && MapSession.get().savedChunks() != null, 2400);
@@ -45,7 +52,7 @@ final class SharedIdleTest {
 			}
 			results.add(String.format(Locale.ROOT, "standing, whole %d s: %s", seconds, last.since(start)));
 			listed = last.listings - start.listings;
-			megabytes = (last.bytes - start.bytes) / 1048576.0;
+			elapsed = (last.nanoTime - start.nanoTime) / 1e9;
 
 			// Each listing on its own, as one more table from the server sets off.
 			SavedChunkImport job = context.computeOnClient(mc -> MapSession.get().savedChunks());
@@ -57,8 +64,10 @@ final class SharedIdleTest {
 				context.waitFor(mc -> job.idle(), 6000);
 			}
 			Sample after = Sample.take();
+			known = context.computeOnClient(mc -> job.regionsListed());
+			perListing = (after.bytes - before.bytes) / 1048576.0 / Math.max(1, after.listings - before.listings);
 			results.add(String.format(Locale.ROOT, "one listing of %d regions: %.1f ms of the fill's thread, %.2f MB allocated",
-				regions, (after.cpuNanos - before.cpuNanos) / 1e6 / listings, (after.bytes - before.bytes) / 1048576.0 / listings));
+				known, (after.cpuNanos - before.cpuNanos) / 1e6 / Math.max(1, after.listings - before.listings), perListing));
 			RealServer.leave(context);
 		}
 		for (String result : results) {
@@ -71,17 +80,25 @@ final class SharedIdleTest {
 		} catch (IOException e) {
 			throw new UncheckedIOException(e);
 		}
+		if (known < regions) {
+			throw new AssertionError("The fill knows " + known + " regions of the " + regions + " planted: this wouldn't show what they cost");
+		}
 		// One listing a second while the tables come and one a minute after, with room to spare: a
 		// listing for each table was one for every region, each going through all the others.
-		if (listed > seconds / 2 || megabytes > regions / 20.0 + 50) {
-			throw new AssertionError("Standing still for " + seconds + " s on a server sharing " + regions + " regions, the fill listed them "
-				+ listed + " times and allocated " + Math.round(megabytes) + " MB");
+		if (listed > elapsed / 10 + 5) {
+			throw new AssertionError("Standing still for " + Math.round(elapsed) + " s on a server sharing " + known + " regions, the fill listed them " + listed + " times");
+		}
+		// A listing that copies every table takes 4 KB a region; one that reads them in place, a third of a KB.
+		if (perListing > known / 1024.0 + 1) {
+			throw new AssertionError("One listing of " + known + " regions allocated " + String.format(Locale.ROOT, "%.2f", perListing) + " MB");
 		}
 	}
 
 	/** Region files with a header and nothing else, far from spawn, in the server's overworld. */
-	private static void plant(int regions) {
-		Path folder = Path.of(System.getProperty("user.home"), "real-servers", System.getenv("DIORAMA_NODE"), "world", "region");
+	private static void plant(RealServer server, int regions) {
+		// 26.x keeps the overworld under dimensions/; before, in the world's own folder.
+		Path newer = server.folder.resolve("world/dimensions/minecraft/overworld/region");
+		Path folder = Files.isDirectory(newer) ? newer : server.folder.resolve("world").resolve("region");
 		int side = (int) Math.ceil(Math.sqrt(regions));
 		try {
 			Files.createDirectories(folder);
