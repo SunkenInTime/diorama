@@ -121,7 +121,7 @@ final class FolderManyTest {
 			wheelToEnd(context);
 			hover(context, FolderManyTest::listMenu, last);
 			context.takeScreenshot("folder-many-" + at_ + "-05-move-end");
-			if (context.computeOnClient(mc -> listMenu(mc.gui.screen()).centreOf(last)) == null) {
+			if (context.computeOnClient(mc -> listMenu(mc.gui.screen()) == null ? null : listMenu(mc.gui.screen()).centreOf(last)) == null) {
 				wrong.add(at_ + ": the wheel didn't reach the last folder in Move's list");
 			}
 
@@ -189,9 +189,10 @@ final class FolderManyTest {
 	}
 
 	/**
-	 * The open list shows every name whole and sits on the screen; its scrollbar's handle dragged to
-	 * the bottom brings the last folders into view, and a click at the top of the scrollbar brings
-	 * back the first, with the list still open after each.
+	 * The open list shows every name whole and sits on the screen; a click at the bottom of its
+	 * scrollbar brings the last folders into view, one at the top the first again, and the handle
+	 * dragged to the bottom and let go under the list the last, with the list still open after each.
+	 * What the caller does next finds out whether the handle was let go.
 	 */
 	private static void scrollbar(ClientGameTestContext context, Function<Screen, FolderMenu> menu, String what, String picture, List<String> wrong) {
 		if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
@@ -214,11 +215,28 @@ final class FolderManyTest {
 		}
 		double scale = context.computeOnClient(mc -> (double) mc.getWindow().getGuiScale());
 		int last = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).names().size() - menu.apply(mc.gui.screen()).shown());
+		for (int[] click : new int[][] {{bounds[1] + bounds[3] - 3, last}, {bounds[1] + 3, 0}}) {
+			DioramaClientTest.clickAtGui(context, handle[0], click[0]);
+			context.waitTicks(2);
+			if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
+				wrong.add(what + " closed at a click on the scrollbar");
+				return;
+			}
+			int at = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
+			if (at != click[1]) {
+				wrong.add(what + " were at line " + at + " after a click at the " + (click[1] == 0 ? "top" : "bottom") + " of the scrollbar, not " + click[1]);
+			}
+		}
+		// A press on the handle alone moves nothing.
 		context.getInput().setCursorPos(handle[0] * scale, handle[1] * scale);
 		context.waitTicks(2);
 		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
 		context.waitTicks(1);
-		float bottom = bounds[1] + bounds[3];
+		int pressed = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
+		if (pressed != 0) {
+			wrong.add(what + " jumped to line " + pressed + " when the scrollbar's handle was pressed");
+		}
+		float bottom = bounds[1] + bounds[3] + 6;
 		for (int i = 1; i <= 4; i++) {
 			context.getInput().setCursorPos(handle[0] * scale, (handle[1] + (bottom - handle[1]) * i / 4) * scale);
 			context.waitTick();
@@ -234,16 +252,6 @@ final class FolderManyTest {
 		int dragged = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
 		if (dragged != last) {
 			wrong.add(what + " were at line " + dragged + " after the scrollbar was dragged to the bottom, not " + last);
-		}
-		DioramaClientTest.clickAtGui(context, handle[0], bounds[1] + 3);
-		context.waitTicks(2);
-		if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
-			wrong.add(what + " closed at a click on the scrollbar");
-			return;
-		}
-		int back = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
-		if (back != 0) {
-			wrong.add(what + " were at line " + back + " after a click at the top of the scrollbar");
 		}
 	}
 

@@ -101,9 +101,20 @@ public final class FolderMenu {
 		return new int[] {handle, (track - handle) * this.scroll / (this.entries.size() - this.shown)};
 	}
 
-	/** Over the scrollbar, or the gap between it and the counts. */
+	/** Over the scrollbar, or the gap between it and the lines' text: a click that just misses it picks nothing. */
 	private boolean overScrollbar(double mouseX, double mouseY) {
-		return this.scrolls() && this.contains(mouseX, mouseY) && mouseX >= this.x + this.width - 2 - SCROLLBAR;
+		return this.scrolls() && this.contains(mouseX, mouseY) && mouseX >= this.x + this.width - PAD - 2 - SCROLLBAR - 1;
+	}
+
+	/**
+	 * Scrolls to a line. The arrow keys' line is forgotten once it's out of view, so Enter never
+	 * picks a folder that isn't showing.
+	 */
+	private void scrollTo(int line) {
+		this.scroll = Math.max(0, Math.min(line, this.entries.size() - this.shown));
+		if (this.cursor < this.scroll || this.cursor >= this.scroll + this.shown) {
+			this.cursor = -1;
+		}
 	}
 
 	/**
@@ -116,8 +127,13 @@ public final class FolderMenu {
 		}
 		int[] handle = this.handle();
 		double in = mouseY - (this.y + 1 + handle[1]);
-		this.held = in >= 0 && in < handle[0] ? in : handle[0] / 2.0;
-		this.drag(mouseY);
+		if (in >= 0 && in < handle[0]) {
+			// Held where it was pressed: the list doesn't move until the mouse does.
+			this.held = in;
+		} else {
+			this.held = handle[0] / 2.0;
+			this.drag(mouseY);
+		}
 		return true;
 	}
 
@@ -129,7 +145,7 @@ public final class FolderMenu {
 		int free = this.height() - 2 - this.handle()[0];
 		int last = this.entries.size() - this.shown;
 		double t = free <= 0 ? 0 : (mouseY - this.held - (this.y + 1)) / free;
-		this.scroll = (int) Math.max(0, Math.min(Math.round(t * last), last));
+		this.scrollTo((int) Math.max(0, Math.min(Math.round(t * last), last)));
 		return true;
 	}
 
@@ -174,7 +190,7 @@ public final class FolderMenu {
 
 	/** The mouse wheel: a line at a time. */
 	public void scroll(double amount) {
-		this.scroll = Math.max(0, Math.min(this.scroll - (int) Math.signum(amount), this.entries.size() - this.shown));
+		this.scrollTo(this.scroll - (int) Math.signum(amount));
 	}
 
 	public void draw(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
