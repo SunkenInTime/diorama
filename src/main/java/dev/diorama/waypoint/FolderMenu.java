@@ -160,6 +160,11 @@ public final class FolderMenu {
 		return this.entries.stream().map(entry -> entry.count() < 0 ? entry.name() : entry.name() + " " + entry.count()).toList();
 	}
 
+	/** For tests: every folder's name in the list's order, scrolled into view or not. */
+	public List<String> names() {
+		return this.entries.stream().map(Entry::name).toList();
+	}
+
 	/** For tests: how many lines show at once. */
 	public int shown() {
 		return this.shown;

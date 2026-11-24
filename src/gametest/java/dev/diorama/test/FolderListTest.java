@@ -71,8 +71,8 @@ final class FolderListTest {
 				wrong.add("the list of folders has no line \"" + CUSTOM[f] + " " + IN_EACH[f] + "\": " + labels);
 			}
 		}
-		if (labels.size() < 9 || !labels.get(0).startsWith("Overworld ") || !labels.get(1).startsWith("Nether ") || !labels.get(3).equals("Farms 5")) {
-			wrong.add("the list of folders isn't the dimensions' then the player's own in the order made: " + labels);
+		if (labels.size() < 9 || !labels.get(0).startsWith("Overworld ") || !labels.get(1).startsWith("Nether ") || !labels.subList(3, 9).equals(List.of("Alex's base 4", "Farms 5", "Mines 3", "Portals 2", "Shops 0", "Villages 4"))) {
+			wrong.add("the list of folders isn't the dimensions' then the player's own by name: " + labels);
 		}
 		hover(context, "Alex's base");
 		context.takeScreenshot("folder-list-02-open");
@@ -111,7 +111,7 @@ final class FolderListTest {
 		context.takeScreenshot("folder-list-04b-arrow-keys");
 		context.getInput().pressKey(InputConstants.KEY_RETURN);
 		context.waitTicks(2);
-		if (!folder(context).equals("Shops") || menu(context) != null) {
+		if (!folder(context).equals("Mines") || menu(context) != null) {
 			wrong.add("Down twice and Enter from Alex's base showed " + folder(context));
 		}
 		clickName(context);
@@ -119,13 +119,13 @@ final class FolderListTest {
 
 		// The arrows step as before.
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), ">")));
-		if (!folder(context).equals("Portals")) {
+		if (!folder(context).equals("Farms")) {
 			wrong.add("> from Alex's base showed " + folder(context));
 		}
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "<")));
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "<")));
-		if (!folder(context).equals("Mines")) {
-			wrong.add("< twice from Portals showed " + folder(context));
+		if (!folder(context).equals("End")) {
+			wrong.add("< twice from Farms showed " + folder(context));
 		}
 
 		// More folders than fit under the name: the list scrolls, and the last one is reached with the wheel.
@@ -146,7 +146,7 @@ final class FolderListTest {
 		if (sizes[0] >= sizes[1]) {
 			wrong.add("49 folders all fit in the list (" + sizes[0] + " lines), so scrolling wasn't checked");
 		}
-		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).folderMenu().centreOf("Trip 40")) != null) {
+		if (context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).folderMenu().centreOf("Villages")) != null) {
 			wrong.add("the last folder was in view before scrolling");
 		}
 		context.takeScreenshot("folder-list-05-many");
@@ -160,10 +160,10 @@ final class FolderListTest {
 			});
 		}
 		context.waitTicks(2);
-		hover(context, "Trip 40");
+		hover(context, "Villages");
 		context.takeScreenshot("folder-list-06-many-scrolled");
-		pick(context, "Trip 40", wrong);
-		if (!folder(context).equals("Trip 40")) {
+		pick(context, "Villages", wrong);
+		if (!folder(context).equals("Villages")) {
 			wrong.add("picking the last folder after scrolling showed " + folder(context));
 		}
 		context.takeScreenshot("folder-list-07-last-picked");

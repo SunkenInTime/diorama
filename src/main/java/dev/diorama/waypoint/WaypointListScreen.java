@@ -196,7 +196,7 @@ public final class WaypointListScreen extends Screen {
 
 	/**
 	 * The folders: the Overworld, the Nether and the End always, any other dimension with waypoints
-	 * or the player in it, then the player's own in the order they were made, then Waystones when
+	 * or the player in it, then the player's own in name order, then Waystones when
 	 * the Waystones mod has told the player of any.
 	 */
 	private void collectFolders(@Nullable WaypointStore store, @Nullable String here) {
