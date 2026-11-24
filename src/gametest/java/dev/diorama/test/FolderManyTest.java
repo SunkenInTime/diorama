@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.diorama.waypoint.FolderMenu;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointEditScreen;
@@ -21,7 +22,9 @@ import net.minecraft.core.BlockPos;
  * made in no order: everywhere folders are listed (the waypoint list's folder name, Move for
  * several rows, the Folder button in a waypoint's editor) they're in name order, capitals or not,
  * after the dimensions' own, the arrows beside the folder's name step in that order too, and the
- * last one is reached with the mouse wheel. Pictured at 1280 x 720 with GUI scale 3 and in the
+ * last one is reached with the mouse wheel. Each list is wide enough to show every name whole and
+ * stays on the screen, and its scrollbar can be dragged to the end and clicked back to the start
+ * without picking a folder or closing the list. Pictured at 1280 x 720 with GUI scale 3 and in the
  * smallest window. Only the waypoints and folders made here are checked and removed.
  */
 final class FolderManyTest {
@@ -84,6 +87,7 @@ final class FolderManyTest {
 				wrong.add(at_ + ": the waypoint list's folders weren't the dimensions' then the player's by name: " + labels);
 			}
 			context.takeScreenshot("folder-many-" + at_ + "-01-list");
+			scrollbar(context, FolderManyTest::listMenu, at_ + ": the waypoint list's folders", "folder-many-" + at_ + "-01b-list-dragged", wrong);
 			wheelToEnd(context);
 			hover(context, FolderManyTest::listMenu, last);
 			context.takeScreenshot("folder-many-" + at_ + "-02-list-end");
@@ -113,10 +117,11 @@ final class FolderManyTest {
 				wrong.add(at_ + ": Move's folders weren't the dimension's then the player's by name: " + labels);
 			}
 			context.takeScreenshot("folder-many-" + at_ + "-04-move");
+			scrollbar(context, FolderManyTest::listMenu, at_ + ": Move's folders", "folder-many-" + at_ + "-04b-move-dragged", wrong);
 			wheelToEnd(context);
 			hover(context, FolderManyTest::listMenu, last);
 			context.takeScreenshot("folder-many-" + at_ + "-05-move-end");
-			if (context.computeOnClient(mc -> listMenu(mc.gui.screen()).centreOf(last)) == null) {
+			if (context.computeOnClient(mc -> listMenu(mc.gui.screen()) == null ? null : listMenu(mc.gui.screen()).centreOf(last)) == null) {
 				wrong.add(at_ + ": the wheel didn't reach the last folder in Move's list");
 			}
 
@@ -133,6 +138,7 @@ final class FolderManyTest {
 				wrong.add(at_ + ": the editor's folders weren't the dimension's then the player's by name: " + labels);
 			}
 			context.takeScreenshot("folder-many-" + at_ + "-06-editor");
+			scrollbar(context, FolderManyTest::editMenu, at_ + ": the editor's folders", "folder-many-" + at_ + "-06b-editor-dragged", wrong);
 			wheelToEnd(context);
 			hover(context, FolderManyTest::editMenu, last);
 			context.takeScreenshot("folder-many-" + at_ + "-07-editor-end");
@@ -180,6 +186,73 @@ final class FolderManyTest {
 
 	private static String folder(ClientGameTestContext context) {
 		return context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).folderName());
+	}
+
+	/**
+	 * The open list shows every name whole and sits on the screen; a click at the bottom of its
+	 * scrollbar brings the last folders into view, one at the top the first again, and the handle
+	 * dragged to the bottom and let go under the list the last, with the list still open after each.
+	 * What the caller does next finds out whether the handle was let go.
+	 */
+	private static void scrollbar(ClientGameTestContext context, Function<Screen, FolderMenu> menu, String what, String picture, List<String> wrong) {
+		if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
+			wrong.add(what + " weren't open");
+			return;
+		}
+		List<String> cut = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).cutNames());
+		if (!cut.isEmpty()) {
+			wrong.add(what + " cut the names " + cut);
+		}
+		int[] bounds = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).bounds());
+		int[] screen = context.computeOnClient(mc -> new int[] {mc.gui.screen().width, mc.gui.screen().height});
+		if (bounds[0] < 0 || bounds[1] < 0 || bounds[0] + bounds[2] > screen[0] || bounds[1] + bounds[3] > screen[1]) {
+			wrong.add(what + " ran off the " + screen[0] + " x " + screen[1] + " screen: " + java.util.Arrays.toString(bounds));
+		}
+		float[] handle = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).handleCentre());
+		if (handle == null) {
+			wrong.add(what + " had no scrollbar for " + NAMES.length + " folders");
+			return;
+		}
+		double scale = context.computeOnClient(mc -> (double) mc.getWindow().getGuiScale());
+		int last = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).names().size() - menu.apply(mc.gui.screen()).shown());
+		for (int[] click : new int[][] {{bounds[1] + bounds[3] - 3, last}, {bounds[1] + 3, 0}}) {
+			DioramaClientTest.clickAtGui(context, handle[0], click[0]);
+			context.waitTicks(2);
+			if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
+				wrong.add(what + " closed at a click on the scrollbar");
+				return;
+			}
+			int at = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
+			if (at != click[1]) {
+				wrong.add(what + " were at line " + at + " after a click at the " + (click[1] == 0 ? "top" : "bottom") + " of the scrollbar, not " + click[1]);
+			}
+		}
+		// A press on the handle alone moves nothing.
+		context.getInput().setCursorPos(handle[0] * scale, handle[1] * scale);
+		context.waitTicks(2);
+		context.getInput().holdMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(1);
+		int pressed = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
+		if (pressed != 0) {
+			wrong.add(what + " jumped to line " + pressed + " when the scrollbar's handle was pressed");
+		}
+		float bottom = bounds[1] + bounds[3] + 6;
+		for (int i = 1; i <= 4; i++) {
+			context.getInput().setCursorPos(handle[0] * scale, (handle[1] + (bottom - handle[1]) * i / 4) * scale);
+			context.waitTick();
+		}
+		context.waitTicks(2);
+		context.takeScreenshot(picture);
+		context.getInput().releaseMouse(InputConstants.MOUSE_BUTTON_LEFT);
+		context.waitTicks(2);
+		if (context.computeOnClient(mc -> menu.apply(mc.gui.screen())) == null) {
+			wrong.add(what + " closed when the scrollbar was dragged");
+			return;
+		}
+		int dragged = context.computeOnClient(mc -> menu.apply(mc.gui.screen()).scrolled());
+		if (dragged != last) {
+			wrong.add(what + " were at line " + dragged + " after the scrollbar was dragged to the bottom, not " + last);
+		}
 	}
 
 	private static void wheelToEnd(ClientGameTestContext context) {

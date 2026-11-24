@@ -239,7 +239,7 @@ public final class WaypointEditScreen extends Screen {
 			entries.add(new FolderMenu.Entry(folder, name, -1, store != null && store.folderHidden(key)));
 		}
 		this.folderMenu = new FolderMenu(this.font, entries, this.folder, button.getX(), button.getY(), button.getY() + button.getHeight(),
-			button.getWidth(), this.height);
+			button.getWidth(), this.width, this.height);
 		// The button keeps the keyboard's focus while the list is open, and its tooltip would cover the list.
 		button.setTooltip(null);
 	}
@@ -251,9 +251,15 @@ public final class WaypointEditScreen extends Screen {
 		}
 	}
 
-	/** A click while the list of folders is open: on a folder it picks that folder, anywhere else it only closes the list. */
+	/**
+	 * A click while the list of folders is open: on a folder it picks that folder, on the list's
+	 * scrollbar it takes hold of that, and anywhere else it only closes the list.
+	 */
 	private void clickFolderMenu(double x, double y, int button) {
 		FolderMenu menu = this.folderMenu;
+		if (menu != null && button == InputConstants.MOUSE_BUTTON_LEFT && menu.press(x, y)) {
+			return;
+		}
 		this.closeFolderMenu();
 		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
 	}
@@ -571,12 +577,12 @@ public final class WaypointEditScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
-		return this.dragged(event.x()) || super.mouseDragged(event, dx, dy);
+		return this.dragged(event.x(), event.y()) || super.mouseDragged(event, dx, dy);
 	}
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		this.dragging = 0;
+		this.released();
 		return super.mouseReleased(event);
 	}
 
@@ -610,12 +616,12 @@ public final class WaypointEditScreen extends Screen {
 
 	@Override
 	public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
-		return this.dragged(x) || super.mouseDragged(x, y, button, dx, dy);
+		return this.dragged(x, y) || super.mouseDragged(x, y, button, dx, dy);
 	}
 
 	@Override
 	public boolean mouseReleased(double x, double y, int button) {
-		this.dragging = 0;
+		this.released();
 		return super.mouseReleased(x, y, button);
 	}
 	*///?}
@@ -638,13 +644,23 @@ public final class WaypointEditScreen extends Screen {
 		return false;
 	}
 
-	/** Follows the mouse along the bar being dragged. */
-	private boolean dragged(double x) {
+	/** Follows the mouse along the bar being dragged: the open list of folders' scrollbar, or a colour bar. */
+	private boolean dragged(double x, double y) {
+		if (this.folderMenu != null) {
+			return this.folderMenu.drag(y);
+		}
 		if (this.dragging == 0) {
 			return false;
 		}
 		this.dragBar(this.dragging, x);
 		return true;
+	}
+
+	private void released() {
+		this.dragging = 0;
+		if (this.folderMenu != null) {
+			this.folderMenu.release();
+		}
 	}
 
 	/** The open list of folders, or null. For tests. */
