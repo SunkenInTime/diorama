@@ -271,10 +271,11 @@ final class ImageExportTest {
 		if (white < inner * 0.97) {
 			throw new AssertionError(file.getFileName() + " is the white floor inside the typed corners in only " + white + " of " + inner + " pixels");
 		}
-		// The red block is the first inside the first corner, the blue the last inside the second: 4 pixels across, 3 down.
+		// The red block is the first inside the first corner, the blue the last inside the second: 4 pixels
+		// across and 3 down, so the second row from the edge is all block wherever the edge falls in the first.
 		for (int i = 1; i <= 2; i++) {
-			int first = image.getRGB(i, i);
-			int last = image.getRGB(image.getWidth() - 1 - i, image.getHeight() - 1 - i);
+			int first = image.getRGB(i, 1);
+			int last = image.getRGB(image.getWidth() - 1 - i, image.getHeight() - 2);
 			if (!((first >> 16 & 0xFF) > (first >> 8 & 0xFF) * 1.5 && (first >> 16 & 0xFF) > (first & 0xFF) * 1.5)) {
 				throw new AssertionError(file.getFileName() + " doesn't start on the red block at the first typed corner: " + Integer.toHexString(first));
 			}
