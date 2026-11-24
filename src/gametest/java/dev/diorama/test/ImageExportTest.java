@@ -159,7 +159,8 @@ final class ImageExportTest {
 	 */
 	private static void corners(ClientGameTestContext context, TestSingleplayerContext world) {
 		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
-		// The tight case for the sidebar: 427 x 240 GUI pixels on the test window.
+		// The tight case for the sidebar: a 1280 x 720 window is 427 x 240 GUI pixels.
+		context.getInput().resizeWindow(1280, 720);
 		DioramaClientTest.setGuiScale(context, 3);
 		int[] player = context.computeOnClient(mc -> new int[] {mc.player.getBlockX(), mc.player.getBlockZ()});
 		int x1 = player[0] + 24;
@@ -247,25 +248,27 @@ final class ImageExportTest {
 			throw new AssertionError(file.getFileName() + " isn't the " + area.width() + "x" + area.height() + " the screen said");
 		}
 		// Every pixel is the floor inside the corners. A block's edge can fall inside a row of pixels,
-		// which is then at least half the white floor: lime is what's mostly the floor outside.
+		// so the top and bottom rows are in part the floor outside: at most half, as the area is the
+		// rows whose middles are inside, which the expected area above has checked.
 		int lime = 0;
 		int white = 0;
-		for (int y = 0; y < image.getHeight(); y++) {
+		for (int y = 1; y < image.getHeight() - 1; y++) {
 			for (int x = 0; x < image.getWidth(); x++) {
 				int rgb = image.getRGB(x, y);
 				int r = rgb >> 16 & 0xFF;
 				int g = rgb >> 8 & 0xFF;
 				int b = rgb & 0xFF;
 				lime += g > r * 1.4 && g > b * 1.5 ? 1 : 0;
-				white += Math.abs(r - g) < 24 && Math.abs(g - b) < 24 && r > 90 ? 1 : 0;
+				// White concrete in the sun, or blue-grey in a tree's shadow; grass and dirt have the least blue.
+				white += b >= r - 10 && b >= g - 10 && r > b * 0.6 && g > b * 0.6 && b > 60 ? 1 : 0;
 			}
 		}
-		int inner = image.getWidth() * image.getHeight();
+		int inner = image.getWidth() * (image.getHeight() - 2);
 		System.out.println("IMAGE-EXPORT corners " + file.getFileName() + " " + image.getWidth() + "x" + image.getHeight() + " lime " + lime + " white " + white + " of " + inner);
 		if (lime > 0) {
 			throw new AssertionError(file.getFileName() + " has " + lime + " pixels of the lime floor outside the typed corners");
 		}
-		if (white < inner * 0.9) {
+		if (white < inner * 0.97) {
 			throw new AssertionError(file.getFileName() + " is the white floor inside the typed corners in only " + white + " of " + inner + " pixels");
 		}
 		// The red block is the first inside the first corner, the blue the last inside the second: 4 pixels across, 3 down.
@@ -282,6 +285,7 @@ final class ImageExportTest {
 
 		context.runOnClient(mc -> DrawingStore.get().remove(far));
 		context.setScreen(() -> null);
+		context.getInput().resizeWindow(1600, 900);
 		DioramaClientTest.setGuiScale(context, scale);
 	}
 
