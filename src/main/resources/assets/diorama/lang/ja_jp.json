@@ -97,6 +97,8 @@
 	"diorama.export.size_mb": "約 %s MB",
 	"diorama.export.size_kb": "約 %s KB",
 	"diorama.export.blocks": "%s × %s ブロック",
+	"diorama.export.corners": "角の座標（Y %s）",
+	"diorama.export.corners_tip": "向かい合う2つの角のブロック座標（XとZ）。高さY %sの地面で測ります。マップは斜めから描かれているため、高い地形は画像の上に、低い地形は下にずれます。",
 	"diorama.export.too_big": "一辺が %s pxを超えている",
 	"diorama.export.save": "画像を保存",
 	"diorama.export.night": "夜",

@@ -52,7 +52,7 @@ final class FolderEditTest {
 			return menu == null ? List.<String>of() : menu.labels();
 		});
 		List<String> expected = new ArrayList<>(List.of("Overworld"));
-		expected.addAll(List.of(CUSTOM));
+		expected.addAll(List.of("Alex's base", "Farms", "Mines", "Portals", "Shops", "Villages"));
 		if (!labels.equals(expected)) {
 			wrong.add("the editor's list of folders was " + labels);
 		}
@@ -99,14 +99,14 @@ final class FolderEditTest {
 		if (menu(context) == null) {
 			wrong.add("Enter on the Folder button didn't open the list of folders");
 		}
-		context.getInput().pressKey(InputConstants.KEY_UP);
-		context.getInput().pressKey(InputConstants.KEY_UP);
+		context.getInput().pressKey(InputConstants.KEY_DOWN);
+		context.getInput().pressKey(InputConstants.KEY_DOWN);
 		context.waitTicks(2);
 		context.takeScreenshot("folder-editor-03b-arrow-keys");
 		context.getInput().pressKey(InputConstants.KEY_RETURN);
 		context.waitTicks(2);
-		if (menu(context) != null || !folderButton(context).getMessage().getString().equals("Villages")) {
-			wrong.add("Up twice and Enter from Alex's base left the button saying " + folderButton(context).getMessage().getString());
+		if (menu(context) != null || !folderButton(context).getMessage().getString().equals("Mines")) {
+			wrong.add("Down twice and Enter from Alex's base left the button saying " + folderButton(context).getMessage().getString());
 		}
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Cancel")));
 		context.waitTicks(3);
@@ -114,11 +114,11 @@ final class FolderEditTest {
 		// Picked and then cancelled, it stays where it was.
 		edit(context, cabin);
 		DioramaClientTest.clickAt(context, folderButton(context));
-		pick(context, "Mines", wrong);
+		pick(context, "Farms", wrong);
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Cancel")));
 		context.waitTicks(3);
 		if (!cabin.folder.equals("Alex's base")) {
-			wrong.add("Cancel after picking Mines left the waypoint in \"" + cabin.folder + "\"");
+			wrong.add("Cancel after picking Farms left the waypoint in \"" + cabin.folder + "\"");
 		}
 
 		// Back to its dimension's own folder, the first line.
@@ -160,12 +160,12 @@ final class FolderEditTest {
 			});
 		}
 		context.waitTicks(2);
-		hover(context, "Trip 40");
+		hover(context, "Villages");
 		context.takeScreenshot("folder-editor-06-many-scrolled");
-		pick(context, "Trip 40", wrong);
+		pick(context, "Villages", wrong);
 		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Save")));
 		context.waitTicks(3);
-		if (!cabin.folder.equals("Trip 40")) {
+		if (!cabin.folder.equals("Villages")) {
 			wrong.add("picking the last folder after scrolling left the waypoint in \"" + cabin.folder + "\"");
 		}
 

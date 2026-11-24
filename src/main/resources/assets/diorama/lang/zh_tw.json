@@ -405,6 +405,8 @@
 	"diorama.export.size_mb": "約 %s MB",
 	"diorama.export.size_kb": "約 %s KB",
 	"diorama.export.blocks": "%s × %s 方塊",
+	"diorama.export.corners": "角點（Y %s）",
+	"diorama.export.corners_tip": "兩個對角的方塊座標（X 和 Z），以 Y %s 高度的地面計算。地圖是傾斜繪製的，因此較高的地面在圖片中偏上，較低的地面偏下。",
 	"diorama.export.too_big": "單邊超過 %s 像素",
 	"diorama.export.save": "儲存圖片",
 	"diorama.export.night": "夜晚",

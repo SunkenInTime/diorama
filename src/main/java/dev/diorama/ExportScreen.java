@@ -8,12 +8,15 @@ import dev.diorama.render.MapViewport;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import dev.diorama.drawing.Drawing;
 import dev.diorama.drawing.DrawingOverlay;
 import dev.diorama.drawing.DrawingStore;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 //? if >=1.21.9 {
@@ -29,7 +32,12 @@ import org.jspecify.annotations.Nullable;
  * Saving the map as an image: a sidebar with the choices, the map beside it with the box that
  * will be saved, and Save image and Cancel along the bottom. In Area mode the box starts inside
  * the view the map had; drag inside it to move it, its edges or corners to resize it, outside it
- * to pan. Whole map boxes everything explored. Cancel and Save go back to the map as it was.
+ * to pan, or type its corners in the sidebar. Whole map boxes everything explored. Cancel and Save
+ * go back to the map as it was.
+ *
+ * <p>The Area box is kept in whole blocks, so the numbers in the sidebar are all of it and the same
+ * numbers save the same image again. The map is drawn at a tilt, where a row of the picture is a
+ * line of z only at one height: the box's z is measured on ground at {@link #groundY()}.
  *
  * <p>Opened on a cave slice it saves that slice. Cave slices aren't saved, so the image is drawn
  * from the chunks the map holds, and Whole map is as much of the slice as they cover.
@@ -44,8 +52,13 @@ public final class ExportScreen extends Screen {
 	private static final int DIM = 0x90000000;
 	/** How close to an edge or corner, in GUI pixels, a press takes hold of it. */
 	private static final int GRAB = 4;
-	/** The smallest box, in map units. */
-	private static final double MIN_BOX = 16;
+	/** The smallest box dragging makes, in blocks a side; typing can make a smaller one. */
+	private static final int MIN_BOX = 16;
+	/** No corner is typed further out than the world goes. */
+	private static final int FARTHEST = 30_000_000;
+	private static final int INVALID_TEXT = 0xFFFF0000;
+	/** A whole or decimal number in typed or pasted text. */
+	private static final Pattern NUMBER = Pattern.compile("-?\\d+(?:\\.\\d+)?");
 	private static final String[] DETAIL_LABELS = {"4", "2", "1", "½"};
 	private static final int LEFT = 1;
 	private static final int RIGHT = 2;
@@ -64,11 +77,28 @@ public final class ExportScreen extends Screen {
 	private double centerV;
 	private double zoom;
 	private boolean whole;
-	/** The Area box, in map units; kept while Whole map is shown. */
-	private double u0;
-	private double v0;
-	private double u1;
-	private double v1;
+	/**
+	 * The Area box, in whole blocks of the turned space the map is drawn in ({@link Facing}), its z
+	 * on ground at {@link #groundY()}; kept while Whole map is shown.
+	 */
+	private int x0;
+	private int z0;
+	private int x1;
+	private int z1;
+	/** The box's corners as the world has them, typed: X and Z of one, then of the other. */
+	private final EditBox[] corners = new EditBox[4];
+	/** Whether the typed corners read as a box; Save image waits for them. */
+	private boolean cornersRead = true;
+	/** Set while the fields are being written from the box, which isn't typing. */
+	private boolean writing;
+	/** What each field last held: 1.20.1 calls a change when only the cursor moved. */
+	private final String[] cornerText = {"", "", "", ""};
+	/** Where the corner fields start, in GUI pixels down the sidebar. */
+	private int cornersY;
+	/** The box when the current press took hold of it, and how far the press has dragged since, in blocks. */
+	private final int[] held = new int[4];
+	private double draggedX;
+	private double draggedZ;
 	/** Everything explored with a margin of fog, once found; null until then or when nothing is. */
 	private double @Nullable [] explored;
 	private @Nullable CompletableFuture<double @Nullable []> finding;
@@ -98,10 +128,137 @@ public final class ExportScreen extends Screen {
 		this.centerV = centerV - (FOOTER / 2.0) / zoom;
 		double halfW = (width - SIDEBAR) / 2.0 / zoom;
 		double halfH = (height - FOOTER) / 2.0 / zoom;
-		this.u0 = this.centerU - halfW * 0.75;
-		this.u1 = this.centerU + halfW * 0.75;
-		this.v0 = this.centerV - halfH * 0.75;
-		this.v1 = this.centerV + halfH * 0.75;
+		this.x0 = (int) Math.round(this.centerU - halfW * 0.75);
+		this.x1 = Math.max(this.x0 + 1, (int) Math.round(this.centerU + halfW * 0.75));
+		this.z0 = (int) Math.round(Projection.zAt(this.centerV - halfH * 0.75, this.groundY()));
+		this.z1 = Math.max(this.z0 + 1, (int) Math.round(Projection.zAt(this.centerV + halfH * 0.75, this.groundY())));
+	}
+
+	/**
+	 * The height the box's z is measured at: where most ground is near, as for a point the map knows
+	 * nothing about, or the cut of the cave slice.
+	 */
+	private int groundY() {
+		return this.layer == TileKey.SURFACE ? MapScreen.USUAL_GROUND_Y : this.layer;
+	}
+
+	/** The Area box in map units. */
+	private double[] areaBox() {
+		int y = this.groundY();
+		return new double[] {this.x0, Projection.v(y, this.z0), this.x1, Projection.v(y, this.z1)};
+	}
+
+	/** The Area box's corners in the world's blocks: the lower X and Z, then the higher. */
+	private int[] worldCorners() {
+		Facing facing = Projection.facing();
+		int ax = (int) Math.round(facing.worldX(this.x0, this.z0));
+		int az = (int) Math.round(facing.worldZ(this.x0, this.z0));
+		int bx = (int) Math.round(facing.worldX(this.x1, this.z1));
+		int bz = (int) Math.round(facing.worldZ(this.x1, this.z1));
+		return new int[] {Math.min(ax, bx), Math.min(az, bz), Math.max(ax, bx), Math.max(az, bz)};
+	}
+
+	/** Shows the box's corners in the fields, after it was dragged. */
+	private void writeCorners() {
+		if (this.corners[0] == null) {
+			return;
+		}
+		int[] world = this.worldCorners();
+		this.writing = true;
+		for (int i = 0; i < 4; i++) {
+			this.cornerText[i] = Integer.toString(world[i]);
+			this.corners[i].setValue(this.cornerText[i]);
+			this.corners[i].setTextColor(EditBox.DEFAULT_TEXT_COLOR);
+		}
+		this.writing = false;
+		this.cornersRead = true;
+	}
+
+	/** A corner field changed. */
+	private void typed(int field, String text) {
+		if (this.writing || text.equals(this.cornerText[field])) {
+			return;
+		}
+		this.cornerText[field] = text;
+		this.readCorners();
+	}
+
+	/**
+	 * Text on its way into a corner field. Several numbers at once are a pasted place: "x z" or
+	 * "x y z", as Copy coordinates and chat give one, become that corner whatever the field held,
+	 * and four become both. Anything else goes into the field as typed.
+	 */
+	private boolean pasted(int field, String text) {
+		List<String> numbers = new java.util.ArrayList<>();
+		Matcher matcher = NUMBER.matcher(text);
+		while (matcher.find()) {
+			numbers.add(Long.toString((long) Math.floor(Double.parseDouble(matcher.group()))));
+		}
+		if (numbers.size() < 2 || numbers.size() > 4) {
+			return false;
+		}
+		int row = field / 2 * 2;
+		this.writing = true;
+		if (numbers.size() == 4) {
+			for (int i = 0; i < 4; i++) {
+				this.corners[i].setValue(numbers.get(i));
+			}
+		} else {
+			this.corners[row].setValue(numbers.get(0));
+			this.corners[row + 1].setValue(numbers.get(numbers.size() - 1));
+		}
+		this.writing = false;
+		for (int i = 0; i < 4; i++) {
+			this.cornerText[i] = this.corners[i].getValue();
+		}
+		this.readCorners();
+		return true;
+	}
+
+	/**
+	 * Moves the box to the typed corners, in either order, once all four read and it has some size.
+	 * A field that doesn't read turns red, as a coordinate does in the waypoint editor.
+	 */
+	private void readCorners() {
+		Integer[] typed = new Integer[4];
+		for (int i = 0; i < 4; i++) {
+			typed[i] = parse(this.corners[i].getValue());
+		}
+		boolean reads = true;
+		for (int i = 0; i < 4; i++) {
+			// A box with no width or depth is nothing to save.
+			boolean good = typed[i] != null && !typed[i].equals(typed[i ^ 2]);
+			this.corners[i].setTextColor(good ? EditBox.DEFAULT_TEXT_COLOR : INVALID_TEXT);
+			reads &= good;
+		}
+		this.cornersRead = reads;
+		if (!reads) {
+			return;
+		}
+		Facing facing = Projection.facing();
+		int ax = (int) Math.round(facing.x(typed[0], typed[1]));
+		int az = (int) Math.round(facing.z(typed[0], typed[1]));
+		int bx = (int) Math.round(facing.x(typed[2], typed[3]));
+		int bz = (int) Math.round(facing.z(typed[2], typed[3]));
+		this.x0 = Math.min(ax, bx);
+		this.x1 = Math.max(ax, bx);
+		this.z0 = Math.min(az, bz);
+		this.z1 = Math.max(az, bz);
+		// Typed somewhere the preview shows none of: bring it into view. A box partly in view stays
+		// put, or the map would jump at each digit on the way to a number.
+		double[] box = this.areaBox();
+		if (this.screenX(box[2]) < SIDEBAR || this.screenX(box[0]) > this.width || this.screenY(box[3]) < 0 || this.screenY(box[1]) > this.previewHeight()) {
+			this.fit(box);
+		}
+	}
+
+	private static @Nullable Integer parse(String text) {
+		try {
+			int value = Integer.parseInt(text.trim());
+			return value >= -FARTHEST && value <= FARTHEST ? value : null;
+		} catch (NumberFormatException e) {
+			return null;
+		}
 	}
 
 	@Override
@@ -153,6 +310,37 @@ public final class ExportScreen extends Screen {
 			});
 			*///?}
 		}
+		// The corners, under whichever checkboxes there are: X and Z of one, then of the other.
+		this.cornersY = 108 + (this.drawings().isEmpty() ? 0 : 24) + (this.hasNight() ? 24 : 0);
+		// Resizing the window runs init() again: the corners stay as typed, in the order typed.
+		String[] kept = this.corners[0] == null ? null : this.cornerText.clone();
+		for (int i = 0; i < 4; i++) {
+			int field = i;
+			EditBox box = new EditBox(this.font, 14 + i % 2 * 52, this.cornersY + 11 + i / 2 * 18, 40, 16, Component.translatable(i % 2 == 0 ? "diorama.waypoint.x" : "diorama.waypoint.z")) {
+				// Typing and pasting both come through here, a paste all at once.
+				@Override
+				public void insertText(String text) {
+					if (!ExportScreen.this.pasted(field, text)) {
+						super.insertText(text);
+					}
+				}
+			};
+			// Nothing in the world is longer than "-30000000".
+			box.setMaxLength(9);
+			box.setResponder(text -> this.typed(field, text));
+			box.visible = !this.whole;
+			this.corners[i] = this.addRenderableWidget(box);
+		}
+		this.writeCorners();
+		if (kept != null) {
+			this.writing = true;
+			for (int i = 0; i < 4; i++) {
+				this.corners[i].setValue(kept[i]);
+				this.cornerText[i] = kept[i];
+			}
+			this.writing = false;
+			this.readCorners();
+		}
 		this.save = this.addRenderableWidget(Button.builder(Component.translatable("diorama.export.save"), b -> this.save())
 			.bounds(6, this.height - FOOTER + 4, 80, 20).build());
 		this.addRenderableWidget(Button.builder(CommonComponents.GUI_CANCEL, b -> this.onClose())
@@ -169,11 +357,19 @@ public final class ExportScreen extends Screen {
 
 	/** The box being saved, in map units: the Area box, or everything explored. Null while Whole map is still looking. */
 	private double @Nullable [] box() {
-		return this.whole ? this.explored : new double[] {this.u0, this.v0, this.u1, this.v1};
+		return this.whole ? this.explored : this.areaBox();
 	}
 
+	/** The levels a box can be saved at, finest first: those whose image is within {@link ImageExport#MAX_EDGE}. */
 	private List<Integer> levels(double[] box) {
-		return ImageExport.levels(box[0], box[1], box[2], box[3]);
+		List<Integer> levels = new java.util.ArrayList<>();
+		for (int lod = 0; lod <= ImageExport.COARSEST; lod++) {
+			ImageExport.Area area = this.area(box, lod);
+			if (Math.max(area.width(), area.height()) <= ImageExport.MAX_EDGE) {
+				levels.add(lod);
+			}
+		}
+		return levels;
 	}
 
 	/** The level the export will be saved at for this box. */
@@ -190,7 +386,26 @@ public final class ExportScreen extends Screen {
 				}
 			}
 		}
-		return ImageExport.defaultLevel(box[0], box[1], box[2], box[3]);
+		// The sharpest whose long side is within the default, else the coarsest there is.
+		for (int lod : levels) {
+			ImageExport.Area area = this.area(box, lod);
+			if (Math.max(area.width(), area.height()) <= ImageExport.DEFAULT_EDGE) {
+				return lod;
+			}
+		}
+		return levels.isEmpty() ? ImageExport.COARSEST : levels.get(levels.size() - 1);
+	}
+
+	/**
+	 * The pixels saved for a box. Whole map grows to whole pixels, losing nothing explored; the Area
+	 * box is the pixels within it, so the image has no row or column of ground outside the corners.
+	 */
+	private ImageExport.Area area(double[] box) {
+		return this.area(box, this.lod(box));
+	}
+
+	private ImageExport.Area area(double[] box, int lod) {
+		return this.whole ? ImageExport.Area.ofUnits(lod, box[0], box[1], box[2], box[3]) : ImageExport.Area.within(lod, box[0], box[1], box[2], box[3]);
 	}
 
 	private double screenX(double u) {
@@ -286,18 +501,27 @@ public final class ExportScreen extends Screen {
 			}
 		}
 		if (this.save != null) {
-			this.save.active = box != null && !levels.isEmpty() && MapExport.running() == null;
+			this.save.active = box != null && !levels.isEmpty() && MapExport.running() == null && (this.whole || this.cornersRead);
 		}
 		if (box != null && !levels.isEmpty()) {
-			ImageExport.Area area = ImageExport.Area.ofUnits(lod, box[0], box[1], box[2], box[3]);
+			ImageExport.Area area = this.area(box);
 			graphics.text(this.font, Component.translatable("diorama.export.pixels", number(area.width()), number(area.height())), 6, 76, 0xFFFFFFFF, false);
 			graphics.text(this.font, size(ImageExport.estimateBytes(area)), 6, 88, MUTED, false);
-			// In map units, a block each, so it reads against pixels per block.
-			Component blocks = Component.translatable("diorama.export.blocks", number(Math.round(box[2] - box[0])), number(Math.round(box[3] - box[1])));
+			// Across and, on level ground, from top to bottom: the tilt draws a block's depth shorter than its width.
+			Component blocks = Component.translatable("diorama.export.blocks", number(Math.round(box[2] - box[0])), number(Math.round((box[3] - box[1]) / Projection.sin())));
 			graphics.fill(SIDEBAR + 4, 4, SIDEBAR + 10 + this.font.width(blocks), 16, DIM);
 			graphics.text(this.font, blocks, SIDEBAR + 7, 6, 0xFFFFFFFF, false);
 		}
 		if (!this.whole) {
+			int y = this.cornersY;
+			graphics.text(this.font, Component.translatable("diorama.export.corners", this.groundY()), 6, y, MUTED, false);
+			for (int row = 0; row < 2; row++) {
+				graphics.text(this.font, "X", 6, y + 15 + row * 18, MUTED, false);
+				graphics.text(this.font, "Z", 58, y + 15 + row * 18, MUTED, false);
+			}
+			if (mouseX >= 6 && mouseX < SIDEBAR - 6 && mouseY >= y - 1 && mouseY < y + 10) {
+				graphics.setTooltipForNextFrame(this.font, this.font.split(Component.translatable("diorama.export.corners_tip", this.groundY()), 190), mouseX, mouseY);
+			}
 			// Beside the buttons, not over what's being saved.
 			String help = this.font.plainSubstrByWidth(Component.translatable("diorama.export.help").getString(), Math.max(0, this.width - 164));
 			graphics.text(this.font, help, 158, ph + 10, MUTED, false);
@@ -389,11 +613,18 @@ public final class ExportScreen extends Screen {
 			return;
 		}
 		this.whole = whole;
+		for (EditBox corner : this.corners) {
+			if (corner != null) {
+				corner.visible = !whole;
+			}
+		}
 		if (!whole) {
 			// Back to the box that was drawn, in view.
-			this.fit(new double[] {this.u0, this.v0, this.u1, this.v1});
+			this.fit(this.areaBox());
 			return;
 		}
+		// The fields are out of sight; what's typed in them is there on the way back.
+		this.setFocused(null);
 		MapSession session = MapSession.get();
 		this.explored = null;
 		this.finding = null;
@@ -482,10 +713,10 @@ public final class ExportScreen extends Screen {
 		double[] box = this.box();
 		MapSession session = MapSession.get();
 		TileStore store = session == null ? null : session.map().savedMap();
-		if (box == null || session == null || !this.caves() && store == null || this.levels(box).isEmpty()) {
+		if (box == null || session == null || !this.caves() && store == null || this.levels(box).isEmpty() || !this.whole && !this.cornersRead) {
 			return;
 		}
-		ImageExport.Area area = ImageExport.Area.ofUnits(this.lod(box), box[0], box[1], box[2], box[3]);
+		ImageExport.Area area = this.area(box);
 		List<Drawing> drawings = this.withDrawings ? this.drawings() : List.of();
 		float night = this.atNight && this.hasNight() ? 1 : 0;
 		boolean started = this.caves() ? MapExport.startCave(session.map(), this.layer, area, drawings)
@@ -544,17 +775,26 @@ public final class ExportScreen extends Screen {
 		if (x < SIDEBAR || y >= this.previewHeight()) {
 			return false;
 		}
+		// A press on the map is done typing.
+		this.setFocused(null);
 		this.pressButton = button;
 		this.grip = this.whole ? PAN : this.gripAt(x, y);
+		this.held[0] = this.x0;
+		this.held[1] = this.z0;
+		this.held[2] = this.x1;
+		this.held[3] = this.z1;
+		this.draggedX = 0;
+		this.draggedZ = 0;
 		return true;
 	}
 
 	/** What a press at a point takes hold of: edges and corners, the inside, or else the map. */
 	private int gripAt(double x, double y) {
-		double x0 = this.screenX(this.u0);
-		double x1 = this.screenX(this.u1);
-		double y0 = this.screenY(this.v0);
-		double y1 = this.screenY(this.v1);
+		double[] box = this.areaBox();
+		double x0 = this.screenX(box[0]);
+		double x1 = this.screenX(box[2]);
+		double y0 = this.screenY(box[1]);
+		double y1 = this.screenY(box[3]);
 		boolean inX = x > x0 - GRAB && x < x1 + GRAB;
 		boolean inY = y > y0 - GRAB && y < y1 + GRAB;
 		int grip = 0;
@@ -590,24 +830,39 @@ public final class ExportScreen extends Screen {
 		if (this.grip == PAN) {
 			this.centerU -= du;
 			this.centerV -= dv;
-		} else if (this.grip == MOVE) {
-			this.u0 += du;
-			this.u1 += du;
-			this.v0 += dv;
-			this.v1 += dv;
+			return true;
+		}
+		int[] was = {this.x0, this.z0, this.x1, this.z1};
+		// The box moves by whole blocks from where the press found it, so it keeps its size as it's moved.
+		this.draggedX += du;
+		this.draggedZ += dv / Projection.sin();
+		int blocksX = (int) Math.round(this.draggedX);
+		int blocksZ = (int) Math.round(this.draggedZ);
+		// An edge stops a small box short of the one across from it; a box typed smaller isn't made bigger.
+		int across = Math.min(MIN_BOX, this.held[2] - this.held[0]);
+		int deep = Math.min(MIN_BOX, this.held[3] - this.held[1]);
+		if (this.grip == MOVE) {
+			this.x0 = this.held[0] + blocksX;
+			this.x1 = this.held[2] + blocksX;
+			this.z0 = this.held[1] + blocksZ;
+			this.z1 = this.held[3] + blocksZ;
 		} else {
 			if ((this.grip & LEFT) != 0) {
-				this.u0 = Math.min(this.u0 + du, this.u1 - MIN_BOX);
+				this.x0 = Math.min(this.held[0] + blocksX, this.held[2] - across);
 			}
 			if ((this.grip & RIGHT) != 0) {
-				this.u1 = Math.max(this.u1 + du, this.u0 + MIN_BOX);
+				this.x1 = Math.max(this.held[2] + blocksX, this.held[0] + across);
 			}
 			if ((this.grip & TOP) != 0) {
-				this.v0 = Math.min(this.v0 + dv, this.v1 - MIN_BOX);
+				this.z0 = Math.min(this.held[1] + blocksZ, this.held[3] - deep);
 			}
 			if ((this.grip & BOTTOM) != 0) {
-				this.v1 = Math.max(this.v1 + dv, this.v0 + MIN_BOX);
+				this.z1 = Math.max(this.held[3] + blocksZ, this.held[1] + deep);
 			}
+		}
+		// Only a box that moved: an edge held at its stop leaves what's typed alone.
+		if (this.x0 != was[0] || this.z0 != was[1] || this.x1 != was[2] || this.z1 != was[3]) {
+			this.writeCorners();
 		}
 		return true;
 	}
@@ -668,7 +923,7 @@ public final class ExportScreen extends Screen {
 		if (box == null || this.levels(box).isEmpty()) {
 			return null;
 		}
-		return ImageExport.Area.ofUnits(this.lod(box), box[0], box[1], box[2], box[3]);
+		return this.area(box);
 	}
 
 	/** For tests: the box on screen in GUI pixels, {x0, y0, x1, y1}, or null while there's none. */
@@ -681,6 +936,11 @@ public final class ExportScreen extends Screen {
 	public int[] tabCenter(int tab) {
 		int x = 6 + (tab == 1 ? this.tabWidth(0) : 0);
 		return new int[] {x + this.tabWidth(tab) / 2, 14};
+	}
+
+	/** For tests: a corner field, 0 to 3: X and Z of one corner, then of the other. */
+	public EditBox cornerField(int field) {
+		return this.corners[field];
 	}
 
 	/** For tests: a detail button, 0 (4 px per block) to 3, and Save image. */

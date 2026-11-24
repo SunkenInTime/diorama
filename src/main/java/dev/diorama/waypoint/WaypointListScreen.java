@@ -196,7 +196,7 @@ public final class WaypointListScreen extends Screen {
 
 	/**
 	 * The folders: the Overworld, the Nether and the End always, any other dimension with waypoints
-	 * or the player in it, then the player's own in the order they were made, then Waystones when
+	 * or the player in it, then the player's own in name order, then Waystones when
 	 * the Waystones mod has told the player of any.
 	 */
 	private void collectFolders(@Nullable WaypointStore store, @Nullable String here) {
@@ -260,15 +260,19 @@ public final class WaypointListScreen extends Screen {
 		}
 		int left = folderNameLeft(this.width / 2 - LIST_WIDTH / 2);
 		this.menuMoves = false;
-		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, Math.max(FOLDER_NAME_WIDTH, this.folderNameWidth), this.height);
+		this.folderMenu = new FolderMenu(this.font, entries, this.folder().key(), left, FOLDER_Y, FOLDER_Y + 20, Math.max(FOLDER_NAME_WIDTH, this.folderNameWidth), this.width, this.height);
 	}
 
 	/**
-	 * A click while the list of folders is open: on a folder it shows that folder, anywhere else it
-	 * only closes the list, as a click outside a menu does.
+	 * A click while the list of folders is open: on a folder it shows that folder, on the list's
+	 * scrollbar it takes hold of that, and anywhere else it only closes the list, as a click outside
+	 * a menu does.
 	 */
 	private void clickFolderMenu(double x, double y, int button) {
 		FolderMenu menu = this.folderMenu;
+		if (menu != null && button == InputConstants.MOUSE_BUTTON_LEFT && menu.press(x, y)) {
+			return;
+		}
 		this.folderMenu = null;
 		this.pickFolder(menu == null || button != InputConstants.MOUSE_BUTTON_LEFT ? null : menu.under(x, y));
 	}
@@ -346,7 +350,7 @@ public final class WaypointListScreen extends Screen {
 		int width = 150;
 		int x = Math.max(2, Math.min(button.getX(), this.width - width - 2));
 		this.menuMoves = true;
-		this.folderMenu = new FolderMenu(this.font, entries, current, x, button.getY(), button.getY() + button.getHeight(), width, this.height);
+		this.folderMenu = new FolderMenu(this.font, entries, current, x, button.getY(), button.getY() + button.getHeight(), width, this.width, this.height);
 	}
 
 	/** Moves the selected rows to one of the player's folders, or with an empty name back to their dimensions' own. */
@@ -1223,7 +1227,7 @@ public final class WaypointListScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(MouseButtonEvent event) {
-		this.draggingScrollbar = false;
+		this.released();
 		return super.mouseReleased(event);
 	}
 	//?} else {
@@ -1270,10 +1274,18 @@ public final class WaypointListScreen extends Screen {
 
 	@Override
 	public boolean mouseReleased(double x, double y, int button) {
-		this.draggingScrollbar = false;
+		this.released();
 		return super.mouseReleased(x, y, button);
 	}
 	*///?}
+
+	/** The mouse button was let go: whichever scrollbar it held, the list's or the open list of folders', is let go too. */
+	private void released() {
+		this.draggingScrollbar = false;
+		if (this.folderMenu != null) {
+			this.folderMenu.release();
+		}
+	}
 
 	/** A click anywhere but on Click again to delete puts the row's buttons back. */
 	private void disarmUnless(double x, double y) {
@@ -1374,8 +1386,11 @@ public final class WaypointListScreen extends Screen {
 		this.placeRowButtons();
 	}
 
-	/** Moves the list with the scrollbar handle while it's held. */
+	/** Moves the list with the scrollbar handle while it's held, or the open list of folders with its own. */
 	private boolean dragged(double y) {
+		if (this.folderMenu != null) {
+			return this.folderMenu.drag(y);
+		}
 		if (!this.draggingScrollbar) {
 			return false;
 		}
