@@ -19,7 +19,7 @@ public interface ChunkSave {
 	/**
 	 * Every region's chunks, by {@link SavedChunks#regionKey}: for each of its 32 × 32 chunks,
 	 * indexed {@code (z << 5) | x}, when the save last wrote it in seconds, or 0 if it has none
-	 * to draw.
+	 * to draw. The arrays are for reading only: a save may hand out the ones it keeps.
 	 */
 	Map<Long, int[]> scan();
 
