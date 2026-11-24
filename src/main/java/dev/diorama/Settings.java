@@ -90,7 +90,8 @@ public final class Settings {
 	/**
 	 * How big the lines under the minimap and the names on it are, in percent of the game's own text:
 	 * {@link #MIN_TEXT_SIZE} to {@link #MAX_TEXT_SIZE}. {@code TextSize.scale} rounds it to
-	 * whole screen pixels.
+	 * whole screen pixels. Also the size an info line falls back to when it has none of its own
+	 * (older files).
 	 */
 	public int minimapTextSize = 100;
 	/**
@@ -99,6 +100,16 @@ public final class Settings {
 	 * from before it existed, when Text size sized both: it starts as that.
 	 */
 	public int minimapCompassSize = 0;
+	/** Size of the coordinates line under the minimap; 0 means use {@link #minimapTextSize}. */
+	public int minimapCoordsSize = 100;
+	/** Size of the biome name line under the minimap; 0 means use {@link #minimapTextSize}. */
+	public int minimapBiomeSize = 100;
+	/** Size of the claim/clan line under the minimap; 0 means use {@link #minimapTextSize}. */
+	public int minimapClaimSize = 100;
+	/** Size of the game-time line under the minimap; 0 means use {@link #minimapTextSize}. */
+	public int minimapTimeSize = 100;
+	/** Horizontal alignment of info lines under the minimap. */
+	public MinimapTextAlign minimapTextAlign = MinimapTextAlign.AUTO;
 	/** Whether the sky view is drawn by day, at night, or as the world's time has it; see {@code NightLook}. */
 	public DayNight dayNight = DayNight.FOLLOW;
 	public boolean autoCaves = true;
@@ -134,6 +145,7 @@ public final class Settings {
 	public RadarStyle radarStyle = RadarStyle.HEADS;
 	/** Radar heads' size, in percent of the normal size: {@link #MIN_SCALE} to {@link #MAX_SCALE} in steps of {@link #SCALE_STEP}. */
 	public int radarIconScale = 100;
+	public int radarTextSize = 100;
 	/** Outlines mob heads in red, yellow or green by how they treat you; off, they're outlined in black. */
 	public boolean radarTypeOutline = true;
 	/** The small arrow beside a player or mob well above or below you (Xaero's "Display Height: Direction"). Off, only the fade says so. */
@@ -249,6 +261,10 @@ public final class Settings {
 	public SpawnSpots spawnSpots = SpawnSpots.OFF;
 	/** Where land claims from FTB Chunks or Open Parties and Claims show, when one is installed. */
 	public ClaimsShown claims = ClaimsShown.ALWAYS;
+	/** How claims look on the tilted map. */
+	public ClaimsStyle claimsStyle = ClaimsStyle.SURFACE;
+	public ClaimColorMode claimColorMode = ClaimColorMode.BOTH;
+	public java.util.List<String> minimapInfoOrder = new java.util.ArrayList<>(java.util.List.of("C", "B", "L", "T"));
 
 	/**
 	 * The map in a browser, for a second screen ({@link dev.diorama.web.ClientWebMap}): off, for
@@ -272,6 +288,34 @@ public final class Settings {
 		OFF,
 		FULLSCREEN,
 		ALWAYS
+	}
+
+	/**
+	 * How claims look on the 3D map.
+	 * SURFACE follows terrain pixels (can skew on tall builds).
+	 * OUTLINE draws only chunk borders, aligned to the world grid.
+	 * WALLS draws stronger borders and also paints cave layers.
+	 */
+	public enum ClaimsStyle {
+		SURFACE,
+		OUTLINE,
+		WALLS
+	}
+
+	/** Horizontal alignment of the text under the minimap. */
+	public enum MinimapTextAlign {
+		/** Follow the minimap corner (original behaviour). */
+		AUTO,
+		LEFT,
+		CENTER,
+		RIGHT
+	}
+
+	public enum ClaimColorMode {
+		ICON,
+		TEXT,
+		BOTH,
+		NONE
 	}
 
 	/** Where the player's drawings show. Notes stay off the minimap, where they'd cover it. */
@@ -346,6 +390,10 @@ public final class Settings {
 
 	private static int clampTextSize(int size) {
 		return Math.max(MIN_TEXT_SIZE, Math.min(MAX_TEXT_SIZE, size));
+	}
+
+	private static int clampTextSizeOrOff(int size) {
+		return size <= 0 ? 0 : clampTextSize(size);
 	}
 
 	private static int clampWaypointSize(int size) {
@@ -537,6 +585,7 @@ public final class Settings {
 			settings.radarStyle = RadarStyle.HEADS;
 		}
 		settings.radarIconScale = snapScale(settings.radarIconScale);
+		settings.radarTextSize = clampTextSize(settings.radarTextSize);
 		if (settings.playerNames == null) {
 			settings.playerNames = NameTags.FULLSCREEN;
 		}
@@ -595,6 +644,33 @@ public final class Settings {
 			moved = true;
 		}
 		settings.minimapCompassSize = clampTextSize(settings.minimapCompassSize);
+		// Files from before the lines had sizes of their own hid these with a toggle: carry it over once.
+		if (!settings.coordinates) {
+			settings.minimapCoordsSize = 0;
+			settings.coordinates = true;
+		}
+		if (!settings.biome) {
+			settings.minimapBiomeSize = 0;
+			settings.biome = true;
+		}
+		// 0 hides that line under the minimap; other values are clamped like Text size.
+		settings.minimapCoordsSize = clampTextSizeOrOff(settings.minimapCoordsSize);
+		settings.minimapBiomeSize = clampTextSizeOrOff(settings.minimapBiomeSize);
+		settings.minimapClaimSize = clampTextSizeOrOff(settings.minimapClaimSize);
+		settings.minimapTimeSize = clampTextSizeOrOff(settings.minimapTimeSize);
+		// minimapInfoOrder handled above as List<String>
+		if (settings.minimapTextAlign == null) {
+			settings.minimapTextAlign = MinimapTextAlign.AUTO;
+		}
+		if (settings.claimsStyle == null) {
+			settings.claimsStyle = ClaimsStyle.SURFACE;
+		}
+		if (settings.claimColorMode == null) {
+			settings.claimColorMode = ClaimColorMode.BOTH;
+		}
+		if (settings.minimapInfoOrder == null || settings.minimapInfoOrder.isEmpty()) {
+			settings.minimapInfoOrder = new java.util.ArrayList<>(java.util.List.of("C", "B", "L", "T"));
+		}
 		settings.waypointMinimapSize = clampWaypointSize(settings.waypointMinimapSize);
 		settings.waypointMapSize = clampWaypointSize(settings.waypointMapSize);
 		settings.waypointWorldSize = clampWaypointSize(settings.waypointWorldSize);

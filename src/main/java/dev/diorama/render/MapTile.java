@@ -30,6 +30,7 @@ public final class MapTile {
 	private @Nullable MapTexture claims;
 	/** The claims {@link #claims} shows, or null before they're first painted. */
 	Claims.@Nullable Snapshot claimsPainted;
+	dev.diorama.Settings.@Nullable ClaimsStyle claimsPaintedStyle;
 	/** Goes up whenever the tile's pixels change, as the ground the claims are painted on may move. */
 	int pixelsRevision;
 	/** When {@link #pixelsRevision} last went up. */
@@ -242,8 +243,9 @@ public final class MapTile {
 	}
 
 	/** Shows freshly painted claims, or none: {@code painted} drawn on the pixels of {@code revision}. */
-	void paintClaims(int @Nullable [] pixels, Claims.Snapshot painted, int revision) {
+	void paintClaims(int @Nullable [] pixels, Claims.Snapshot painted, dev.diorama.Settings.@Nullable ClaimsStyle style, int revision) {
 		this.claimsPainted = painted;
+		this.claimsPaintedStyle = style;
 		this.claimsRevision = revision;
 		if (pixels == null) {
 			if (this.claims != null) {
@@ -312,6 +314,7 @@ public final class MapTile {
 			this.claims = null;
 		}
 		this.claimsPainted = null;
+		this.claimsPaintedStyle = null;
 		if (this.overlay != null) {
 			this.overlay.close();
 			this.overlay = null;

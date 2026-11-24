@@ -131,10 +131,19 @@ public final class Claims {
 
 	/** Whose a chunk is as last handed over, by any claims mod; null for no one's. Client thread. */
 	public static @Nullable Owner owner(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+		Claim claim = claim(dimension, chunkX, chunkZ);
+		return claim == null ? null : claim.owner();
+	}
+
+	/**
+	 * A chunk's claim as last handed over, by any claims mod, with its owner and whether it's force
+	 * loaded; null for no one's. Unlike {@link #get}, this is known whether or not claims are shown.
+	 * Client thread.
+	 */
+	public static @Nullable Claim claim(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
 		Map<Region, Claim[]> regions = known.get(dimension);
 		Claim[] chunks = regions == null ? null : regions.get(new Region(chunkX >> 5, chunkZ >> 5));
-		Claim claim = chunks == null ? null : chunks[index(chunkX, chunkZ)];
-		return claim == null ? null : claim.owner();
+		return chunks == null ? null : chunks[index(chunkX, chunkZ)];
 	}
 
 	/** Time spent taking in an update, counted toward this tick's. */

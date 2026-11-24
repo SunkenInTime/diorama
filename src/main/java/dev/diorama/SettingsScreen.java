@@ -82,14 +82,19 @@ public final class SettingsScreen extends Screen {
 		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
 		minimap.toggle("minimap_shown", () -> s.minimap, v -> s.minimap = v);
 		minimap.toggle("compass", () -> s.compass, v -> s.compass = v);
-		minimap.toggle("coordinates", () -> s.coordinates, v -> s.coordinates = v);
-		minimap.toggle("biome", () -> s.biome, v -> s.biome = v);
+		// coordinates and biome checkboxes removed (controlled by size sliders)
 		minimap.toggle("auto_caves", () -> s.autoCaves, v -> s.autoCaves = v, ServerRules.caveMapsAllowed() ? null : false);
 		minimap.toggle("prefer_surface", () -> s.preferSurface, v -> s.preferSurface = v);
 		minimap.toggle("legible_caves", () -> s.legibleCaves, v -> s.legibleCaves = v);
 		minimap.toggle("enlarge_toggle", () -> s.minimapEnlargeToggle, v -> s.minimapEnlargeToggle = v);
 		minimap.open("position", MinimapPositionScreen.placeName(), () -> this.minecraft.gui.setScreen(new MinimapPositionScreen(this)));
-		minimap.choice("game_time", Settings.GameTime.values(), () -> s.gameTime, v -> s.gameTime = v);
+		minimap.choice("game_time", Settings.GameTime.values(), () -> s.gameTime, v -> {
+			s.gameTime = v;
+			if (v != Settings.GameTime.OFF && s.minimapTimeSize == 0) {
+				s.minimapTimeSize = 100;
+			}
+			this.rebuildWidgets();
+		});
 		// Beside Position, so the tab doesn't grow.
 		minimap.lastTwoSideBySide();
 		int sizes = (Settings.MAX_SIZE - Settings.MIN_SIZE) / Settings.SIZE_STEP + 1;
@@ -103,11 +108,25 @@ public final class SettingsScreen extends Screen {
 		// Three to a row, so the tab doesn't grow: it has no room for another row on a small screen.
 		minimap.lastThreeSideBySide();
 		int opacities = (Settings.MAX_OPACITY - Settings.MIN_OPACITY) / Settings.OPACITY_STEP + 1;
+		int[] textSizes = TextSize.sizes();
+		int[] textSizesOff = TextSize.sizesWithOff();
+		// Three to a row, so the tab has room for the sizes of the lines under the minimap on a small screen.
 		minimap.slider("opacity", (Settings.snapOpacity(s.minimapOpacity) - Settings.MIN_OPACITY) / Settings.OPACITY_STEP, opacities,
 			i -> s.minimapOpacity = Settings.MIN_OPACITY + i * Settings.OPACITY_STEP, i -> Component.literal((Settings.MIN_OPACITY + i * Settings.OPACITY_STEP) + "%"));
-		int[] textSizes = TextSize.sizes();
-		minimap.slider("text_size", nearestIndex(textSizes, s.minimapTextSize), textSizes.length, i -> s.minimapTextSize = textSizes[i], i -> Component.literal(textSizes[i] + "%"));
 		minimap.slider("compass_size", nearestIndex(textSizes, s.minimapCompassSize), textSizes.length, i -> s.minimapCompassSize = textSizes[i], i -> Component.literal(textSizes[i] + "%"));
+		minimap.slider("coords_size", nearestIndex(textSizesOff, s.minimapCoordsSize), textSizesOff.length, i -> s.minimapCoordsSize = textSizesOff[i], i -> textSizesOff[i] == 0 ? Component.translatable("diorama.settings.off") : Component.literal(textSizesOff[i] + "%"));
+		minimap.lastThreeSideBySide();
+		minimap.slider("biome_size", nearestIndex(textSizesOff, s.minimapBiomeSize), textSizesOff.length, i -> s.minimapBiomeSize = textSizesOff[i], i -> textSizesOff[i] == 0 ? Component.translatable("diorama.settings.off") : Component.literal(textSizesOff[i] + "%"));
+		minimap.slider("claim_size", nearestIndex(textSizesOff, s.minimapClaimSize), textSizesOff.length, i -> s.minimapClaimSize = textSizesOff[i], i -> textSizesOff[i] == 0 ? Component.translatable("diorama.settings.off") : Component.literal(textSizesOff[i] + "%"));
+		if (s.gameTime != Settings.GameTime.OFF) {
+			minimap.slider("time_size", nearestIndex(textSizesOff, s.minimapTimeSize), textSizesOff.length, i -> s.minimapTimeSize = textSizesOff[i], i -> textSizesOff[i] == 0 ? Component.translatable("diorama.settings.off") : Component.literal(textSizesOff[i] + "%"));
+			minimap.lastThreeSideBySide();
+		} else {
+			minimap.lastTwoSideBySide();
+		}
+		minimap.open("info_order", Component.translatable("diorama.info_order.configure"), () -> this.minecraft.gui.setScreen(new MinimapOrderScreen(this)));
+		minimap.choice("text_align", Settings.MinimapTextAlign.values(), () -> s.minimapTextAlign, v -> s.minimapTextAlign = v);
+		minimap.choice("claim_color", Settings.ClaimColorMode.values(), () -> s.claimColorMode, v -> s.claimColorMode = v);
 		minimap.lastThreeSideBySide();
 		// Side by side, so the tab stays short enough for a small screen.
 		minimap.choice("shape", Settings.Shape.values(), () -> s.minimapShape, v -> s.minimapShape = v);
@@ -135,6 +154,9 @@ public final class SettingsScreen extends Screen {
 		// Side by side, so the tab stays short enough for a small screen.
 		radar.lastTwoSideBySide();
 		radar.choice("player_names", Settings.NameTags.values(), () -> s.playerNames, v -> s.playerNames = v);
+		radar.slider("radar_text_size", nearestIndex(textSizes, s.radarTextSize), textSizes.length,
+			i -> s.radarTextSize = textSizes[i], i -> Component.literal(textSizes[i] + "%"));
+		radar.lastTwoSideBySide(TEXT_SLIDER);
 		int[] ranges = Settings.RANGES;
 		radar.slider("range", indexOf(ranges, s.radarRange), ranges.length, i -> s.radarRange = ranges[i], i -> Component.literal(ranges[i] + " m"));
 		radar.open("radar_categories", RadarCategoriesScreen.summary(), () -> this.minecraft.gui.setScreen(new RadarCategoriesScreen(this)));
@@ -155,6 +177,7 @@ public final class SettingsScreen extends Screen {
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));
 		if (Claims.supported()) {
 			overlays.choice("claims", Settings.ClaimsShown.values(), () -> s.claims, v -> s.claims = v);
+			overlays.choice("claims_style", Settings.ClaimsStyle.values(), () -> s.claimsStyle, v -> s.claimsStyle = v);
 		}
 		overlays.choice("drawings", Settings.DrawingsShown.values(), () -> s.drawings, v -> s.drawings = v);
 		// The map in a browser; beside Drawings, so the tab doesn't grow.

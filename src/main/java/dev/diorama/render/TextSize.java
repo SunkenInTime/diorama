@@ -32,6 +32,15 @@ public final class TextSize {
 		return sizes;
 	}
 
+	/** {@link #sizes()} with 0 first: 0 means the line is hidden. */
+	public static int[] sizesWithOff() {
+		int[] base = sizes();
+		int[] out = new int[base.length + 1];
+		out[0] = 0;
+		System.arraycopy(base, 0, out, 1, base.length);
+		return out;
+	}
+
 	/** {@code value} GUI pixels, moved to the nearest screen pixel. */
 	public static float snap(float value) {
 		int gui = Radar.pixelsPerGuiPixel();

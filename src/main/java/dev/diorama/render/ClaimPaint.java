@@ -1,6 +1,7 @@
 package dev.diorama.render;
 
 import dev.diorama.Claims;
+import dev.diorama.Settings;
 import dev.diorama.Projection;
 import dev.diorama.bake.TileChunks;
 import dev.diorama.bake.TileKey;
@@ -32,7 +33,10 @@ final class ClaimPaint {
 	 * and {@code south} are the chunks of the tiles above and below, where saved, so an edge
 	 * running along the tile's top or bottom shows.
 	 */
-	static int @Nullable [] paint(TileKey key, byte[] chunks, byte @Nullable [] north, byte @Nullable [] south, Claims.Snapshot claims) {
+	static int @Nullable [] paint(TileKey key, byte[] chunks, byte @Nullable [] north, byte @Nullable [] south, Claims.Snapshot claims, Settings.ClaimsStyle style) {
+		if (style != Settings.ClaimsStyle.SURFACE) {
+			return paintFlat(key, claims, style);
+		}
 		int size = Projection.TILE_PIXELS;
 		dev.diorama.Facing facing = Projection.facing();
 		int[] chunkX = new int[size];
@@ -104,10 +108,14 @@ final class ClaimPaint {
 			below[k] = row(south, southKey, k, chunkX, claims, owners, idOf);
 		}
 		int[] fill = new int[owners.size()];
+		int[] forceFill = new int[owners.size()];
 		int[] line = new int[owners.size()];
+		boolean[] isForce = new boolean[owners.size()];
 		for (int id = 1; id < owners.size(); id++) {
 			Claims.Claim claim = owners.get(id);
-			fill[id] = abgr(claim.forceLoaded() ? FORCE_LOADED_ALPHA : FILL_ALPHA, claim.rgb());
+			isForce[id] = claim.forceLoaded();
+			fill[id] = abgr(FILL_ALPHA, claim.rgb());
+			forceFill[id] = abgr(0x78, darken15Percent(claim.rgb()));
 			line[id] = abgr(EDGE_ALPHA, claim.rgb());
 		}
 		int[] pixels = new int[size * size];
@@ -118,7 +126,13 @@ final class ClaimPaint {
 				if (id == 0) {
 					continue;
 				}
-				pixels[i] = onEdge(ids, west, east, above, below, size, px, py, id, edge) ? line[id] : fill[id];
+				if (onEdge(ids, west, east, above, below, size, px, py, id, edge)) {
+					pixels[i] = line[id];
+				} else if (isForce[id] && isCheckerCell(px, py)) {
+					pixels[i] = forceFill[id];
+				} else {
+					pixels[i] = fill[id];
+				}
 			}
 		}
 		return pixels;
@@ -182,6 +196,105 @@ final class ClaimPaint {
 
 	private static boolean differs(int other, int id) {
 		return other != -1 && other != id;
+	}
+
+	
+	/**
+	 * Chunk-aligned claim overlay: each pixel maps to a world chunk at a fixed height, so borders
+	 * stay square on the tilted map instead of following building faces.
+	 */
+	static int @Nullable [] paintFlat(TileKey key, Claims.Snapshot claims, Settings.ClaimsStyle style) {
+		final int fillAlpha = style == Settings.ClaimsStyle.OUTLINE ? 0 : (style == Settings.ClaimsStyle.WALLS ? 0x28 : FILL_ALPHA);
+		final int forceAlpha = style == Settings.ClaimsStyle.OUTLINE ? 0 : (style == Settings.ClaimsStyle.WALLS ? 0x44 : FORCE_LOADED_ALPHA);
+		final int edgeAlpha = style == Settings.ClaimsStyle.WALLS ? 0xEE : EDGE_ALPHA;
+		final int edge = style == Settings.ClaimsStyle.WALLS ? 3 : 2;
+		int size = Projection.TILE_PIXELS;
+		dev.diorama.Facing facing = Projection.facing();
+		int y = key.isCave() ? key.layer() : 64;
+		int[] ids = new int[size * size];
+		java.util.List<Claims.Claim> owners = new java.util.ArrayList<>();
+		owners.add(null);
+		java.util.Map<Claims.Claim, Integer> idOf = new java.util.HashMap<>();
+		boolean any = false;
+		for (int py = 0; py < size; py++) {
+			for (int px = 0; px < size; px++) {
+				double u = key.minU() + (px + 0.5) * key.units() / size;
+				double v = key.minV() + (py + 0.5) * key.units() / size;
+				double wz = Projection.zAt(v, y);
+				double wx = facing.worldX(u, wz);
+				double worldZ = facing.worldZ(u, wz);
+				int cx = (int) Math.floor(wx) >> 4;
+				int cz = (int) Math.floor(worldZ) >> 4;
+				Claims.Claim claim = claims.at(cx, cz);
+				int id = 0;
+				if (claim != null) {
+					any = true;
+					Integer existing = idOf.get(claim);
+					if (existing == null) {
+						id = owners.size();
+						owners.add(claim);
+						idOf.put(claim, id);
+					} else {
+						id = existing;
+					}
+				}
+				ids[py * size + px] = id;
+			}
+		}
+		if (!any) {
+			return null;
+		}
+		int[] fill = new int[owners.size()];
+		int[] forceFill = new int[owners.size()];
+		int[] line = new int[owners.size()];
+		boolean[] isForce = new boolean[owners.size()];
+		// An outline is only the border: force-loaded ground gets no checker inside it.
+		final int checkerAlpha = style == Settings.ClaimsStyle.OUTLINE ? 0 : 0x78;
+		for (int id = 1; id < owners.size(); id++) {
+			Claims.Claim claim = owners.get(id);
+			isForce[id] = claim.forceLoaded();
+			fill[id] = abgr(fillAlpha, claim.rgb());
+			forceFill[id] = abgr(checkerAlpha, darken15Percent(claim.rgb()));
+			line[id] = abgr(edgeAlpha, claim.rgb());
+		}
+		int[] pixels = new int[size * size];
+		for (int py = 0; py < size; py++) {
+			for (int px = 0; px < size; px++) {
+				int i = py * size + px;
+				int id = ids[i];
+				if (id == 0) {
+					continue;
+				}
+				boolean border = false;
+				for (int d = 1; d <= edge && !border; d++) {
+					if (px - d < 0 || ids[py * size + px - d] != id
+						|| px + d >= size || ids[py * size + px + d] != id
+						|| py - d < 0 || ids[(py - d) * size + px] != id
+						|| py + d >= size || ids[(py + d) * size + px] != id) {
+						border = true;
+					}
+				}
+				if (border) {
+					pixels[i] = line[id];
+				} else if (isForce[id] && isCheckerCell(px, py)) {
+					pixels[i] = forceFill[id];
+				} else {
+					pixels[i] = fill[id];
+				}
+			}
+		}
+		return pixels;
+	}
+
+	private static int darken15Percent(int rgb) {
+		int r = Math.max(0, (int) Math.round(((rgb >> 16) & 0xFF) * 0.85));
+		int g = Math.max(0, (int) Math.round(((rgb >> 8) & 0xFF) * 0.85));
+		int b = Math.max(0, (int) Math.round((rgb & 0xFF) * 0.85));
+		return (r << 16) | (g << 8) | b;
+	}
+
+	private static boolean isCheckerCell(int px, int py) {
+		return (((px >> 1) + (py >> 1)) & 1) == 0;
 	}
 
 	private static int abgr(int alpha, int rgb) {
