@@ -104,7 +104,8 @@ final class Sections {
 
 	/**
 	 * The container's packed blocks: one palette index per block, indexed
-	 * {@code (y << 8) | (z << 4) | x}, and the palette. Null if they can't be read.
+	 * {@code (y << 8) | (z << 4) | x}, and the palette. Null if they can't be read, or the palette
+	 * is the game's whole list of block states.
 	 */
 	@SuppressWarnings("unchecked")
 	static ChunkSnapshot.@Nullable Packed packed(PalettedContainer<BlockState> states) {
@@ -115,7 +116,20 @@ final class Sections {
 			Object data = (Object) PACKED_DATA.invokeExact(states);
 			net.minecraft.util.BitStorage storage = (net.minecraft.util.BitStorage) PACKED_STORAGE.invokeExact(data);
 			net.minecraft.world.level.chunk.Palette<BlockState> palette = (net.minecraft.world.level.chunk.Palette<BlockState>) (net.minecraft.world.level.chunk.Palette<?>) PACKED_PALETTE.invokeExact(data);
-			return storage == null || palette == null || storage.getSize() != 4096 ? null : new ChunkSnapshot.Packed(storage, palette);
+			if (storage == null || palette == null || storage.getSize() != 4096) {
+				return null;
+			}
+			// A palette with more places than the storage can pick is the game's whole list of block states.
+			int bits = storage.getBits();
+			int size = palette.getSize();
+			if (bits > 8 || size > 1 << bits) {
+				return null;
+			}
+			BlockState[] states = new BlockState[size];
+			for (int p = 0; p < size; p++) {
+				states[p] = palette.valueFor(p);
+			}
+			return new ChunkSnapshot.Packed(storage, states);
 		} catch (Throwable e) {
 			return null;
 		}

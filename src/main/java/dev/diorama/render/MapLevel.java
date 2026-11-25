@@ -748,7 +748,12 @@ public final class MapLevel implements ChunkSource {
 	public void packFar(int playerChunkX, int playerChunkZ, int radius) {
 		for (ChunkSnapshot snapshot : this.chunks.values()) {
 			if ((Math.abs(snapshot.chunkX - playerChunkX) > radius || Math.abs(snapshot.chunkZ - playerChunkZ) > radius) && snapshot.startPacking()) {
-				PACKER.execute(snapshot::pack);
+				// One the map has replaced or dropped by then is left as it is.
+				PACKER.execute(() -> {
+					if (this.chunks.get(snapshot.key()) == snapshot) {
+						snapshot.pack();
+					}
+				});
 			}
 		}
 	}

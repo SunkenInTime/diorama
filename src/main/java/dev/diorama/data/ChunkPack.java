@@ -3,33 +3,40 @@ package dev.diorama.data;
 import dev.diorama.Diorama;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import java.util.ArrayList;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.util.BitStorage;
+import net.minecraft.util.SimpleBitStorage;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
-import net.minecraft.world.level.chunk.PalettedContainer;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A chunk snapshot's blocks and light as a few kilobytes, for chunks the game has unloaded: the
- * map keeps thousands of those to redraw from, and reads few of them ever again.
+ * A chunk snapshot's blocks, light and tints as a few kilobytes, for chunks the game has unloaded:
+ * the map keeps thousands of those to redraw from, and reads few of them ever again.
  *
- * <p>Block states go in as the game sends them in a chunk packet, by number, so the bytes only
- * mean anything while the game's block numbers stay as they are: within one stay in a world, which
- * is as long as a snapshot lives. Light goes in as it is; a layer of one value as that value. All
- * of it deflated.
+ * <p>The bytes hold each section's blocks as the game packs them, a few bits per block that pick
+ * from the section's palette, and the palettes as places in {@link #table}: the chunk's block
+ * states themselves, held beside the bytes. So nothing in the bytes depends on how the game
+ * numbers its blocks, which a modded server changes, and which some mods' blocks have no number
+ * in at all. Light goes in as it is, a layer of one value as that value. All of it deflated.
  */
 final class ChunkPack {
 	private static final int ABSENT = 0;
 	private static final int ONE_VALUE = 1;
 	private static final int ARRAY = 2;
 	private static final int LIGHT_BYTES = 2048;
-	/** An empty container to read block states into, made from the first one packed. */
-	private static volatile @Nullable PalettedContainer<BlockState> empty;
-	/** Whether packing failed once: the game's containers aren't what this expects, so no more is packed. */
+	private static final int BLOCKS = 4096;
+	/** Whether packing failed once: the game's sections aren't what this expects, so no more is packed. */
 	private static volatile boolean failed;
 	private static final ThreadLocal<Inflater> INFLATER = ThreadLocal.withInitial(Inflater::new);
 	/** The packing thread's. */
@@ -41,23 +48,55 @@ final class ChunkPack {
 	static final AtomicLong UNPACKED = new AtomicLong();
 	static final AtomicLong UNPACK_NANOS = new AtomicLong();
 
-	private ChunkPack() {
+	private final byte[] bytes;
+	/** Every block state in the chunk's sections with more than one, in the order first met. */
+	private final BlockState[] table;
+
+	private ChunkPack(byte[] bytes, BlockState[] table) {
+		this.bytes = bytes;
+		this.table = table;
+	}
+
+	int size() {
+		return this.bytes.length;
+	}
+
+	/** A section's blocks as unpacked: the game's own packing, with the palette as an array. */
+	record Unpacked(BitStorage storage, BlockState[] palette) implements ChunkSnapshot.Blocks {
+		@Override
+		public BlockState get(int x, int y, int z) {
+			return this.palette[this.storage.get((y << 8) | (z << 4) | x)];
+		}
+
+		@Override
+		public boolean maybeHas(Predicate<BlockState> predicate) {
+			for (BlockState state : this.palette) {
+				if (predicate.test(state)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		@Override
+		public ChunkSnapshot.Packed packed() {
+			return new ChunkSnapshot.Packed(this.storage, this.palette);
+		}
 	}
 
 	/** The body packed, with these tints if there are any, or null if it can't be. The packing thread only. */
-	static byte @Nullable [] pack(ChunkSnapshot.Body body, ChunkSnapshot.@Nullable Tints tints) {
+	static @Nullable ChunkPack pack(ChunkSnapshot.Body body, ChunkSnapshot.@Nullable Tints tints) {
 		if (failed) {
 			return null;
 		}
 		long start = System.nanoTime();
 		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer(48 << 10));
 		try {
-			for (PalettedContainer<BlockState> states : body.states()) {
-				if (states != null) {
-					if (empty == null) {
-						empty = states.recreate();
-					}
-					states.write(buf);
+			Map<BlockState, Integer> places = new IdentityHashMap<>();
+			List<BlockState> table = new ArrayList<>();
+			for (ChunkSnapshot.Blocks blocks : body.blocks()) {
+				if (blocks != null) {
+					writeBlocks(buf, blocks, places, table);
 				}
 			}
 			for (DataLayer layer : body.blockLight()) {
@@ -73,11 +112,11 @@ final class ChunkPack {
 				writeTint(buf, tints.dryFoliage());
 				writeTint(buf, tints.water());
 			}
-			byte[] bytes = deflate(buf);
+			ChunkPack pack = new ChunkPack(deflate(buf), table.toArray(new BlockState[0]));
 			PACKED.incrementAndGet();
-			PACKED_BYTES.addAndGet(bytes.length);
+			PACKED_BYTES.addAndGet(pack.bytes.length);
 			PACK_NANOS.addAndGet(System.nanoTime() - start);
-			return bytes;
+			return pack;
 		} catch (RuntimeException e) {
 			failed = true;
 			Diorama.LOGGER.warn("Couldn't pack a chunk; the map keeps its chunks unpacked", e);
@@ -87,17 +126,15 @@ final class ChunkPack {
 		}
 	}
 
-	/** What {@link #pack} packed, for a chunk whose sections with block states of their own are {@code mixed}. Any thread. */
-	@SuppressWarnings("unchecked")
-	static ChunkSnapshot.Body unpack(byte[] bytes, boolean[] mixed) {
+	/** What {@link #pack} packed, for a chunk whose sections with more than one block state are {@code mixed}. Any thread. */
+	ChunkSnapshot.Body unpack(boolean[] mixed) {
 		long start = System.nanoTime();
-		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(inflate(bytes)));
+		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(inflate(this.bytes)));
 		int sections = mixed.length;
-		PalettedContainer<BlockState>[] states = new PalettedContainer[sections];
+		ChunkSnapshot.Blocks[] blocks = new ChunkSnapshot.Blocks[sections];
 		for (int i = 0; i < sections; i++) {
 			if (mixed[i]) {
-				states[i] = empty.recreate();
-				states[i].read(buf);
+				blocks[i] = this.readBlocks(buf);
 			}
 		}
 		DataLayer[] blockLight = new DataLayer[sections];
@@ -111,7 +148,65 @@ final class ChunkPack {
 		ChunkSnapshot.Tints tints = buf.readBoolean() ? new ChunkSnapshot.Tints(readTint(buf), readTint(buf), readTint(buf), readTint(buf)) : null;
 		UNPACKED.incrementAndGet();
 		UNPACK_NANOS.addAndGet(System.nanoTime() - start);
-		return new ChunkSnapshot.Body(states, blockLight, skyLight, tints);
+		return new ChunkSnapshot.Body(blocks, blockLight, skyLight, tints);
+	}
+
+	private static void writeBlocks(FriendlyByteBuf buf, ChunkSnapshot.Blocks blocks, Map<BlockState, Integer> places, List<BlockState> table) {
+		ChunkSnapshot.Packed packed = blocks.packed();
+		BitStorage storage = packed == null ? null : packed.storage();
+		BlockState[] palette = packed == null ? null : packed.palette();
+		if (!(storage instanceof SimpleBitStorage) || storage.getSize() != BLOCKS) {
+			// Not packed the game's way, or not readable as packed: packed here, block by block.
+			Map<BlockState, Integer> own = new IdentityHashMap<>();
+			List<BlockState> states = new ArrayList<>();
+			int[] picks = new int[BLOCKS];
+			for (int i = 0; i < BLOCKS; i++) {
+				BlockState state = blocks.get(i & 15, i >> 8, i >> 4 & 15);
+				Integer pick = own.get(state);
+				if (pick == null) {
+					pick = states.size();
+					own.put(state, pick);
+					states.add(state);
+				}
+				picks[i] = pick;
+			}
+			storage = new SimpleBitStorage(Math.max(1, 32 - Integer.numberOfLeadingZeros(states.size() - 1)), BLOCKS);
+			for (int i = 0; i < BLOCKS; i++) {
+				storage.set(i, picks[i]);
+			}
+			palette = states.toArray(new BlockState[0]);
+		}
+		buf.writeByte(storage.getBits());
+		buf.writeVarInt(palette.length);
+		for (BlockState state : palette) {
+			// A palette can have places nothing picks, without a state.
+			BlockState known = state == null ? Blocks.AIR.defaultBlockState() : state;
+			Integer place = places.get(known);
+			if (place == null) {
+				place = table.size();
+				places.put(known, place);
+				table.add(known);
+			}
+			buf.writeVarInt(place);
+		}
+		long[] raw = storage.getRaw();
+		buf.writeVarInt(raw.length);
+		for (long word : raw) {
+			buf.writeLong(word);
+		}
+	}
+
+	private ChunkSnapshot.Blocks readBlocks(FriendlyByteBuf buf) {
+		int bits = buf.readByte();
+		BlockState[] palette = new BlockState[buf.readVarInt()];
+		for (int i = 0; i < palette.length; i++) {
+			palette[i] = this.table[buf.readVarInt()];
+		}
+		long[] raw = new long[buf.readVarInt()];
+		for (int i = 0; i < raw.length; i++) {
+			raw[i] = buf.readLong();
+		}
+		return new Unpacked(new SimpleBitStorage(bits, BLOCKS, raw), palette);
 	}
 
 	private static void writeLight(ByteBuf buf, @Nullable DataLayer layer) {
@@ -127,6 +222,19 @@ final class ChunkPack {
 		}
 	}
 
+	private static @Nullable DataLayer readLight(ByteBuf buf) {
+		int kind = buf.readByte();
+		if (kind == ABSENT) {
+			return null;
+		}
+		if (kind == ONE_VALUE) {
+			return new DataLayer(buf.readByte());
+		}
+		byte[] data = new byte[LIGHT_BYTES];
+		buf.readBytes(data);
+		return new DataLayer(data);
+	}
+
 	private static void writeTint(ByteBuf buf, int[] tint) {
 		for (int colour : tint) {
 			buf.writeInt(colour);
@@ -139,19 +247,6 @@ final class ChunkPack {
 			tint[i] = buf.readInt();
 		}
 		return tint;
-	}
-
-	private static @Nullable DataLayer readLight(ByteBuf buf) {
-		int kind = buf.readByte();
-		if (kind == ABSENT) {
-			return null;
-		}
-		if (kind == ONE_VALUE) {
-			return new DataLayer(buf.readByte());
-		}
-		byte[] data = new byte[LIGHT_BYTES];
-		buf.readBytes(data);
-		return new DataLayer(data);
 	}
 
 	/** The buffer's bytes deflated, after their length. */

@@ -36,20 +36,50 @@ public final class ChunkSnapshot {
 	public final int chunkX;
 	public final int chunkZ;
 	public final int minSectionY;
+	/** The blocks of a section that has more than one block state. Read only. */
+	public interface Blocks {
+		/** The block at a place in the section, in the chunk's own layout. */
+		BlockState get(int x, int y, int z);
+
+		/** Whether any block of the section may pass; false means none does. */
+		boolean maybeHas(java.util.function.Predicate<BlockState> predicate);
+
+		/** See {@link ChunkSnapshot#packed}. */
+		@Nullable Packed packed();
+	}
+
+	/** A section's blocks in a copy of the game's own container. */
+	private record Copied(PalettedContainer<BlockState> states) implements Blocks {
+		@Override
+		public BlockState get(int x, int y, int z) {
+			return this.states.get(x, y, z);
+		}
+
+		@Override
+		public boolean maybeHas(java.util.function.Predicate<BlockState> predicate) {
+			return this.states.maybeHas(predicate);
+		}
+
+		@Override
+		public @Nullable Packed packed() {
+			return Sections.packed(this.states);
+		}
+	}
+
 	/**
-	 * What takes the memory: block states per section (null for sections that are only air or a
-	 * single block) and light. Never changes once the snapshot is made. One that was packed also
-	 * has the blended tints the snapshot had by then, which went into the pack with it.
+	 * What takes the memory: blocks per section (null for sections that are only air or a single
+	 * block) and light. Never changes once the snapshot is made. One that was packed also has the
+	 * blended tints the snapshot had by then, which went into the pack with it.
 	 */
-	record Body(@Nullable PalettedContainer<BlockState>[] states, @Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, @Nullable Tints tints) {
+	record Body(@Nullable Blocks[] blocks, @Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, @Nullable Tints tints) {
 	}
 
 	/** Which sections have block states of their own: neither only air nor a single block. */
 	private final boolean[] mixed;
 	/** The blocks and light, until {@link #pack} packs them; a view reads its chunk's. */
 	private volatile @Nullable Body body;
-	/** The blocks and light packed, see {@link ChunkPack}; null until then. */
-	private volatile byte @Nullable [] packedBody;
+	/** The blocks and light packed; null until then. */
+	private volatile @Nullable ChunkPack pack;
 	/** The packed blocks and light as last unpacked, for as long as something still reads them. */
 	private volatile java.lang.ref.@Nullable WeakReference<Body> unpacked;
 	/** Set by the first {@link #startPacking}. */
@@ -162,8 +192,8 @@ public final class ChunkSnapshot {
 		return out;
 	}
 
-	/** The block at a place in the view, from a section's {@link #section} container. */
-	public BlockState state(PalettedContainer<BlockState> states, int x, int y, int z) {
+	/** The block at a place in the view, from a section's {@link #section} blocks. */
+	public BlockState state(Blocks states, int x, int y, int z) {
 		return this.facing.turned(states.get(this.localX(x, z), y, this.localZ(x, z)));
 	}
 
@@ -231,7 +261,7 @@ public final class ChunkSnapshot {
 			skyLight[i] = sky == null ? null : sky.copy();
 		}
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, blockLight, skyLight, null);
+		this.body = new Body(copied(ownStates), blockLight, skyLight, null);
 
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
@@ -278,7 +308,7 @@ public final class ChunkSnapshot {
 			}
 		}
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, new DataLayer[sections.length], new DataLayer[sections.length], null);
+		this.body = new Body(copied(ownStates), new DataLayer[sections.length], new DataLayer[sections.length], null);
 		this.biomes = new PalettedContainerRO[9][];
 		this.biomeZoomSeed = 0;
 		this.blendRadius = 0;
@@ -345,7 +375,7 @@ public final class ChunkSnapshot {
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = level.dimensionType().hasSkyLight();
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, chunk.blockLight(), chunk.skyLight(), null);
+		this.body = new Body(copied(ownStates), chunk.blockLight(), chunk.skyLight(), null);
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
 		for (int i = 0; i < 256; i++) {
@@ -448,6 +478,14 @@ public final class ChunkSnapshot {
 		return new ChunkSnapshot(chunk, level);
 	}
 
+	private static @Nullable Blocks[] copied(@Nullable PalettedContainer<BlockState>[] states) {
+		Blocks[] blocks = new Blocks[states.length];
+		for (int i = 0; i < states.length; i++) {
+			blocks[i] = states[i] == null ? null : new Copied(states[i]);
+		}
+		return blocks;
+	}
+
 	private static boolean[] mixed(@Nullable PalettedContainer<BlockState>[] states) {
 		boolean[] mixed = new boolean[states.length];
 		for (int i = 0; i < states.length; i++) {
@@ -474,7 +512,7 @@ public final class ChunkSnapshot {
 			last = this.unpacked;
 			body = last == null ? null : last.get();
 			if (body == null) {
-				body = ChunkPack.unpack(this.packedBody, this.mixed);
+				body = this.pack.unpack(this.mixed);
 				this.unpacked = new java.lang.ref.WeakReference<>(body);
 			}
 			return body;
@@ -505,8 +543,13 @@ public final class ChunkSnapshot {
 
 	/** The size of the packed blocks and light in bytes, 0 if they aren't packed. */
 	public int packedSize() {
-		byte[] bytes = this.chunk().packedBody;
-		return bytes == null ? 0 : bytes.length;
+		ChunkPack pack = this.chunk().pack;
+		return pack == null ? 0 : pack.size();
+	}
+
+	/** Forgets the blocks and light as last unpacked, so the next read unpacks them again. For tests. */
+	public void forgetUnpacked() {
+		this.chunk().unpacked = null;
 	}
 
 	/** How many snapshots were packed and unpacked since the game started, and how long both took, for tests and the debug log. */
@@ -525,17 +568,17 @@ public final class ChunkSnapshot {
 			return;
 		}
 		Tints tints = this.tints;
-		byte[] bytes = ChunkPack.pack(body, tints);
-		if (bytes == null) {
+		ChunkPack pack = ChunkPack.pack(body, tints);
+		if (pack == null) {
 			return;
 		}
 		// What the next snapshot here compares with: a chunk loaded anew, which bakes afresh anyway.
 		this.replaced = null;
 		// Views are cheap to make again, and hold tints of their own.
 		java.util.Arrays.fill(this.views, null);
-		this.packedBody = bytes;
-		this.unpacked = new java.lang.ref.WeakReference<>(new Body(body.states(), body.blockLight(), body.skyLight(), tints));
-		// Last: a reader that finds no body finds the bytes.
+		this.pack = pack;
+		this.unpacked = new java.lang.ref.WeakReference<>(new Body(body.blocks(), body.blockLight(), body.skyLight(), tints));
+		// Last: a reader that finds no body finds the pack.
 		this.body = null;
 		// Tints a bake set meanwhile stay: they aren't in the pack.
 		if (this.tints == tints) {
@@ -547,8 +590,14 @@ public final class ChunkSnapshot {
 		return this.mixed.length;
 	}
 
-	public @Nullable PalettedContainer<BlockState> section(int index) {
-		return this.mixed[index] ? this.body().states()[index] : null;
+	/** The section's blocks, or null for one that is only air or a single block. */
+	public @Nullable Blocks section(int index) {
+		return this.mixed[index] ? this.body().blocks()[index] : null;
+	}
+
+	/** Whether {@link #section} has blocks for the section, without reading them. */
+	public boolean hasBlocks(int index) {
+		return this.mixed[index];
 	}
 
 	public @Nullable BlockState uniformSection(int index) {
@@ -563,12 +612,12 @@ public final class ChunkSnapshot {
 	 * where the container can't be read that way. Read only.
 	 */
 	public @Nullable Packed packed(int index) {
-		PalettedContainer<BlockState> states = this.section(index);
-		return states == null ? null : Sections.packed(states);
+		Blocks blocks = this.section(index);
+		return blocks == null ? null : blocks.packed();
 	}
 
-	/** See {@link #packed}. */
-	public record Packed(net.minecraft.util.BitStorage storage, net.minecraft.world.level.chunk.Palette<BlockState> palette) {
+	/** See {@link #packed}. A place in the palette that nothing picks can be null. */
+	public record Packed(net.minecraft.util.BitStorage storage, @Nullable BlockState[] palette) {
 	}
 
 	/** {@link #columns} per facing, by turns. */
@@ -805,12 +854,12 @@ public final class ChunkSnapshot {
 			if (this.uniform[i] != before.uniform[i]) {
 				return false;
 			}
-			PalettedContainer<BlockState> mine = body.states()[i];
-			PalettedContainer<BlockState> theirs = bodyBefore.states()[i];
+			Blocks mine = body.blocks()[i];
+			Blocks theirs = bodyBefore.blocks()[i];
 			if (mine == theirs) {
 				continue;
 			}
-			if (mine == null || theirs == null || !samePacked(Sections.packed(mine), Sections.packed(theirs))) {
+			if (mine == null || theirs == null || !samePacked(mine.packed(), theirs.packed())) {
 				return false;
 			}
 		}
@@ -821,12 +870,12 @@ public final class ChunkSnapshot {
 		if (a == null || b == null || a.storage().getBits() != b.storage().getBits() || a.storage().getSize() != b.storage().getSize()) {
 			return false;
 		}
-		int size = a.palette().getSize();
-		if (size != b.palette().getSize() || !java.util.Arrays.equals(a.storage().getRaw(), b.storage().getRaw())) {
+		int size = a.palette().length;
+		if (size != b.palette().length || !java.util.Arrays.equals(a.storage().getRaw(), b.storage().getRaw())) {
 			return false;
 		}
 		for (int p = 0; p < size; p++) {
-			if (a.palette().valueFor(p) != b.palette().valueFor(p)) {
+			if (a.palette()[p] != b.palette()[p]) {
 				return false;
 			}
 		}

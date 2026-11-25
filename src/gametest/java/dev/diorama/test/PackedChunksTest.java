@@ -16,7 +16,6 @@ import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.PalettedContainer;
 
 /**
  * Chunks the game has unloaded ({@code packed-chunks}): the map packs what it keeps of them, and
@@ -68,6 +67,9 @@ final class PackedChunksTest {
 			return sum;
 		});
 
+		// Read from the pack, not from what the collector hasn't taken yet.
+		context.runOnClient(mc -> forget(chunks));
+		long[] stats1b = ChunkSnapshot.packStats();
 		long start = System.nanoTime();
 		ChunkSnapshot[] now = context.computeOnClient(mc -> chunks(cx, cz));
 		long[] after = context.computeOnClient(mc -> digests(chunks));
@@ -98,20 +100,34 @@ final class PackedChunksTest {
 			throw new AssertionError("None of the chunks left behind had their tints blended: this wouldn't show the tints being packed");
 		}
 		long[] stats2 = ChunkSnapshot.packStats();
-		if (stats2[3] == stats1[3]) {
-			throw new AssertionError("Reading packed chunks unpacked none");
+		if (stats2[3] - stats1b[3] < same) {
+			throw new AssertionError("Reading " + same + " packed chunks unpacked " + (stats2[3] - stats1b[3]));
 		}
 		if (context.computeOnClient(mc -> count(cx, cz, true)) != side() * side()) {
 			throw new AssertionError("Reading packed chunks left them unpacked");
 		}
 
 		// The map turned east over them: those tiles were never drawn, and the chunks are packed.
+		context.runOnClient(mc -> forget(chunks));
 		context.setScreen(MapScreen::new);
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(1));
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(HOME, HOME), Projection.v(HOME, 80, HOME), 1.0, TileKey.SURFACE));
 		DioramaClientTest.settle(context, 60);
 		context.takeScreenshot("packed-chunks-turned");
 		long[] stats3 = ChunkSnapshot.packStats();
+		TileKey turned = context.computeOnClient(mc -> new TileKey(TileKey.SURFACE, (int) Math.floor(Projection.u(HOME, HOME) / Projection.TILE_UNITS), (int) Math.floor(Projection.v(HOME, 80, HOME) / Projection.TILE_UNITS)));
+		int drawn = context.computeOnClient(mc -> {
+			int[] pixels = MapSession.get().map().savedMap().read(turned);
+			int count = 0;
+			if (pixels != null) {
+				for (int pixel : pixels) {
+					if ((pixel >>> 24) != 0) {
+						count++;
+					}
+				}
+			}
+			return count;
+		});
 		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).turn(-1));
 		context.setScreen(() -> null);
 		DioramaClientTest.settle(context, 20);
@@ -121,8 +137,8 @@ final class PackedChunksTest {
 		results.add("chunks compared: " + same + ", with tints: " + tinted);
 		results.add("packed since the section began: " + packed + " chunks, " + (packed == 0 ? 0 : (stats1[1] - stats0[1]) / packed) + " bytes each, " + (packed == 0 ? 0 : (stats1[2] - stats0[2]) / packed / 1000) + " us each");
 		results.add("the compared chunks packed: " + bytes / before.length + " bytes each");
-		results.add("unpacked to compare: " + (stats2[3] - stats1[3]) + " chunks, " + (stats2[4] - stats1[4]) / Math.max(1, stats2[3] - stats1[3]) / 1000 + " us each; reading them all took " + readMs + " ms");
-		results.add("unpacked to draw the turned map: " + (stats3[3] - stats2[3]) + " chunks");
+		results.add("unpacked to compare: " + (stats2[3] - stats1b[3]) + " chunks, " + (stats2[4] - stats1b[4]) / Math.max(1, stats2[3] - stats1b[3]) / 1000 + " us each; reading them all took " + readMs + " ms");
+		results.add("unpacked to draw the turned map: " + (stats3[3] - stats2[3]) + " chunks; its tile over them has " + drawn + " pixels drawn");
 		for (String result : results) {
 			Diorama.LOGGER.info("PACKED-CHUNKS {}", result);
 		}
@@ -135,6 +151,9 @@ final class PackedChunksTest {
 		}
 		if (stats3[3] == stats2[3]) {
 			throw new AssertionError("Drawing the turned map over packed chunks unpacked none");
+		}
+		if (drawn == 0) {
+			throw new AssertionError("The turned map's tile " + turned + " over the packed chunks shows nothing");
 		}
 	}
 
@@ -154,6 +173,14 @@ final class PackedChunksTest {
 			}
 		}
 		return count;
+	}
+
+	private static void forget(ChunkSnapshot[] chunks) {
+		for (ChunkSnapshot chunk : chunks) {
+			if (chunk.isPacked()) {
+				chunk.forgetUnpacked();
+			}
+		}
 	}
 
 	/** The map's snapshots of the compared chunks. Client thread. */
@@ -191,7 +218,7 @@ final class PackedChunksTest {
 				ChunkSnapshot chunk = chunks[at];
 				long digest = 17;
 				for (int i = 0; i < chunk.sectionCount(); i++) {
-					PalettedContainer<BlockState> states = chunk.section(i);
+					ChunkSnapshot.Blocks states = chunk.section(i);
 					BlockState uniform = chunk.uniformSection(i);
 					digest = digest * 31 + (uniform == null ? -1 : Block.getId(uniform));
 					for (int y = 0; y < 16; y++) {

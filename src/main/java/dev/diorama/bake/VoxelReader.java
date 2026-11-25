@@ -6,7 +6,6 @@ import java.util.Arrays;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.PalettedContainer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -632,7 +631,7 @@ public final class VoxelReader {
 					}
 				} else if (section == BY_BLOCK && this.ids[index] == null) {
 					// Straight from the blocks, without numbering every block of the section.
-					PalettedContainer<BlockState> states = this.held().section(index);
+					ChunkSnapshot.Blocks states = this.held().section(index);
 					mask = new long[64];
 					BlockState last = null;
 					int f = 0;
@@ -789,9 +788,9 @@ public final class VoxelReader {
 		}
 
 		private Section read(int index) {
-			PalettedContainer<BlockState> states = this.held().section(index);
+			// Without reading the blocks: a packed snapshot unpacks them for the first section that needs them.
 			BlockState uniform = this.snapshot.uniformSection(index);
-			if (states == null && uniform == null) {
+			if (uniform == null && !this.snapshot.hasBlocks(index)) {
 				return AIR_SECTION;
 			}
 			ChunkSnapshot.SectionCopycats copycats = this.looks == null ? null : this.snapshot.copycats(index);
@@ -821,7 +820,7 @@ public final class VoxelReader {
 
 		/** Every block's id in a section with a container, looked up block by block. */
 		private int[] byBlock(int index) {
-			PalettedContainer<BlockState> states = this.held().section(index);
+			ChunkSnapshot.Blocks states = this.held().section(index);
 			int[] ids = new int[4096];
 			BlockState lastState = null;
 			int lastId = 0;
@@ -846,14 +845,14 @@ public final class VoxelReader {
 		 */
 		private int @Nullable [] paletteIds(ChunkSnapshot.Packed packed) {
 			int bits = packed.storage().getBits();
-			int size = packed.palette().getSize();
+			int size = packed.palette().length;
 			if (bits > 8 || size > 1 << bits) {
 				return null;
 			}
 			int[] ids = new int[1 << bits];
 			Arrays.fill(ids, AIR_ID);
 			for (int p = 0; p < size; p++) {
-				BlockState state = packed.palette().valueFor(p);
+				BlockState state = packed.palette()[p];
 				if (state != null) {
 					ids[p] = this.id(this.snapshot.turned(state));
 				}
