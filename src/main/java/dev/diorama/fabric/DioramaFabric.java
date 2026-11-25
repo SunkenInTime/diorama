@@ -11,6 +11,8 @@ import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.addon.Addons;
+import dev.diorama.api.DioramaAddon;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
@@ -21,6 +23,8 @@ import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
 import dev.diorama.waypoint.Waystones;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.loader.api.FabricLoader;
+import net.fabricmc.loader.api.entrypoint.EntrypointContainer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -47,6 +51,15 @@ public final class DioramaFabric implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		DioramaClient.init();
+		// Addons declare a "diorama" entrypoint, tied to the mod whose fabric.mod.json declares it.
+		// Nothing is loaded until Addons makes them.
+		Addons.finder(() -> {
+			java.util.List<Addons.Found> found = new java.util.ArrayList<>();
+			for (EntrypointContainer<DioramaAddon> container : FabricLoader.getInstance().getEntrypointContainers("diorama", DioramaAddon.class)) {
+				found.add(new Addons.Found(container.getProvider().getMetadata().getId(), container::getEntrypoint));
+			}
+			return found;
+		});
 		ShareClient.init();
 		// The payload type is registered on both sides, in DioramaFabricCommon.
 		//? if >=1.21 {

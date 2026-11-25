@@ -171,6 +171,11 @@ public final class MapSession {
 		return started;
 	}
 
+	/** For tests: ticks until fog-of-war progress is next saved, short of leaving. */
+	public int ticksToNextSeenSave() {
+		return 600 - this.ticks % 600;
+	}
+
 	/**
 	 * The world seed, which places slime chunks. Only known in singleplayer, and slime chunks
 	 * only exist in the overworld.
@@ -584,6 +589,8 @@ public final class MapSession {
 		Entity viewer = viewer();
 		if (viewer != null && this.ticks++ % 40 == 0) {
 			this.sweepLoadedChunks(viewer);
+			// One further than the sweep looks, so a chunk at the edge isn't packed and taken again.
+			this.map.packFar(viewer.blockPosition().getX() >> 4, viewer.blockPosition().getZ() >> 4, mc.options.renderDistance().get() + 3);
 		}
 		if (this.ticks % 600 == 0) {
 			this.map.saveSeen();

@@ -72,6 +72,13 @@ public final class MapLevel implements ChunkSource {
 			return thread;
 		}
 	);
+	/** Packs the snapshots of chunks the game has unloaded, see {@link #packFar}. */
+	private static final ExecutorService PACKER = Executors.newSingleThreadExecutor(task -> {
+		Thread thread = new Thread(task, "diorama-chunk-pack");
+		thread.setDaemon(true);
+		thread.setPriority(Thread.MIN_PRIORITY);
+		return thread;
+	});
 	/** Finds the ground under lights, beside the bakers: a tile bake never queues behind it. */
 	private static final ExecutorService SURFACES = Executors.newSingleThreadExecutor(task -> {
 		Thread thread = new Thread(task, "diorama-surface");
@@ -730,6 +737,24 @@ public final class MapLevel implements ChunkSource {
 		Dirty(long now) {
 			this.first = now;
 			this.last = now;
+		}
+	}
+
+	/**
+	 * Packs the snapshots further than {@code radius} chunks from the player's chunk: the game has
+	 * unloaded those chunks, so nothing replaces their snapshots, and they are only read again if
+	 * their tiles are redrawn. See {@link ChunkSnapshot#pack}. The client thread, now and then.
+	 */
+	public void packFar(int playerChunkX, int playerChunkZ, int radius) {
+		for (ChunkSnapshot snapshot : this.chunks.values()) {
+			if ((Math.abs(snapshot.chunkX - playerChunkX) > radius || Math.abs(snapshot.chunkZ - playerChunkZ) > radius) && snapshot.startPacking()) {
+				// One the map has replaced or dropped by then is left as it is.
+				PACKER.execute(() -> {
+					if (this.chunks.get(snapshot.key()) == snapshot) {
+						snapshot.pack();
+					}
+				});
+			}
 		}
 	}
 
@@ -1632,7 +1657,9 @@ public final class MapLevel implements ChunkSource {
 		if (this.memory != null) {
 			this.memory.close();
 		}
-		this.saveSeen();
+		if (this.folder != null && !this.savedOnly) {
+			this.seen.close(this.folder.resolve("seen.bin"));
+		}
 		for (MapTile tile : this.tiles.values()) {
 			tile.close();
 		}

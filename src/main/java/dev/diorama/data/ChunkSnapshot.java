@@ -36,13 +36,57 @@ public final class ChunkSnapshot {
 	public final int chunkX;
 	public final int chunkZ;
 	public final int minSectionY;
-	/** Block states per section, or null for sections that are only air or a single block. */
-	private final @Nullable PalettedContainer<BlockState>[] states;
+	/** The blocks of a section that has more than one block state. Read only. */
+	public interface Blocks {
+		/** The block at a place in the section, in the chunk's own layout. */
+		BlockState get(int x, int y, int z);
+
+		/** Whether any block of the section may pass; false means none does. */
+		boolean maybeHas(java.util.function.Predicate<BlockState> predicate);
+
+		/** See {@link ChunkSnapshot#packed}. */
+		@Nullable Packed packed();
+	}
+
+	/** A section's blocks in a copy of the game's own container. */
+	private record Copied(PalettedContainer<BlockState> states) implements Blocks {
+		@Override
+		public BlockState get(int x, int y, int z) {
+			return this.states.get(x, y, z);
+		}
+
+		@Override
+		public boolean maybeHas(java.util.function.Predicate<BlockState> predicate) {
+			return this.states.maybeHas(predicate);
+		}
+
+		@Override
+		public @Nullable Packed packed() {
+			return Sections.packed(this.states);
+		}
+	}
+
+	/**
+	 * What takes the memory: blocks per section (null for sections that are only air or a single
+	 * block) and light. Never changes once the snapshot is made. One that was packed also has the
+	 * blended tints the snapshot had by then, which went into the pack with it.
+	 */
+	record Body(@Nullable Blocks[] blocks, @Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, @Nullable Tints tints) {
+	}
+
+	/** Which sections have block states of their own: neither only air nor a single block. */
+	private final boolean[] mixed;
+	/** The blocks and light, until {@link #pack} packs them; a view reads its chunk's. */
+	private volatile @Nullable Body body;
+	/** The blocks and light packed; null until then. */
+	private volatile @Nullable ChunkPack pack;
+	/** The packed blocks and light as last unpacked, for as long as something still reads them. */
+	private volatile java.lang.ref.@Nullable WeakReference<Body> unpacked;
+	/** Set by the first {@link #startPacking}. */
+	private final java.util.concurrent.atomic.AtomicBoolean packing = new java.util.concurrent.atomic.AtomicBoolean();
 	/** The one block filling a section, for sections made of a single block. */
 	private final @Nullable BlockState[] uniform;
 	private final boolean hasSkyLight;
-	private final @Nullable DataLayer[] blockLight;
-	private final @Nullable DataLayer[] skyLight;
 	/**
 	 * How far from a column its blended tint reads biomes: the game's largest blend radius, 7, plus
 	 * the 5 blocks its biome lookup fuzzes positions by. Never further than a neighbouring chunk.
@@ -61,7 +105,10 @@ public final class ChunkSnapshot {
 	public final int blendRadius;
 	/** The biome the game assumes where no chunk is loaded. */
 	public final Holder<Biome> fallbackBiome;
-	/** Blended biome tints, worked out on a bake thread the first time a bake needs them. */
+	/**
+	 * Blended biome tints, worked out on a bake thread the first time a bake needs them. Those
+	 * worked out before the snapshot was packed are in the pack; see {@link #tints()}.
+	 */
 	private volatile @Nullable Tints tints;
 	/** Highest non-air block y, or {@code Integer.MIN_VALUE} when the chunk is empty. */
 	public final int maxY;
@@ -96,11 +143,9 @@ public final class ChunkSnapshot {
 		this.chunkX = facing.blockX(base.chunkX, base.chunkZ);
 		this.chunkZ = facing.blockZ(base.chunkX, base.chunkZ);
 		this.minSectionY = base.minSectionY;
-		this.states = base.states;
+		this.mixed = base.mixed;
 		this.uniform = base.uniform;
 		this.hasSkyLight = base.hasSkyLight;
-		this.blockLight = base.blockLight;
-		this.skyLight = base.skyLight;
 		this.biomes = base.biomes;
 		this.biomeZoomSeed = base.biomeZoomSeed;
 		this.blendRadius = base.blendRadius;
@@ -147,8 +192,8 @@ public final class ChunkSnapshot {
 		return out;
 	}
 
-	/** The block at a place in the view, from a section's {@link #section} container. */
-	public BlockState state(PalettedContainer<BlockState> states, int x, int y, int z) {
+	/** The block at a place in the view, from a section's {@link #section} blocks. */
+	public BlockState state(Blocks states, int x, int y, int z) {
 		return this.facing.turned(states.get(this.localX(x, z), y, this.localZ(x, z)));
 	}
 
@@ -171,7 +216,7 @@ public final class ChunkSnapshot {
 		this.chunkZ = chunk.getPos().z();
 		this.minSectionY = chunk.getMinSectionY();
 		LevelChunkSection[] sections = chunk.getSections();
-		this.states = new PalettedContainer[sections.length];
+		PalettedContainer<BlockState>[] ownStates = new PalettedContainer[sections.length];
 		this.uniform = new BlockState[sections.length];
 		// The game never writes into a section's biome container: new biomes arrive in a new one,
 		// swapped in. So holding the containers keeps the biomes as they are now, without copying.
@@ -193,8 +238,8 @@ public final class ChunkSnapshot {
 		this.blendRadius = Minecraft.getInstance().options.biomeBlendRadius().get();
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = level.dimensionType().hasSkyLight();
-		this.blockLight = new DataLayer[sections.length];
-		this.skyLight = new DataLayer[sections.length];
+		DataLayer[] blockLight = new DataLayer[sections.length];
+		DataLayer[] skyLight = new DataLayer[sections.length];
 		LevelLightEngine light = level.getLightEngine();
 		for (int i = 0; i < sections.length; i++) {
 			LevelChunkSection section = sections[i];
@@ -206,15 +251,17 @@ public final class ChunkSnapshot {
 				if (single != null) {
 					this.uniform[i] = single;
 				} else {
-					this.states[i] = states.copy();
+					ownStates[i] = states.copy();
 				}
 			}
 			SectionPos pos = SectionPos.of(this.chunkX, this.minSectionY + i, this.chunkZ);
 			DataLayer block = light.getLayerListener(LightLayer.BLOCK).getDataLayerData(pos);
 			DataLayer sky = light.getLayerListener(LightLayer.SKY).getDataLayerData(pos);
-			this.blockLight[i] = block == null ? null : block.copy();
-			this.skyLight[i] = sky == null ? null : sky.copy();
+			blockLight[i] = block == null ? null : block.copy();
+			skyLight[i] = sky == null ? null : sky.copy();
 		}
+		this.mixed = mixed(ownStates);
+		this.body = new Body(copied(ownStates), blockLight, skyLight, null);
 
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
@@ -246,7 +293,7 @@ public final class ChunkSnapshot {
 		this.chunkZ = chunk.getPos().z();
 		this.minSectionY = chunk.getMinSectionY();
 		LevelChunkSection[] sections = chunk.getSections();
-		this.states = new PalettedContainer[sections.length];
+		PalettedContainer<BlockState>[] ownStates = new PalettedContainer[sections.length];
 		this.uniform = new BlockState[sections.length];
 		for (int i = 0; full && i < sections.length; i++) {
 			LevelChunkSection section = sections[i];
@@ -256,17 +303,17 @@ public final class ChunkSnapshot {
 				if (single != null) {
 					this.uniform[i] = single;
 				} else {
-					this.states[i] = states.copy();
+					ownStates[i] = states.copy();
 				}
 			}
 		}
+		this.mixed = mixed(ownStates);
+		this.body = new Body(copied(ownStates), new DataLayer[sections.length], new DataLayer[sections.length], null);
 		this.biomes = new PalettedContainerRO[9][];
 		this.biomeZoomSeed = 0;
 		this.blendRadius = 0;
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = false;
-		this.blockLight = new DataLayer[sections.length];
-		this.skyLight = new DataLayer[sections.length];
 		int top = Integer.MIN_VALUE;
 		for (int z = 0; full && z < 16; z++) {
 			for (int x = 0; x < 16; x++) {
@@ -303,7 +350,7 @@ public final class ChunkSnapshot {
 		this.chunkZ = chunk.chunkZ();
 		this.minSectionY = level.getMinSectionY();
 		int count = chunk.states().length;
-		this.states = new PalettedContainer[count];
+		PalettedContainer<BlockState>[] ownStates = new PalettedContainer[count];
 		this.uniform = new BlockState[count];
 		for (int i = 0; i < count; i++) {
 			PalettedContainer<BlockState> states = chunk.states()[i];
@@ -311,7 +358,7 @@ public final class ChunkSnapshot {
 				// Read from the save for this snapshot alone: nothing else holds or changes it.
 				BlockState single = Sections.singleValue(states);
 				if (single == null) {
-					this.states[i] = states;
+					ownStates[i] = states;
 				} else if (!single.isAir()) {
 					this.uniform[i] = single;
 				}
@@ -327,8 +374,8 @@ public final class ChunkSnapshot {
 		this.blendRadius = blendRadius;
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = level.dimensionType().hasSkyLight();
-		this.blockLight = chunk.blockLight();
-		this.skyLight = chunk.skyLight();
+		this.mixed = mixed(ownStates);
+		this.body = new Body(copied(ownStates), chunk.blockLight(), chunk.skyLight(), null);
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
 		for (int i = 0; i < 256; i++) {
@@ -431,12 +478,129 @@ public final class ChunkSnapshot {
 		return new ChunkSnapshot(chunk, level);
 	}
 
-	public int sectionCount() {
-		return this.states.length;
+	private static @Nullable Blocks[] copied(@Nullable PalettedContainer<BlockState>[] states) {
+		Blocks[] blocks = new Blocks[states.length];
+		for (int i = 0; i < states.length; i++) {
+			blocks[i] = states[i] == null ? null : new Copied(states[i]);
+		}
+		return blocks;
 	}
 
-	public @Nullable PalettedContainer<BlockState> section(int index) {
-		return this.states[index];
+	private static boolean[] mixed(@Nullable PalettedContainer<BlockState>[] states) {
+		boolean[] mixed = new boolean[states.length];
+		for (int i = 0; i < states.length; i++) {
+			mixed[i] = states[i] != null;
+		}
+		return mixed;
+	}
+
+	/** The chunk's blocks and light, unpacked first if they were packed. Any thread. */
+	private Body body() {
+		ChunkSnapshot chunk = this.base != null ? this.base : this;
+		Body body = chunk.body;
+		return body != null ? body : chunk.unpackedBody();
+	}
+
+	private Body unpackedBody() {
+		java.lang.ref.WeakReference<Body> last = this.unpacked;
+		Body body = last == null ? null : last.get();
+		if (body != null) {
+			return body;
+		}
+		// One at a time, so bakes of neighbouring tiles that reach here together share one.
+		synchronized (this) {
+			last = this.unpacked;
+			body = last == null ? null : last.get();
+			if (body == null) {
+				body = this.pack.unpack(this.mixed);
+				this.unpacked = new java.lang.ref.WeakReference<>(body);
+			}
+			return body;
+		}
+	}
+
+	/**
+	 * The blocks and light, to keep a reference to while reading them: packed ones then stay
+	 * unpacked for as long, where otherwise they go with the next collection. Any thread.
+	 */
+	public Object hold() {
+		return this.body();
+	}
+
+	/**
+	 * Whether to pack this one, asked once it's far from every chunk the game has loaded: true the
+	 * first time, for a chunk itself with anything worth packing. The caller then has {@link #pack}
+	 * run on the packing thread.
+	 */
+	public boolean startPacking() {
+		return this.base == null && this.body != null && this.packing.compareAndSet(false, true);
+	}
+
+	/** Whether the blocks and light are packed. */
+	public boolean isPacked() {
+		return this.chunk().body == null;
+	}
+
+	/** The size of the packed blocks and light in bytes, 0 if they aren't packed. */
+	public int packedSize() {
+		ChunkPack pack = this.chunk().pack;
+		return pack == null ? 0 : pack.size();
+	}
+
+	/** Forgets the blocks and light as last unpacked, so the next read unpacks them again. For tests. */
+	public void forgetUnpacked() {
+		this.chunk().unpacked = null;
+	}
+
+	/** How many snapshots were packed and unpacked since the game started, and how long both took, for tests and the debug log. */
+	public static long[] packStats() {
+		return new long[] {ChunkPack.PACKED.get(), ChunkPack.PACKED_BYTES.get(), ChunkPack.PACK_NANOS.get(), ChunkPack.UNPACKED.get(), ChunkPack.UNPACK_NANOS.get()};
+	}
+
+	/**
+	 * Packs the blocks and light, about a seventh of their size, to be unpacked whenever something
+	 * reads them again: a redraw after the game has unloaded the chunk, which is rare. Whatever
+	 * reads them meanwhile keeps reading what it has. A chunk that can't be packed stays as it is;
+	 * see {@link ChunkPack}. The packing thread only, after {@link #startPacking}.
+	 */
+	public void pack() {
+		Body body = this.body;
+		if (body == null) {
+			return;
+		}
+		Tints tints = this.tints;
+		ChunkPack pack = ChunkPack.pack(body, tints);
+		if (pack == null) {
+			return;
+		}
+		// What the next snapshot here compares with: a chunk loaded anew, which bakes afresh anyway.
+		this.replaced = null;
+		// Views are cheap to make again, and hold tints of their own.
+		java.util.Arrays.fill(this.views, null);
+		this.pack = pack;
+		this.unpacked = new java.lang.ref.WeakReference<>(new Body(body.blocks(), body.blockLight(), body.skyLight(), tints));
+		// Last: a reader that finds no body finds the pack.
+		this.body = null;
+		// Only tints that are in the pack go. With none in it, a bake may be setting its own right
+		// now, and those have to stay. With some in it, a bake that set its own meanwhile blended
+		// the same biomes, and loses nothing to the ones in the pack.
+		if (tints != null) {
+			this.tints = null;
+		}
+	}
+
+	public int sectionCount() {
+		return this.mixed.length;
+	}
+
+	/** The section's blocks, or null for one that is only air or a single block. */
+	public @Nullable Blocks section(int index) {
+		return this.mixed[index] ? this.body().blocks()[index] : null;
+	}
+
+	/** Whether {@link #section} has blocks for the section, without reading them. */
+	public boolean hasBlocks(int index) {
+		return this.mixed[index];
 	}
 
 	public @Nullable BlockState uniformSection(int index) {
@@ -451,12 +615,12 @@ public final class ChunkSnapshot {
 	 * where the container can't be read that way. Read only.
 	 */
 	public @Nullable Packed packed(int index) {
-		PalettedContainer<BlockState> states = this.states[index];
-		return states == null ? null : Sections.packed(states);
+		Blocks blocks = this.section(index);
+		return blocks == null ? null : blocks.packed();
 	}
 
-	/** See {@link #packed}. */
-	public record Packed(net.minecraft.util.BitStorage storage, net.minecraft.world.level.chunk.Palette<BlockState> palette) {
+	/** See {@link #packed}. A place in the palette that nothing picks can be null. */
+	public record Packed(net.minecraft.util.BitStorage storage, @Nullable BlockState[] palette) {
 	}
 
 	/** {@link #columns} per facing, by turns. */
@@ -483,7 +647,7 @@ public final class ChunkSnapshot {
 	}
 
 	public int blockLight(int sectionIndex, int x, int y, int z) {
-		DataLayer layer = this.blockLight[sectionIndex];
+		DataLayer layer = this.body().blockLight()[sectionIndex];
 		return layer == null ? 0 : layer.get(this.localX(x, z), y, this.localZ(x, z));
 	}
 
@@ -494,15 +658,16 @@ public final class ChunkSnapshot {
 		int turnedX = x;
 		x = this.localX(turnedX, z);
 		z = this.localZ(turnedX, z);
-		DataLayer layer = this.skyLight[sectionIndex];
+		DataLayer[] skyLight = this.body().skyLight();
+		DataLayer layer = skyLight[sectionIndex];
 		if (layer != null) {
 			return layer.get(x, y, z);
 		}
 		// Same as vanilla: a section without stored sky light takes the bottom layer of the
 		// nearest stored section above it, and is fully lit if there is none.
-		for (int i = sectionIndex + 1; i < this.skyLight.length; i++) {
-			if (this.skyLight[i] != null) {
-				return this.skyLight[i].get(x, 0, z);
+		for (int i = sectionIndex + 1; i < skyLight.length; i++) {
+			if (skyLight[i] != null) {
+				return skyLight[i].get(x, 0, z);
 			}
 		}
 		return 15;
@@ -566,8 +731,8 @@ public final class ChunkSnapshot {
 
 	/** The bottom y of the lowest section with blocks in it, from the one holding {@code y} up; {@code y} if none has. */
 	public int firstSectionFrom(int y) {
-		for (int i = Math.max(0, (y >> 4) - this.minSectionY); i < this.states.length; i++) {
-			if (this.states[i] != null || this.uniform[i] != null) {
+		for (int i = Math.max(0, (y >> 4) - this.minSectionY); i < this.mixed.length; i++) {
+			if (this.mixed[i] || this.uniform[i] != null) {
 				return (this.minSectionY + i) << 4;
 			}
 		}
@@ -576,8 +741,8 @@ public final class ChunkSnapshot {
 
 	/** One above the highest section with blocks in it below the one holding {@code y}; {@code Integer.MIN_VALUE} if none has. */
 	public int lastSectionTopBelow(int y) {
-		for (int i = Math.min(this.states.length, (y >> 4) - this.minSectionY) - 1; i >= 0; i--) {
-			if (this.states[i] != null || this.uniform[i] != null) {
+		for (int i = Math.min(this.mixed.length, (y >> 4) - this.minSectionY) - 1; i >= 0; i--) {
+			if (this.mixed[i] || this.uniform[i] != null) {
 				return (this.minSectionY + i + 1) << 4;
 			}
 		}
@@ -590,9 +755,14 @@ public final class ChunkSnapshot {
 	}
 
 	public @Nullable Tints tints() {
-		if (this.tints == null && this.base != null && this.base.tints != null) {
+		if (this.base == null) {
+			Tints tints = this.tints;
+			// Packed with the blocks and light, and unpacked with them: a bake that asks reads those too.
+			return tints != null || this.body != null ? tints : this.body().tints();
+		}
+		Tints from = this.tints == null ? this.base.tints() : null;
+		if (from != null) {
 			// The chunk's own tints, turned, so every facing shows the same colours.
-			Tints from = this.base.tints;
 			this.tints = new Tints(this.turnedColumns(from.grass()), this.turnedColumns(from.foliage()), this.turnedColumns(from.dryFoliage()), this.turnedColumns(from.water()));
 		}
 		return this.tints;
@@ -674,21 +844,25 @@ public final class ChunkSnapshot {
 	 * palette indices with the same palette, the same column tops and no copycats.
 	 */
 	private boolean sameBlocks(ChunkSnapshot before) {
-		if (this.chunkX != before.chunkX || this.chunkZ != before.chunkZ
+		// Packed ones aren't unpacked to find out: the game has unloaded their chunk, and its next
+		// snapshot is of a chunk loaded anew.
+		Body body = this.body;
+		Body bodyBefore = before.body;
+		if (body == null || bodyBefore == null || this.chunkX != before.chunkX || this.chunkZ != before.chunkZ
 			|| this.minSectionY != before.minSectionY || this.copycats != null || before.copycats != null
-			|| this.states.length != before.states.length || !java.util.Arrays.equals(this.surface, before.surface)) {
+			|| this.mixed.length != before.mixed.length || !java.util.Arrays.equals(this.surface, before.surface)) {
 			return false;
 		}
-		for (int i = 0; i < this.states.length; i++) {
+		for (int i = 0; i < this.mixed.length; i++) {
 			if (this.uniform[i] != before.uniform[i]) {
 				return false;
 			}
-			PalettedContainer<BlockState> mine = this.states[i];
-			PalettedContainer<BlockState> theirs = before.states[i];
+			Blocks mine = body.blocks()[i];
+			Blocks theirs = bodyBefore.blocks()[i];
 			if (mine == theirs) {
 				continue;
 			}
-			if (mine == null || theirs == null || !samePacked(this.packed(i), before.packed(i))) {
+			if (mine == null || theirs == null || !samePacked(mine.packed(), theirs.packed())) {
 				return false;
 			}
 		}
@@ -699,12 +873,12 @@ public final class ChunkSnapshot {
 		if (a == null || b == null || a.storage().getBits() != b.storage().getBits() || a.storage().getSize() != b.storage().getSize()) {
 			return false;
 		}
-		int size = a.palette().getSize();
-		if (size != b.palette().getSize() || !java.util.Arrays.equals(a.storage().getRaw(), b.storage().getRaw())) {
+		int size = a.palette().length;
+		if (size != b.palette().length || !java.util.Arrays.equals(a.storage().getRaw(), b.storage().getRaw())) {
 			return false;
 		}
 		for (int p = 0; p < size; p++) {
-			if (a.palette().valueFor(p) != b.palette().valueFor(p)) {
+			if (a.palette()[p] != b.palette()[p]) {
 				return false;
 			}
 		}
