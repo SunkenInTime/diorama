@@ -1,0 +1,17 @@
+{
+	"schemaVersion": 1,
+	"id": "diorama_test_addon_unprintable",
+	"version": "${version}",
+	"name": "Diorama Test Addon (unprintable)",
+	"description": "Throws an exception whose message can't be read from onReady on purpose, for Diorama's game tests. Never released.",
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"diorama": [
+			"dev.diorama.testaddon.unprintable.UnprintableAddon"
+		]
+	},
+	"suggests": {
+		"diorama": "*"
+	}
+}

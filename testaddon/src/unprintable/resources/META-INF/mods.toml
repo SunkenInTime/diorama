@@ -1,0 +1,17 @@
+modLoader = "lowcodefml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon_unprintable"
+version = "${version}"
+displayName = "Diorama Test Addon (unprintable)"
+description = "Throws an exception whose message can't be read from onReady on purpose, for Diorama's game tests. Never released."
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.diorama_test_addon_unprintable]]
+modId = "diorama"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"

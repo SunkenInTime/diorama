@@ -5,7 +5,9 @@ import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -35,9 +37,9 @@ final class Addon implements DioramaApi, Hud {
 	}
 
 	/**
-	 * Calls into the addon. What it throws, an exception or a LinkageError (a class or method its
-	 * jar expected and didn't find), switches it off instead of reaching Diorama or other addons.
-	 * Null if it threw, or was already switched off.
+	 * Calls into the addon, its constructor included. Whatever it throws switches it off instead of
+	 * reaching Diorama or other addons, except what no addon can recover from ({@link #fatal}),
+	 * which goes on up. Null if it threw, or was already switched off.
 	 */
 	<T> @Nullable T call(String what, Callable<T> call) {
 		if (this.failed) {
@@ -45,8 +47,49 @@ final class Addon implements DioramaApi, Hud {
 		}
 		try {
 			return call.call();
-		} catch (Exception | LinkageError e) {
-			this.fail(what, e);
+		} catch (Throwable thrown) {
+			rethrowFatal(thrown);
+			this.fail(what, thrown);
+			return null;
+		}
+	}
+
+	/**
+	 * The JVM running out of memory or stack, or breaking ({@link VirtualMachineError}), or the
+	 * thread being stopped: not the addon's failure to recover from, so not caught. Looked for
+	 * through the causes too, since reflection wraps a constructor's (InvocationTargetException,
+	 * ExceptionInInitializerError) and Fabric wraps those again. Null for anything else.
+	 */
+	static @Nullable Error fatal(Throwable thrown) {
+		Map<Throwable, Boolean> seen = new IdentityHashMap<>();
+		for (Throwable at = thrown; at != null && seen.put(at, Boolean.TRUE) == null && seen.size() <= 32; at = causeOf(at)) {
+			if (isFatal(at)) {
+				return (Error) at;
+			}
+		}
+		return null;
+	}
+
+	@SuppressWarnings("removal")
+	private static boolean isFatal(Throwable thrown) {
+		return thrown instanceof VirtualMachineError || thrown instanceof ThreadDeath;
+	}
+
+	static void rethrowFatal(Throwable thrown) {
+		Error fatal = fatal(thrown);
+		if (fatal != null) {
+			throw fatal;
+		}
+	}
+
+	/** Its cause, or null if getCause() (the addon's to override) throws. */
+	private static @Nullable Throwable causeOf(Throwable thrown) {
+		try {
+			return thrown.getCause();
+		} catch (Throwable unreadable) {
+			if (isFatal(unreadable)) {
+				throw (Error) unreadable;
+			}
 			return null;
 		}
 	}
@@ -58,7 +101,69 @@ final class Addon implements DioramaApi, Hud {
 		}
 		this.failed = true;
 		this.releaseAll();
-		Diorama.LOGGER.error("Diorama addon {} failed in {} and is switched off until the game restarts: {}", this.modId, what, cause.toString(), cause);
+		log(this.modId, what, cause);
+	}
+
+	/**
+	 * One ERROR line naming the addon, with the stack trace under it. The throwable is the addon's,
+	 * and its toString() or getMessage() can throw, here or as the logger prints it, so it is logged
+	 * as it is only if they can be read, and otherwise as a stand-in with its class and stack. Nothing
+	 * thrown while logging gets out of here, apart from {@link #fatal} errors.
+	 */
+	private static void log(String modId, String what, Throwable cause) {
+		String message = "Diorama addon {} failed in {} and is switched off until the game restarts: {}";
+		try {
+			String described = describe(cause);
+			Throwable printed = readable(cause) ? cause : standIn(cause, described);
+			Diorama.LOGGER.error(message, modId, what, described, printed);
+		} catch (Throwable logging) {
+			rethrowFatal(logging);
+			try {
+				Diorama.LOGGER.error(message, modId, what, cause.getClass().getName());
+			} catch (Throwable again) {
+				rethrowFatal(again);
+			}
+		}
+	}
+
+	/** toString(), or the class name and why that couldn't be read. */
+	private static String describe(Throwable thrown) {
+		try {
+			return String.valueOf(thrown);
+		} catch (Throwable unreadable) {
+			rethrowFatal(unreadable);
+			return thrown.getClass().getName() + " (its message couldn't be read: " + unreadable.getClass().getName() + ")";
+		}
+	}
+
+	/** Whether the logger can print it and its causes without one of them throwing. */
+	private static boolean readable(Throwable thrown) {
+		Map<Throwable, Boolean> seen = new IdentityHashMap<>();
+		try {
+			for (Throwable at = thrown; at != null && seen.put(at, Boolean.TRUE) == null; at = at.getCause()) {
+				at.toString();
+				at.getLocalizedMessage();
+				at.getStackTrace();
+				for (Throwable suppressed : at.getSuppressed()) {
+					suppressed.toString();
+				}
+			}
+			return true;
+		} catch (Throwable unreadable) {
+			rethrowFatal(unreadable);
+			return false;
+		}
+	}
+
+	/** A plain Throwable saying what it was, with its stack where that can be read. */
+	private static Throwable standIn(Throwable thrown, String described) {
+		Throwable standIn = new Throwable(described);
+		try {
+			standIn.setStackTrace(thrown.getStackTrace());
+		} catch (Throwable unreadable) {
+			rethrowFatal(unreadable);
+		}
+		return standIn;
 	}
 
 	boolean failed() {

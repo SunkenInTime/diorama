@@ -2,9 +2,13 @@
 // outside mod would be: nothing from Minecraft, a mod loader or Diorama's own code is on their
 // classpath. Each jar is one mod with metadata for Fabric, NeoForge and Forge, found on Fabric
 // through its diorama entrypoint and on NeoForge and Forge through @DioramaEntrypoint.
-//   diorama-test-addon.jar          works, and lets the test hide and show Diorama's HUD through it
-//   diorama-test-addon-broken.jar   hides the minimap, then throws from onReady
-//   diorama-test-addon-linkage.jar  hides the minimap, then calls a class its jar doesn't have
+//   diorama-test-addon.jar              works, and lets the test hide and show Diorama's HUD through
+//                                       it; it also has a class marked @DioramaEntrypoint by mistake
+//   diorama-test-addon-broken.jar       hides the minimap, then throws from onReady
+//   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
+//   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError
+//   diorama-test-addon-unprintable.jar  hides the minimap, then throws an exception whose
+//                                       toString() throws
 // ./gradlew :testaddon:assemble puts them in testaddon/build/libs; boat_run.py --mods takes that
 // folder (docs/development.md). Never released.
 plugins {
@@ -21,9 +25,12 @@ val broken = sourceSets.create("broken")
 // newer library would be.
 val missing = sourceSets.create("missing")
 val linkage = sourceSets.create("linkage")
+val assertion = sourceSets.create("assertion")
+val unprintable = sourceSets.create("unprintable")
+val addons = listOf(main, broken, linkage, assertion, unprintable)
 
 dependencies {
-	for (set in listOf(main, broken, linkage)) {
+	for (set in addons) {
 		add(set.compileOnlyConfigurationName, project(":api"))
 	}
 	add(linkage.compileOnlyConfigurationName, missing.output)
@@ -34,7 +41,7 @@ tasks.withType<JavaCompile>().configureEach {
 	options.encoding = "UTF-8"
 }
 
-for (set in listOf(main, broken, linkage)) {
+for (set in addons) {
 	tasks.named<ProcessResources>(set.processResourcesTaskName) {
 		// Local to the task, which the configuration cache keeps; a script-level value it can't.
 		val props = mapOf("version" to "1.0.0")
@@ -48,7 +55,7 @@ for (set in listOf(main, broken, linkage)) {
 tasks.named<Jar>("jar") {
 	archiveFileName = "diorama-test-addon.jar"
 }
-for ((set, name) in listOf(broken to "broken", linkage to "linkage")) {
+for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable")) {
 	val jar = tasks.register<Jar>("${name}Jar") {
 		from(set.output)
 		archiveFileName = "diorama-test-addon-$name.jar"

@@ -9,8 +9,10 @@ import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
 import dev.diorama.testaddon.TestAddon;
+import dev.diorama.testaddon.assertion.AssertionAddon;
 import dev.diorama.testaddon.broken.BrokenAddon;
 import dev.diorama.testaddon.linkage.LinkageAddon;
+import dev.diorama.testaddon.unprintable.UnprintableAddon;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointStore;
 import java.awt.image.BufferedImage;
@@ -30,27 +32,59 @@ import net.minecraft.core.BlockPos;
 /**
  * Diorama's API for other mods ({@code addon-api}), driven through the test addons in testaddon/,
  * which only know the API. Needs their jars installed: boat_run.py --mods testaddon/build/libs
- * after ./gradlew :testaddon:assemble. The good addon was found and told it's ready once, on the
- * client thread; hiding the minimap through it takes the minimap off the screen without touching
- * the settings or their file, two holders stack, and each part shows again once both let go; the
- * waypoints in the world hide the same way; the placing screen still shows the minimap; calls from
- * another thread throw; the addon that throws and the one missing a class were switched off once
- * each, with a log line naming them, and what they hid shows again; and a handle held when the
- * player leaves is let go ({@link #reopened}).
+ * after ./gradlew :testaddon:assemble. At the title screen ({@link #titleScreen}): the good addon
+ * was found and told it's ready once, on the client thread; the four that fail (one throws, one is
+ * missing a class, one fails an assertion, one throws an exception whose toString() throws) were
+ * switched off once each, with a log line naming them, and their handles closed; a class marked by
+ * mistake was turned down without running. The handle the good addon took at the title screen
+ * still holds in the first world ({@link #firstWorld}). In that world ({@link #run}), hiding the
+ * minimap takes it off the screen without touching the settings or their file, two holders stack,
+ * and each part shows again once both let go; the waypoints in the world hide the same way; the
+ * placing screen still shows the minimap; calls from another thread throw. Leaving the world lets
+ * go of a handle still held ({@link #left}), and it stays closed in the reopened world
+ * ({@link #reopened}).
  */
 final class AddonApiTest {
 	/** A colour no block uses, to find the waypoint's pin in the world by. */
 	private static final int PIN = 0xFF00FF;
-	/** Held as the world closes, to check after rejoining that leaving let go of it. */
+	/** Held as the world closes, to check after leaving that leaving let go of it. */
 	private static Handle heldWhileLeaving;
 
 	private AddonApiTest() {
 	}
 
-	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+	/** Before any world: the addons were found, and the failing ones switched off and cleaned up. */
+	static void titleScreen(ClientGameTestContext context) {
 		found(context);
+		if (context.computeOnClient(mc -> TestAddon.fromReady() == null || !TestAddon.fromReady().isOpen() || !HudHides.minimapHidden())) {
+			throw new AssertionError("The handle the test addon took in onReady isn't holding at the title screen");
+		}
 		failures(context);
+		notAnAddon(context);
+	}
 
+	/**
+	 * In the first world, with the map warmed up: the handle onReady took at the title screen still
+	 * holds, and once it closes nothing hides the minimap, so the failed addons' hides are gone too.
+	 */
+	static void firstWorld(ClientGameTestContext context) {
+		context.waitTicks(2);
+		context.takeScreenshot("addon-api-00-first-world");
+		boolean open = context.computeOnClient(mc -> TestAddon.fromReady().isOpen());
+		boolean drawn = context.computeOnClient(mc -> MinimapHud.shown() != null);
+		if (!open || drawn) {
+			throw new AssertionError("In the first world, the handle onReady took at the title screen is " + (open ? "open" : "closed")
+				+ " and the minimap " + (drawn ? "drawn" : "not drawn"));
+		}
+		context.runOnClient(mc -> TestAddon.fromReady().close());
+		context.waitTicks(2);
+		if (context.computeOnClient(mc -> HudHides.minimapHidden() || MinimapHud.shown() == null)) {
+			throw new AssertionError("The minimap isn't drawn after closing the handle onReady took");
+		}
+		Diorama.LOGGER.info("addon-api: the handle onReady took at the title screen held into the first world");
+	}
+
+	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
 		world.getServer().runCommand("weather clear");
 		context.setScreen(() -> null);
@@ -87,6 +121,21 @@ final class AddonApiTest {
 		}
 	}
 
+	/** At the title screen after leaving the world with a handle held, before opening another: it was let go. */
+	static void left(ClientGameTestContext context) {
+		if (heldWhileLeaving == null) {
+			throw new AssertionError("addon-api didn't run in the first world");
+		}
+		context.waitTicks(2);
+		boolean open = context.computeOnClient(mc -> heldWhileLeaving.isOpen());
+		boolean hidden = context.computeOnClient(mc -> HudHides.minimapHidden());
+		if (open || hidden) {
+			throw new AssertionError("After leaving the world with a handle held, before opening another: handle " + (open ? "still open" : "closed")
+				+ ", minimap " + (hidden ? "still hidden by addons" : "not hidden"));
+		}
+		Diorama.LOGGER.info("addon-api: leaving the world let go of the handle");
+	}
+
 	/** After leaving with a handle held and opening the world again: the minimap is back. */
 	static void reopened(ClientGameTestContext context) {
 		if (heldWhileLeaving == null) {
@@ -103,7 +152,7 @@ final class AddonApiTest {
 		}
 		// Closing it now does nothing, as for any closed handle.
 		context.runOnClient(mc -> heldWhileLeaving.close());
-		Diorama.LOGGER.info("addon-api: leaving the world let go of the handle, and the minimap is back after rejoining");
+		Diorama.LOGGER.info("addon-api: the handle is still closed and the minimap is back after rejoining");
 	}
 
 	private static void found(ClientGameTestContext context) {
@@ -120,29 +169,65 @@ final class AddonApiTest {
 		Diorama.LOGGER.info("addon-api: found {} through {}, onReady once on {}, API {}", modId, loader(), thread, version);
 	}
 
-	/** The broken and linkage addons: switched off, once each, and what they hid shows again. */
+	/**
+	 * The addons that fail in onReady, at the title screen: each switched off once, with one log
+	 * line, and the handle it took first closed. That they all got as far as hiding, beside the good
+	 * addon's onReady, says one failing didn't stop the others loading.
+	 */
 	private static void failures(ClientGameTestContext context) {
-		boolean brokenHeld = context.computeOnClient(mc -> BrokenAddon.held() != null && BrokenAddon.held().isOpen());
-		boolean linkageHeld = context.computeOnClient(mc -> LinkageAddon.held() != null && LinkageAddon.held().isOpen());
-		if (context.computeOnClient(mc -> BrokenAddon.held() == null || LinkageAddon.held() == null)) {
-			throw new AssertionError("The broken or linkage test addon never got as far as hiding the minimap: is it installed?");
+		if (context.computeOnClient(mc -> BrokenAddon.held() == null || LinkageAddon.held() == null || AssertionAddon.held() == null || UnprintableAddon.held() == null)) {
+			throw new AssertionError("A failing test addon never got as far as hiding the minimap: is it installed?");
 		}
-		if (brokenHeld || linkageHeld || context.computeOnClient(mc -> HudHides.minimapHidden())) {
-			throw new AssertionError("A failed addon still hides the minimap: broken " + brokenHeld + ", linkage " + linkageHeld);
+		boolean brokenHeld = context.computeOnClient(mc -> BrokenAddon.held().isOpen());
+		boolean linkageHeld = context.computeOnClient(mc -> LinkageAddon.held().isOpen());
+		boolean assertionHeld = context.computeOnClient(mc -> AssertionAddon.held().isOpen());
+		boolean unprintableHeld = context.computeOnClient(mc -> UnprintableAddon.held().isOpen());
+		if (brokenHeld || linkageHeld || assertionHeld || unprintableHeld) {
+			throw new AssertionError("A failed addon's handle is still open at the title screen: broken " + brokenHeld + ", linkage " + linkageHeld
+				+ ", assertion " + assertionHeld + ", unprintable " + unprintableHeld);
 		}
 		// Switched off, its later calls do nothing.
 		Handle late = context.computeOnClient(mc -> BrokenAddon.api().hud().hide(EnumSet.of(Hud.Part.MINIMAP)));
-		if (context.computeOnClient(mc -> late.isOpen() || HudHides.minimapHidden())) {
+		if (context.computeOnClient(mc -> late.isOpen())) {
 			throw new AssertionError("The broken addon hid the minimap again after it was switched off");
 		}
-		String log = context.computeOnClient(mc -> text(mc.gameDirectory.toPath().resolve("logs/latest.log")));
+		String log = log(context);
 		long broken = lines(log, "Diorama addon diorama_test_addon_broken failed");
 		long linkage = lines(log, "Diorama addon diorama_test_addon_linkage failed");
+		long assertion = lines(log, "Diorama addon diorama_test_addon_assertion failed");
+		long unprintable = lines(log, "Diorama addon diorama_test_addon_unprintable failed");
 		boolean linkageCause = log.contains("NoClassDefFoundError: dev/diorama/testaddon/linkage/MissingClass");
-		if (broken != 1 || linkage != 1 || !linkageCause) {
-			throw new AssertionError("Log lines for the failed addons: broken " + broken + ", linkage " + linkage + ", linkage's cause named " + linkageCause);
+		boolean assertionCause = log.contains("AssertionError: Diorama test addon: an assertion failed on purpose");
+		boolean unprintableCause = log.contains("UnprintableAddon$Unreadable (its message couldn't be read: java.lang.IllegalStateException)");
+		if (broken != 1 || linkage != 1 || assertion != 1 || unprintable != 1 || !linkageCause || !assertionCause || !unprintableCause) {
+			throw new AssertionError("Log lines for the failed addons: broken " + broken + ", linkage " + linkage + ", assertion " + assertion
+				+ ", unprintable " + unprintable + "; causes named: linkage " + linkageCause + ", assertion " + assertionCause + ", unprintable " + unprintableCause);
 		}
-		Diorama.LOGGER.info("addon-api: the broken and linkage addons were each switched off with one log line, and their handles closed");
+		Diorama.LOGGER.info("addon-api: the broken, linkage, assertion and unprintable addons were each switched off with one log line, and their handles closed");
+	}
+
+	/**
+	 * The class marked @DioramaEntrypoint that isn't an addon: on NeoForge and Forge turned down
+	 * with a log line, without its static initialiser or constructor running. Fabric only reads
+	 * entrypoints, and the test addon declares none for it.
+	 */
+	private static void notAnAddon(ClientGameTestContext context) {
+		boolean initialised = System.getProperty("diorama.testaddon.notaddon.initialised") != null;
+		boolean made = System.getProperty("diorama.testaddon.notaddon.made") != null;
+		// The ERROR line itself, not the stack trace's first line under it.
+		long turnedDown = log(context).lines()
+			.filter(line -> line.contains("Diorama addon diorama_test_addon failed") && line.contains("dev.diorama.testaddon.NotAnAddon doesn't implement dev.diorama.api.DioramaAddon"))
+			.count();
+		//? if fabric {
+		long expected = 0;
+		//?} else {
+		/*long expected = 1;
+		*///?}
+		if (initialised || made || turnedDown != expected) {
+			throw new AssertionError("The class marked by mistake: static initialiser ran " + initialised + ", constructor ran " + made
+				+ ", turned down in " + turnedDown + " log lines (expected " + expected + ")");
+		}
+		Diorama.LOGGER.info("addon-api: the class marked by mistake was turned down in {} log lines without running", turnedDown);
 	}
 
 	private static void hiding(ClientGameTestContext context) {
@@ -166,6 +251,7 @@ final class AddonApiTest {
 		if (!has(world(hidden), PIN)) {
 			throw new AssertionError("Hiding the minimap took the waypoint in the world with it");
 		}
+		sameFile(config, before, "with a handle on the minimap");
 
 		Handle second = context.computeOnClient(mc -> TestAddon.hide(Hud.Part.MINIMAP, Hud.Part.WORLD_WAYPOINTS));
 		context.waitTicks(2);
@@ -174,6 +260,7 @@ final class AddonApiTest {
 		if (has(world(both), PIN)) {
 			throw new AssertionError("The waypoint is still drawn in the world with a handle hiding waypoints in the world");
 		}
+		sameFile(config, before, "with two handles");
 
 		// The first lets go, twice: closing a closed handle does nothing. The second still holds both parts.
 		context.runOnClient(mc -> {
@@ -195,12 +282,20 @@ final class AddonApiTest {
 			throw new AssertionError("The waypoint isn't drawn in the world again after both handles closed");
 		}
 
-		byte[] after = bytes(config);
+		sameFile(config, before, "after both handles closed");
 		boolean settingsKept = context.computeOnClient(mc -> Settings.get().minimap == minimapSetting && Settings.get().waypointsInWorld == waypointsSetting);
-		if (!Arrays.equals(before, after) || !settingsKept) {
-			throw new AssertionError("Hiding changed the settings: config.json " + (Arrays.equals(before, after) ? "the same" : "changed") + ", settings " + (settingsKept ? "kept" : "changed"));
+		if (!settingsKept) {
+			throw new AssertionError("Hiding changed the minimap or waypointsInWorld setting");
 		}
-		Diorama.LOGGER.info("addon-api: hidden and shown again, two handles stacked, config.json byte for byte the same ({} bytes)", after.length);
+		Diorama.LOGGER.info("addon-api: hidden and shown again, two handles stacked, config.json byte for byte the same with handles held and after ({} bytes)", before.length);
+	}
+
+	/** config.json on disk is byte for byte what it was before any handle. */
+	private static void sameFile(Path config, byte[] before, String when) {
+		byte[] now = bytes(config);
+		if (!Arrays.equals(before, now)) {
+			throw new AssertionError("config.json changed " + when + ": " + before.length + " bytes before any handle, " + now.length + " now");
+		}
 	}
 
 	/** While the player places the minimap, it shows even with a handle hiding it. */
@@ -293,6 +388,10 @@ final class AddonApiTest {
 		//?} else {
 		/*return "@DioramaEntrypoint in the mod file scan";
 		*///?}
+	}
+
+	private static String log(ClientGameTestContext context) {
+		return context.computeOnClient(mc -> text(mc.gameDirectory.toPath().resolve("logs/latest.log")));
 	}
 
 	private static long lines(String log, String text) {

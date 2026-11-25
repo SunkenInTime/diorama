@@ -17,6 +17,7 @@ public final class TestAddon implements DioramaAddon {
 	private static DioramaApi api;
 	private static int readyCalls;
 	private static String readyThread = "";
+	private static Handle fromReady;
 
 	static {
 		// Read by the scenario that runs the game without Diorama: nothing should load this class there.
@@ -28,6 +29,8 @@ public final class TestAddon implements DioramaAddon {
 		TestAddon.api = api;
 		readyCalls++;
 		readyThread = Thread.currentThread().getName();
+		// Taken at the title screen and kept: it should still hold in the first world.
+		fromReady = api.hud().hide(EnumSet.of(Hud.Part.MINIMAP));
 		System.out.println("Diorama test addon: ready as " + api.modId() + " on API " + api.apiVersion());
 	}
 
@@ -44,6 +47,11 @@ public final class TestAddon implements DioramaAddon {
 	/** The thread Diorama called onReady on. */
 	public static String readyThread() {
 		return readyThread;
+	}
+
+	/** The handle onReady took on the minimap, at the title screen. */
+	public static Handle fromReady() {
+		return fromReady;
 	}
 
 	/** Hides these parts through this addon's API. */

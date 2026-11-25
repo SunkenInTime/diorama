@@ -14,10 +14,12 @@ package dev.diorama.api;
  * an addon that only optionally supports Diorama needs no reflection: keep every reference to
  * {@code dev.diorama.api} inside this class and the classes only it uses.
  *
- * <p>An exception or {@link LinkageError} thrown from the constructor or from any call Diorama
- * makes into the addon switches the addon off for the rest of the session: what it hid shows
- * again, later calls it makes do nothing, and Diorama logs the failure once with its mod ID. Other
- * addons and Diorama itself carry on.
+ * <p>Anything thrown from the constructor or from any call Diorama makes into the addon switches
+ * the addon off for the rest of the session: what it hid shows again, later calls it makes do
+ * nothing, and Diorama logs the failure once with its mod ID. Other addons and Diorama itself
+ * carry on. The exceptions are errors no addon can recover from, the JVM's own
+ * ({@link VirtualMachineError}, such as running out of memory) and {@code ThreadDeath}, which
+ * Diorama lets through.
  */
 public interface DioramaAddon {
 	/**

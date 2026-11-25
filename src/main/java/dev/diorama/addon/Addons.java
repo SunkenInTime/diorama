@@ -63,7 +63,15 @@ public final class Addons {
 			Diorama.LOGGER.warn("Skipped Diorama addon {}: its jar declares {} mods ({}), so it can't be told which one it belongs to", className, fileMods.size(), String.join(", ", fileMods));
 			return null;
 		}
-		return new Found(fileMods.get(0), () -> Class.forName(className).getDeclaredConstructor().newInstance());
+		return new Found(fileMods.get(0), () -> {
+			// Loaded without running any of its code, so a class marked by mistake is turned down
+			// before its static initialiser or constructor can do anything.
+			Class<?> type = Class.forName(className, false, Addons.class.getClassLoader());
+			if (!DioramaAddon.class.isAssignableFrom(type)) {
+				throw new ClassCastException(className + " doesn't implement " + DioramaAddon.class.getName());
+			}
+			return type.getDeclaredConstructor().newInstance();
+		});
 	}
 
 	/** How this loader finds addons; set once, by its entrypoint. */
@@ -94,7 +102,7 @@ public final class Addons {
 		for (Found one : found) {
 			Addon addon = new Addon(one.modId());
 			ADDONS.add(addon);
-			Object made = addon.call("its constructor", one.create());
+			Object made = addon.call("its entrypoint", one.create());
 			if (made == null) {
 				continue;
 			}
@@ -122,9 +130,17 @@ public final class Addons {
 		});
 	}
 
-	/** The player left the world: every addon lets go of what it held. */
+	/**
+	 * The player left the world: every addon lets go of what it held. Forge and NeoForge also send
+	 * their leave event while a singleplayer world is being made, before anyone has joined it; with
+	 * no world to leave that changes nothing, so a handle taken at the title screen lasts into the
+	 * first world.
+	 */
 	public static void left() {
 		onClientThread(() -> {
+			if (!inWorld) {
+				return;
+			}
 			inWorld = false;
 			releaseAll();
 		});
