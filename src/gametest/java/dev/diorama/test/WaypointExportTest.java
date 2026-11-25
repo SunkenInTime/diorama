@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import dev.diorama.Maps;
 import dev.diorama.Settings;
 import dev.diorama.waypoint.Waypoint;
 import dev.diorama.waypoint.WaypointExport;
@@ -136,7 +137,7 @@ final class WaypointExportTest {
 
 	/**
 	 * The rule that keeps every file inside the export: a dimension's folder and a map's file are
-	 * one name each, with no way out, and no name is longer than a file system allows.
+	 * one name each, with no way out.
 	 */
 	private static void containment() {
 		Path world = Path.of("export-check", "waypoints_x", "World");
@@ -148,15 +149,12 @@ final class WaypointExportTest {
 		} catch (IOException e) {
 			throw new AssertionError("An ordinary file was refused", e);
 		}
-		// A save folder named Home and 64 underscores: Xaero's escapes it to 260 characters.
-		String longWorld = XaeroImport.singleplayerFolders("Home" + "_".repeat(64)).get(0);
 		List<String[]> refused = List.of(
 			new String[] {"export-check/waypoints_x/World", "dim%0", "cm$../../../../escape_Map.txt"},
 			new String[] {"export-check/waypoints_x/World", "dim%0", "cm$a/b_Map.txt"},
 			new String[] {"export-check/waypoints_x/World", "..", "waypoints.txt"},
 			new String[] {"export-check/waypoints_x/World", "dim%0/../..", "waypoints.txt"},
-			new String[] {"export-check/waypoints_x/World", "dim%0", Path.of("escape.txt").toAbsolutePath().toString()},
-			new String[] {"export-check/waypoints_x/" + longWorld, "dim%0", "waypoints.txt"});
+			new String[] {"export-check/waypoints_x/World", "dim%0", Path.of("escape.txt").toAbsolutePath().toString()});
 		for (String[] c : refused) {
 			try {
 				Path got = WaypointExport.within(Path.of(c[0]), c[1], c[2]);
@@ -168,42 +166,63 @@ final class WaypointExportTest {
 	}
 
 	/**
-	 * A hand-edited waypoint file whose map ID leads out of the export: the export fails and says
-	 * so, after the Overworld's ordinary file was already written, and leaves no folder behind.
+	 * Exports that must fail, and say so, and leave nothing: a hand-edited waypoint file whose map ID
+	 * leads out of the export on a server, where map IDs name the files, after the Overworld's
+	 * ordinary file was already written; and a save folder named Home and 64 underscores, which
+	 * Xaero's escapes to a 260-character name no file system takes. A test can't name its world or
+	 * be on a server and in singleplayer at once, so both go through {@link WaypointExport#run(String, boolean)}.
 	 */
 	private static void refusesEscape(ClientGameTestContext context) {
 		Path exports = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("diorama").resolve("exports"));
+		Path diorama = exports.getParent();
 		Set<Path> before = folders(exports);
-		Waypoint bad = new Waypoint("Escape", 1, 64, 1, OVERWORLD, Waypoint.PALETTE[0]);
+		// The first makes a real cm$ folder in the dimension's; the second climbs out through it,
+		// past the world's folder and the export's, into the exports folder. Without a folder to
+		// pass through, the write would fail anyway, whatever the check said.
+		Waypoint step = new Waypoint("Step", 1, 64, 1, OVERWORLD, Waypoint.PALETTE[0]);
+		Waypoint bad = new Waypoint("Escape", 2, 64, 2, OVERWORLD, Waypoint.PALETTE[0]);
 		context.runOnClient(mc -> {
+			WaypointStore.get().add(step);
 			WaypointStore.get().add(bad);
 			// After add, which notes the map in use: as if waypoints.json said so.
-			bad.map = "../../../../escape";
+			step.map = "/x";
+			bad.map = "/../../../../escape";
 		});
-		context.setScreen(() -> new WaypointListScreen(null));
-		context.waitTicks(5);
-		DioramaClientTest.clickWidget(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Export waypoints")));
-		context.getInput().setCursorPos(0, 0);
-		context.waitTicks(5);
+		WaypointExport.Told escape = context.computeOnClient(mc -> WaypointExport.run(null, false));
+		context.waitTicks(2);
 		context.takeScreenshot("waypoint-export-6-refused");
-		context.setScreen(() -> null);
-		context.runOnClient(mc -> WaypointStore.get().remove(bad));
+		context.runOnClient(mc -> {
+			WaypointStore.get().remove(step);
+			WaypointStore.get().remove(bad);
+		});
 		String notice = context.computeOnClient(mc -> lastChat(mc));
-		if (!notice.startsWith("Couldn't export the waypoints: ")) {
+		if (escape.done() || !notice.startsWith("Couldn't export the waypoints: ")) {
 			throw new AssertionError("A map ID leading out of the export should fail it; chat says " + notice);
 		}
-		Set<Path> after = folders(exports);
-		if (!after.equals(before)) {
-			throw new AssertionError("A failed export left " + after.stream().filter(p -> !before.contains(p)).toList());
-		}
-		Path diorama = exports.getParent();
-		try (Stream<Path> files = Files.walk(diorama.getParent(), 3)) {
+		assertNothingLeft(exports, before, "A map ID leading out of the export");
+		try (Stream<Path> files = Files.walk(diorama)) {
 			List<Path> escaped = files.filter(p -> p.getFileName().toString().startsWith("escape")).toList();
 			if (!escaped.isEmpty()) {
 				throw new AssertionError("The export wrote outside its folder: " + escaped);
 			}
 		} catch (IOException e) {
 			throw new AssertionError(e);
+		}
+
+		String longWorld = XaeroImport.singleplayerFolders("Home" + "_".repeat(64)).get(0);
+		WaypointExport.Told tooLong = context.computeOnClient(mc -> WaypointExport.run(longWorld, true));
+		notice = context.computeOnClient(mc -> lastChat(mc));
+		dev.diorama.Diorama.LOGGER.info("waypoint-export: a {}-character world folder: {}", longWorld.length(), notice);
+		if (tooLong.done() || !notice.startsWith("Couldn't export the waypoints: ")) {
+			throw new AssertionError("A world folder too long for a file should fail the export; chat says " + notice);
+		}
+		assertNothingLeft(exports, before, "A world folder too long for a file");
+	}
+
+	private static void assertNothingLeft(Path exports, Set<Path> before, String what) {
+		Set<Path> after = folders(exports);
+		if (!after.equals(before)) {
+			throw new AssertionError(what + " left " + after.stream().filter(p -> !before.contains(p)).toList());
 		}
 	}
 
@@ -212,17 +231,52 @@ final class WaypointExportTest {
 	private static List<Expected> forXaeroExpected = List.of();
 
 	/**
-	 * With Xaero's Minimap installed (opt-in: {@code waypoint-export-xaero}): the same waypoints
-	 * exported with the button. Between the visits the export goes over the files Xaero's saved for
+	 * With Xaero's Minimap installed (opt-in: {@code waypoint-export-xaero}): the same waypoints,
+	 * and two more maps in the Overworld with one waypoint each, exported with the button. The map
+	 * in use is in Xaero's layout and each other map is a world folder of its own in
+	 * {@code Other maps}. Between the visits the world's folder goes over the files Xaero's saved for
 	 * this world on leaving ({@link #intoXaero}), and on the next visit Xaero's own code has read
-	 * every line of it ({@link #readByXaero}).
+	 * every line of it into the one world it opens, and nothing else ({@link #readByXaero}).
 	 */
 	static void forXaero(ClientGameTestContext context, TestSingleplayerContext world) {
 		// Xaero's sets up its world a few ticks after joining; it never does without Xaero's installed.
 		context.waitFor(mc -> XaeroRealTest.xaeroWorld() != null, 1200);
 		List<Waypoint> made = make(context, world);
 		forXaeroExpected = context.computeOnClient(mc -> made.stream().map(w -> expect(WaypointStore.get(), w)).toList());
-		forXaero = only(exportWithButton(context, "waypoint-export-xaero", forXaeroExpected.size()));
+		// Two more maps in the Overworld, a waypoint on each; then back on the main map, as in use.
+		context.runOnClient(mc -> {
+			BlockPos at = mc.player.blockPosition();
+			String[][] others = {{"Second base", "Far camp"}, {"Third base", "Lake hut"}};
+			for (int i = 0; i < others.length; i++) {
+				if (Maps.get().create(OVERWORLD, others[i][0]) == null) {
+					throw new AssertionError("Couldn't make the map " + others[i][0]);
+				}
+				WaypointStore.get().add(new Waypoint(others[i][1], at.getX() + 300 + 40 * i, 66, at.getZ() - 300, OVERWORLD, Waypoint.PALETTE[4 + i]));
+			}
+			Maps.get().use(OVERWORLD, Maps.MAIN);
+		});
+		Path export = exportWithButton(context, "waypoint-export-xaero", forXaeroExpected.size() + 2);
+		Set<Path> inside = folders(export);
+		Path others = export.resolve("Other maps");
+		if (inside.size() != 2 || !inside.remove(others)) {
+			throw new AssertionError("The export should hold the world's folder and Other maps: " + describe(export));
+		}
+		forXaero = inside.iterator().next();
+		String name = forXaero.getFileName().toString();
+		Map<String, List<String>> wanted = Map.of("Overworld - Second base", List.of("Far camp"), "Overworld - Third base", List.of("Lake hut"));
+		Map<String, List<String>> got = new HashMap<>();
+		for (Path other : folders(others)) {
+			if (!folders(other).equals(Set.of(other.resolve(name))) || !files(other.resolve(name).resolve("dim%0")).equals(List.of("waypoints.txt"))) {
+				throw new AssertionError("Each other map should be a world folder of its own: " + describe(other));
+			}
+			got.put(other.getFileName().toString(), fileWaypoints(other.resolve(name).resolve("dim%0").resolve("waypoints.txt")).stream().map(l -> l.split("\\|")[1]).toList());
+		}
+		if (!got.equals(wanted)) {
+			throw new AssertionError("Other maps holds " + got);
+		}
+		if (!files(forXaero.resolve("dim%0")).equals(List.of("waypoints.txt"))) {
+			throw new AssertionError("The world's Overworld folder should hold the map in use only: " + describe(forXaero));
+		}
 		context.runOnClient(mc -> Settings.get().removeReachedDeaths = true);
 	}
 
@@ -234,27 +288,27 @@ final class WaypointExportTest {
 		copy(forXaero, into, true);
 	}
 
-	/** Back in the world: every waypoint Xaero's Minimap has here, as Xaero's own code read the files. */
+	/**
+	 * Back in the world: Xaero's Minimap has one world in the Overworld, the one it opened, holding
+	 * the map in use's waypoints as Xaero's own code read them, and none of another map's.
+	 */
 	static void readByXaero(ClientGameTestContext context) {
 		context.waitFor(mc -> XaeroRealTest.xaeroWorld() != null, 1200);
-		// set|name|initials|x|y|z|colour|disabled|type for each of Xaero's waypoints in this dimension.
-		List<String> got = context.computeOnClient(mc -> xaeroWaypoints());
-		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: Xaero's Minimap has {}", got);
-		List<String> file = lines(forXaero.resolve("dim%0").resolve("waypoints.txt"));
-		List<String> wanted = new ArrayList<>();
-		for (String line : file) {
-			if (line.startsWith("waypoint:")) {
-				String[] f = line.split(":");
-				wanted.add(f[9] + "|" + f[1].replace("§§", ":") + "|" + f[2].replace("§§", ":") + "|" + f[3] + "|" + f[4] + "|" + f[5]
-					+ "|" + f[6] + "|" + f[7] + "|" + f[8]);
-			}
-		}
+		// Each of Xaero's worlds here by its node: set|name|initials|x|y|z|colour|disabled|type for its waypoints.
+		Map<String, List<String>> worlds = context.computeOnClient(mc -> xaeroWorlds());
+		String opened = context.computeOnClient(mc -> xaeroNode(XaeroRealTest.xaeroWorld()));
+		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: Xaero's Minimap opened {} and has {}", opened, worlds);
+		List<String> wanted = fileWaypoints(forXaero.resolve("dim%0").resolve("waypoints.txt"));
 		List<String> overworld = forXaeroExpected.stream().filter(e -> e.dimension().equals(OVERWORLD)).map(Expected::name).toList();
 		if (wanted.size() != overworld.size()) {
 			throw new AssertionError("The export's Overworld file has " + wanted.size() + " waypoints for " + overworld);
 		}
+		if (worlds.size() != 1) {
+			throw new AssertionError("Xaero's Minimap should have one world in the Overworld, and has " + worlds);
+		}
+		List<String> got = worlds.get(opened);
 		if (!new java.util.HashSet<>(got).equals(new java.util.HashSet<>(wanted)) || got.size() != wanted.size()) {
-			throw new AssertionError("Xaero's Minimap read\n" + String.join("\n", got) + "\nfrom a file saying\n" + String.join("\n", wanted));
+			throw new AssertionError("Xaero's Minimap opened " + opened + " with\n" + String.join("\n", got) + "\nfrom a file saying\n" + String.join("\n", wanted));
 		}
 		for (String name : overworld) {
 			if (got.stream().noneMatch(line -> line.split("\\|")[1].equals(name))) {
@@ -265,17 +319,59 @@ final class WaypointExportTest {
 		context.getInput().pressKey(com.mojang.blaze3d.platform.InputConstants.KEY_U);
 		context.waitTicks(10);
 		context.takeScreenshot("waypoint-export-xaero-4-u-key");
-		String opened = context.computeOnClient(mc -> mc.gui.screen() == null ? "nothing" : mc.gui.screen().getClass().getName());
-		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: U opened {}", opened);
-		if (!opened.equals("xaero.common.gui.GuiWaypoints")) {
-			throw new AssertionError("U should open Xaero's Minimap's waypoint list, and opened " + opened);
+		String screen = context.computeOnClient(mc -> mc.gui.screen() == null ? "nothing" : mc.gui.screen().getClass().getName());
+		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: U opened {}", screen);
+		if (!screen.equals("xaero.common.gui.GuiWaypoints")) {
+			throw new AssertionError("U should open Xaero's Minimap's waypoint list, and opened " + screen);
 		}
 		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			for (Maps.Info map : Maps.get().list(OVERWORLD)) {
+				if (!map.active()) {
+					Maps.get().delete(OVERWORLD, map.id());
+				}
+			}
+		});
 	}
 
-	private static List<String> xaeroWaypoints() {
+	/** A file's waypoints as {@link #xaeroWaypoints} gives Xaero's. */
+	private static List<String> fileWaypoints(Path file) {
+		List<String> out = new ArrayList<>();
+		for (String line : lines(file)) {
+			if (line.startsWith("waypoint:")) {
+				String[] f = line.split(":");
+				out.add(f[9] + "|" + f[1].replace("§§", ":") + "|" + f[2].replace("§§", ":") + "|" + f[3] + "|" + f[4] + "|" + f[5]
+					+ "|" + f[6] + "|" + f[7] + "|" + f[8]);
+			}
+		}
+		return out;
+	}
+
+	/** Every world Xaero's has in the dimension the player is in, by node, with its waypoints. */
+	private static Map<String, List<String>> xaeroWorlds() {
 		try {
-			Object world = XaeroRealTest.xaeroWorld();
+			Object opened = XaeroRealTest.xaeroWorld();
+			Object container = opened.getClass().getMethod("getContainer").invoke(opened);
+			Map<String, List<String>> out = new java.util.TreeMap<>();
+			for (Object world : (Iterable<?>) container.getClass().getMethod("getWorlds").invoke(container)) {
+				out.put(xaeroNode(world), xaeroWaypoints(world));
+			}
+			return out;
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError("Couldn't list Xaero's Minimap's worlds", e);
+		}
+	}
+
+	private static String xaeroNode(Object world) {
+		try {
+			return (String) world.getClass().getMethod("getNode").invoke(world);
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	private static List<String> xaeroWaypoints(Object world) {
+		try {
 			List<String> out = new ArrayList<>();
 			for (Object set : (Iterable<?>) world.getClass().getMethod("getIterableWaypointSets").invoke(world)) {
 				String setName = (String) set.getClass().getMethod("getName").invoke(set);
@@ -452,6 +548,15 @@ final class WaypointExportTest {
 		}
 		try (Stream<Path> list = Files.list(folder)) {
 			return list.filter(Files::isDirectory).collect(Collectors.toCollection(java.util.HashSet::new));
+		} catch (IOException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/** The names of the files in a folder, sorted. */
+	private static List<String> files(Path folder) {
+		try (Stream<Path> list = Files.list(folder)) {
+			return list.filter(Files::isRegularFile).map(p -> p.getFileName().toString()).sorted().toList();
 		} catch (IOException e) {
 			throw new AssertionError(e);
 		}

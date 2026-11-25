@@ -66,7 +66,7 @@
 	"diorama.xaero.imported": "Imported %s from Xaero's Minimap",
 	"diorama.xaero.imported_elsewhere": "Imported %s from Xaero's Minimap, %s in other dimensions",
 	"diorama.waypoints.export": "Export waypoints",
-	"diorama.waypoints.export.tooltip": "Saves this world's waypoints as Xaero's Minimap files, in .minecraft/diorama/exports. To use them in Xaero's Minimap, copy the folder inside into .minecraft/xaero/minimap. Where Xaero's already has waypoints for this world, copying replaces them. On a server, each map is a sub-world to pick in Xaero's waypoint list.",
+	"diorama.waypoints.export.tooltip": "Saves this world's waypoints as Xaero's Minimap files, in .minecraft/diorama/exports. To use them in Xaero's Minimap, copy this world's folder from there into .minecraft/xaero/minimap. Where Xaero's already has waypoints for this world, copying replaces them. On a server, each map is a sub-world to pick in Xaero's waypoint list.",
 	"diorama.waypoints.exported": "Exported %s to %s",
 	"diorama.waypoints.export_failed": "Couldn't export the waypoints: %s",
 	"diorama.xaero.pick_title": "Import from Xaero's Minimap",

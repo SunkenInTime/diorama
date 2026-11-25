@@ -66,7 +66,7 @@
 	"diorama.xaero.imported": "已从 Xaero's Minimap 导入 %s",
 	"diorama.xaero.imported_elsewhere": "已从 Xaero's Minimap 导入 %s，其中 %s 个位于其他维度",
 	"diorama.waypoints.export": "导出路径点",
-	"diorama.waypoints.export.tooltip": "将此世界的路径点保存为 Xaero's Minimap 文件，位于 .minecraft/diorama/exports。若要在 Xaero's Minimap 中使用，请将其中的文件夹复制到 .minecraft/xaero/minimap。如果 Xaero's 中已有此世界的路径点，复制后会将其替换。在服务器上，每张地图都是一个子世界，需在 Xaero's 的路径点列表中选择。",
+	"diorama.waypoints.export.tooltip": "将此世界的路径点保存为 Xaero's Minimap 文件，位于 .minecraft/diorama/exports。若要在 Xaero's Minimap 中使用，请将其中此世界的文件夹复制到 .minecraft/xaero/minimap。如果 Xaero's 中已有此世界的路径点，复制后会将其替换。在服务器上，每张地图都是一个子世界，需在 Xaero's 的路径点列表中选择。",
 	"diorama.waypoints.exported": "已将 %s 导出到 %s",
 	"diorama.waypoints.export_failed": "无法导出路径点：%s",
 	"diorama.xaero.pick_title": "从 Xaero's Minimap 导入",

@@ -66,7 +66,7 @@
     "diorama.xaero.imported": "Імпарт з Xaero's Minimap — %s",
     "diorama.xaero.imported_elsewhere": "Імпарт з Xaero's Minimap — %s; у іншых вымярэннях: %s",
     "diorama.waypoints.export": "Экспарт указальнікаў",
-    "diorama.waypoints.export.tooltip": "Захоўвае ўказальнікі гэтага свету файламі Xaero's Minimap у .minecraft/diorama/exports. Каб адкрыць іх у Xaero's Minimap, скапіруйце тэчку ўнутры ў .minecraft/xaero/minimap. Калі ў Xaero's ужо ёсць указальнікі для гэтага свету, копія заменіць іх. На серверы кожная карта — падсвет, які трэба выбраць у спісе ўказальнікаў Xaero's.",
+    "diorama.waypoints.export.tooltip": "Захоўвае ўказальнікі гэтага свету файламі Xaero's Minimap у .minecraft/diorama/exports. Каб адкрыць іх у Xaero's Minimap, скапіруйце адтуль тэчку гэтага свету ў .minecraft/xaero/minimap. Калі ў Xaero's ужо ёсць указальнікі для гэтага свету, копія заменіць іх. На серверы кожная карта — падсвет, які трэба выбраць у спісе ўказальнікаў Xaero's.",
     "diorama.waypoints.exported": "Экспартавана (%s) у %s",
     "diorama.waypoints.export_failed": "Не атрымалася экспартаваць указальнікі: %s",
     "diorama.xaero.pick_title": "Імпарт з Xaero's Minimap",

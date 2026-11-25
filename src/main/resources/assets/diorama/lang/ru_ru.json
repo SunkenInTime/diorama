@@ -66,7 +66,7 @@
     "diorama.xaero.imported": "Импорт из Xaero's Minimap — %s",
     "diorama.xaero.imported_elsewhere": "Импорт из Xaero's Minimap — %s; в других измерениях: %s",
     "diorama.waypoints.export": "Экспорт точек",
-    "diorama.waypoints.export.tooltip": "Сохраняет точки этого мира файлами Xaero's Minimap в .minecraft/diorama/exports. Чтобы открыть их в Xaero's Minimap, скопируйте папку внутри в .minecraft/xaero/minimap. Если в Xaero's уже есть точки для этого мира, копия заменит их. На сервере каждая карта — подмир, который нужно выбрать в списке точек Xaero's.",
+    "diorama.waypoints.export.tooltip": "Сохраняет точки этого мира файлами Xaero's Minimap в .minecraft/diorama/exports. Чтобы открыть их в Xaero's Minimap, скопируйте оттуда папку этого мира в .minecraft/xaero/minimap. Если в Xaero's уже есть точки для этого мира, копия заменит их. На сервере каждая карта — подмир, который нужно выбрать в списке точек Xaero's.",
     "diorama.waypoints.exported": "Экспортировано (%s) в %s",
     "diorama.waypoints.export_failed": "Не удалось экспортировать точки: %s",
     "diorama.xaero.pick_title": "Импорт из Xaero's Minimap",
