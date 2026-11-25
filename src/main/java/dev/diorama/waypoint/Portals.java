@@ -13,7 +13,6 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EndPortalFrameBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.PalettedContainer;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -92,7 +91,7 @@ public final class Portals {
 		// Per side of the roof, the kinds with a portal built the game's way.
 		List<java.util.Set<Waypoint.Kind>> framed = List.of(java.util.EnumSet.noneOf(Waypoint.Kind.class), java.util.EnumSet.noneOf(Waypoint.Kind.class));
 		for (int i = 0; i < chunk.sectionCount(); i++) {
-			PalettedContainer<BlockState> section = chunk.section(i);
+			ChunkSnapshot.Blocks section = chunk.section(i);
 			if (section == null || !section.maybeHas(PORTAL)) {
 				continue;
 			}
@@ -170,7 +169,7 @@ public final class Portals {
 		if (x < 0 || x > 15 || z < 0 || z > 15 || index < 0 || index >= chunk.sectionCount()) {
 			return null;
 		}
-		PalettedContainer<BlockState> section = chunk.section(index);
+		ChunkSnapshot.Blocks section = chunk.section(index);
 		return section != null ? section.get(x, y & 15, z) : chunk.uniformSection(index);
 	}
 
@@ -181,7 +180,7 @@ public final class Portals {
 	static List<Spot> unlit(ChunkSnapshot chunk) {
 		List<Spot> spots = new ArrayList<>();
 		for (int i = 0; i < chunk.sectionCount(); i++) {
-			PalettedContainer<BlockState> section = chunk.section(i);
+			ChunkSnapshot.Blocks section = chunk.section(i);
 			if (section == null || !section.maybeHas(END_FRAME)) {
 				continue;
 			}
@@ -310,7 +309,7 @@ public final class Portals {
 	 */
 	private static boolean onPortal(Waypoint pin, ChunkSnapshot chunk) {
 		int index = (pin.y >> 4) - chunk.minSectionY;
-		PalettedContainer<BlockState> section = index < 0 || index >= chunk.sectionCount() ? null : chunk.section(index);
+		ChunkSnapshot.Blocks section = index < 0 || index >= chunk.sectionCount() ? null : chunk.section(index);
 		if (section != null && kind(section.get(pin.x & 15, pin.y & 15, pin.z & 15).getBlock()) == pin.kind) {
 			return true;
 		}
