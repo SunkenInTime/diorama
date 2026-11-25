@@ -44,8 +44,8 @@ final class ChunkPack {
 	private ChunkPack() {
 	}
 
-	/** The body packed, or null if it can't be. The packing thread only. */
-	static byte @Nullable [] pack(ChunkSnapshot.Body body) {
+	/** The body packed, with these tints if there are any, or null if it can't be. The packing thread only. */
+	static byte @Nullable [] pack(ChunkSnapshot.Body body, ChunkSnapshot.@Nullable Tints tints) {
 		if (failed) {
 			return null;
 		}
@@ -65,6 +65,13 @@ final class ChunkPack {
 			}
 			for (DataLayer layer : body.skyLight()) {
 				writeLight(buf, layer);
+			}
+			buf.writeBoolean(tints != null);
+			if (tints != null) {
+				writeTint(buf, tints.grass());
+				writeTint(buf, tints.foliage());
+				writeTint(buf, tints.dryFoliage());
+				writeTint(buf, tints.water());
 			}
 			byte[] bytes = deflate(buf);
 			PACKED.incrementAndGet();
@@ -101,9 +108,10 @@ final class ChunkPack {
 		for (int i = 0; i < sections; i++) {
 			skyLight[i] = readLight(buf);
 		}
+		ChunkSnapshot.Tints tints = buf.readBoolean() ? new ChunkSnapshot.Tints(readTint(buf), readTint(buf), readTint(buf), readTint(buf)) : null;
 		UNPACKED.incrementAndGet();
 		UNPACK_NANOS.addAndGet(System.nanoTime() - start);
-		return new ChunkSnapshot.Body(states, blockLight, skyLight);
+		return new ChunkSnapshot.Body(states, blockLight, skyLight, tints);
 	}
 
 	private static void writeLight(ByteBuf buf, @Nullable DataLayer layer) {
@@ -117,6 +125,20 @@ final class ChunkPack {
 			buf.writeByte(ARRAY);
 			buf.writeBytes(layer.getData());
 		}
+	}
+
+	private static void writeTint(ByteBuf buf, int[] tint) {
+		for (int colour : tint) {
+			buf.writeInt(colour);
+		}
+	}
+
+	private static int[] readTint(ByteBuf buf) {
+		int[] tint = new int[256];
+		for (int i = 0; i < 256; i++) {
+			tint[i] = buf.readInt();
+		}
+		return tint;
 	}
 
 	private static @Nullable DataLayer readLight(ByteBuf buf) {

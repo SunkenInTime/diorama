@@ -44,6 +44,7 @@ final class PackedChunksTest {
 		// map then has another snapshot there, which says nothing about packing.
 		ChunkSnapshot[] chunks = context.computeOnClient(mc -> chunks(cx, cz));
 		long[] before = context.computeOnClient(mc -> digests(chunks));
+		long[] tintsBefore = context.computeOnClient(mc -> tints(chunks));
 		long[] stats0 = ChunkSnapshot.packStats();
 
 		// Far enough that the game unloads them, near enough that the map still keeps them.
@@ -70,8 +71,10 @@ final class PackedChunksTest {
 		long start = System.nanoTime();
 		ChunkSnapshot[] now = context.computeOnClient(mc -> chunks(cx, cz));
 		long[] after = context.computeOnClient(mc -> digests(chunks));
+		long[] tintsAfter = context.computeOnClient(mc -> tints(chunks));
 		long readMs = (System.nanoTime() - start) / 1_000_000;
 		int same = 0;
+		int tinted = 0;
 		for (int i = 0; i < before.length; i++) {
 			if (now[i] != chunks[i]) {
 				continue;
@@ -80,9 +83,19 @@ final class PackedChunksTest {
 			if (before[i] != after[i]) {
 				throw new AssertionError("Chunk " + (cx - RADIUS + i / side()) + ", " + (cz - RADIUS + i % side()) + " reads differently once packed");
 			}
+			// Tints blended later than the first look aren't known from before.
+			if (tintsBefore[i] != 0) {
+				tinted++;
+				if (tintsBefore[i] != tintsAfter[i]) {
+					throw new AssertionError("Chunk " + (cx - RADIUS + i / side()) + ", " + (cz - RADIUS + i % side()) + " has other tints once packed");
+				}
+			}
 		}
 		if (same < before.length / 2) {
 			throw new AssertionError("Only " + same + " of " + before.length + " chunks kept their snapshot until they were left behind");
+		}
+		if (tinted == 0) {
+			throw new AssertionError("None of the chunks left behind had their tints blended: this wouldn't show the tints being packed");
 		}
 		long[] stats2 = ChunkSnapshot.packStats();
 		if (stats2[3] == stats1[3]) {
@@ -105,7 +118,7 @@ final class PackedChunksTest {
 
 		long packed = stats1[0] - stats0[0];
 		List<String> results = new ArrayList<>();
-		results.add("chunks compared: " + same);
+		results.add("chunks compared: " + same + ", with tints: " + tinted);
 		results.add("packed since the section began: " + packed + " chunks, " + (packed == 0 ? 0 : (stats1[1] - stats0[1]) / packed) + " bytes each, " + (packed == 0 ? 0 : (stats1[2] - stats0[2]) / packed / 1000) + " us each");
 		results.add("the compared chunks packed: " + bytes / before.length + " bytes each");
 		results.add("unpacked to compare: " + (stats2[3] - stats1[3]) + " chunks, " + (stats2[4] - stats1[4]) / Math.max(1, stats2[3] - stats1[3]) / 1000 + " us each; reading them all took " + readMs + " ms");
@@ -149,6 +162,22 @@ final class PackedChunksTest {
 		for (int dx = -RADIUS; dx <= RADIUS; dx++) {
 			for (int dz = -RADIUS; dz <= RADIUS; dz++) {
 				out[(dx + RADIUS) * side() + dz + RADIUS] = MapSession.get().map().worldChunk(cx + dx, cz + dz);
+			}
+		}
+		return out;
+	}
+
+	/** Each snapshot's blended tints as one number, 0 where it has none. Client thread. */
+	private static long[] tints(ChunkSnapshot[] chunks) {
+		long[] out = new long[chunks.length];
+		for (int i = 0; i < chunks.length; i++) {
+			ChunkSnapshot.Tints tints = chunks[i].tints();
+			if (tints != null) {
+				long digest = 17;
+				for (int[] tint : new int[][] {tints.grass(), tints.foliage(), tints.dryFoliage(), tints.water()}) {
+					digest = digest * 31 + java.util.Arrays.hashCode(tint);
+				}
+				out[i] = digest == 0 ? 1 : digest;
 			}
 		}
 		return out;

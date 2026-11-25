@@ -38,9 +38,10 @@ public final class ChunkSnapshot {
 	public final int minSectionY;
 	/**
 	 * What takes the memory: block states per section (null for sections that are only air or a
-	 * single block) and light. Never changes once the snapshot is made.
+	 * single block) and light. Never changes once the snapshot is made. One that was packed also
+	 * has the blended tints the snapshot had by then, which went into the pack with it.
 	 */
-	record Body(@Nullable PalettedContainer<BlockState>[] states, @Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight) {
+	record Body(@Nullable PalettedContainer<BlockState>[] states, @Nullable DataLayer[] blockLight, @Nullable DataLayer[] skyLight, @Nullable Tints tints) {
 	}
 
 	/** Which sections have block states of their own: neither only air nor a single block. */
@@ -74,7 +75,10 @@ public final class ChunkSnapshot {
 	public final int blendRadius;
 	/** The biome the game assumes where no chunk is loaded. */
 	public final Holder<Biome> fallbackBiome;
-	/** Blended biome tints, worked out on a bake thread the first time a bake needs them. */
+	/**
+	 * Blended biome tints, worked out on a bake thread the first time a bake needs them. Those
+	 * worked out before the snapshot was packed are in the pack; see {@link #tints()}.
+	 */
 	private volatile @Nullable Tints tints;
 	/** Highest non-air block y, or {@code Integer.MIN_VALUE} when the chunk is empty. */
 	public final int maxY;
@@ -227,7 +231,7 @@ public final class ChunkSnapshot {
 			skyLight[i] = sky == null ? null : sky.copy();
 		}
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, blockLight, skyLight);
+		this.body = new Body(ownStates, blockLight, skyLight, null);
 
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
@@ -274,7 +278,7 @@ public final class ChunkSnapshot {
 			}
 		}
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, new DataLayer[sections.length], new DataLayer[sections.length]);
+		this.body = new Body(ownStates, new DataLayer[sections.length], new DataLayer[sections.length], null);
 		this.biomes = new PalettedContainerRO[9][];
 		this.biomeZoomSeed = 0;
 		this.blendRadius = 0;
@@ -341,7 +345,7 @@ public final class ChunkSnapshot {
 		this.fallbackBiome = level.registryAccess().lookupOrThrow(Registries.BIOME).getOrThrow(Biomes.PLAINS);
 		this.hasSkyLight = level.dimensionType().hasSkyLight();
 		this.mixed = mixed(ownStates);
-		this.body = new Body(ownStates, chunk.blockLight(), chunk.skyLight());
+		this.body = new Body(ownStates, chunk.blockLight(), chunk.skyLight(), null);
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
 		for (int i = 0; i < 256; i++) {
@@ -520,7 +524,8 @@ public final class ChunkSnapshot {
 		if (body == null) {
 			return;
 		}
-		byte[] bytes = ChunkPack.pack(body);
+		Tints tints = this.tints;
+		byte[] bytes = ChunkPack.pack(body, tints);
 		if (bytes == null) {
 			return;
 		}
@@ -529,9 +534,13 @@ public final class ChunkSnapshot {
 		// Views are cheap to make again, and hold tints of their own.
 		java.util.Arrays.fill(this.views, null);
 		this.packedBody = bytes;
-		this.unpacked = new java.lang.ref.WeakReference<>(body);
+		this.unpacked = new java.lang.ref.WeakReference<>(new Body(body.states(), body.blockLight(), body.skyLight(), tints));
 		// Last: a reader that finds no body finds the bytes.
 		this.body = null;
+		// Tints a bake set meanwhile stay: they aren't in the pack.
+		if (this.tints == tints) {
+			this.tints = null;
+		}
 	}
 
 	public int sectionCount() {
@@ -694,9 +703,14 @@ public final class ChunkSnapshot {
 	}
 
 	public @Nullable Tints tints() {
-		if (this.tints == null && this.base != null && this.base.tints != null) {
+		if (this.base == null) {
+			Tints tints = this.tints;
+			// Packed with the blocks and light, and unpacked with them: a bake that asks reads those too.
+			return tints != null || this.body != null ? tints : this.body().tints();
+		}
+		Tints from = this.tints == null ? this.base.tints() : null;
+		if (from != null) {
 			// The chunk's own tints, turned, so every facing shows the same colours.
-			Tints from = this.base.tints;
 			this.tints = new Tints(this.turnedColumns(from.grass()), this.turnedColumns(from.foliage()), this.turnedColumns(from.dryFoliage()), this.turnedColumns(from.water()));
 		}
 		return this.tints;
