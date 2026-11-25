@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
@@ -44,6 +46,8 @@ public final class WaypointExport {
 	static final int NORMAL = 0;
 	static final int DEATH = 1;
 	static final int OLD_DEATH = 2;
+	/** The longest name a file or folder can have: 255 characters on Windows, 255 bytes on Linux. */
+	private static final int MAX_NAME_LENGTH = 255;
 
 	/** An export written: the folder it's in, and how many waypoints it holds. */
 	public record Result(Path folder, int count) {
@@ -109,15 +113,64 @@ public final class WaypointExport {
 			throw new IOException("not in a world");
 		}
 		List<String> names = XaeroImport.worldFolders(mc);
-		// A Realm's folder is named by what only the Realms screen knows; Diorama's own name will do.
+		// Xaero's names a Realm's folder by its owner and id; Diorama notes only the id, so its own name will do.
 		String world = names != null ? names.get(0) : maps.worldKey();
 		Path exports = mc.gameDirectory.toPath().resolve(Diorama.MOD_ID).resolve("exports");
 		String stamp = LocalDateTime.now().format(NAME);
 		Path folder = exports.resolve("waypoints_" + stamp);
-		for (int i = 1; Files.exists(folder); i++) {
+		for (int i = 1; Files.exists(folder) || Files.exists(partial(folder)); i++) {
 			folder = exports.resolve("waypoints_" + stamp + "_" + i);
 		}
-		return write(store, maps, folder.resolve(world), mc.getSingleplayerServer() != null);
+		// Written beside it and moved into place once every file is there, so an export that
+		// fails partway (a full disk, a name no file can have) leaves nothing that looks whole.
+		Path partial = partial(folder);
+		try {
+			Result written = write(store, maps, partial.resolve(world), mc.getSingleplayerServer() != null);
+			Files.move(partial, folder, StandardCopyOption.ATOMIC_MOVE);
+			return new Result(folder, written.count());
+		} catch (IOException | RuntimeException e) {
+			deleteQuietly(partial);
+			throw e;
+		}
+	}
+
+	/** Where an export is written before it's complete. */
+	private static Path partial(Path folder) {
+		return folder.resolveSibling(folder.getFileName() + ".partial");
+	}
+
+	private static void deleteQuietly(Path folder) {
+		if (!Files.exists(folder)) {
+			return;
+		}
+		try (Stream<Path> files = Files.walk(folder)) {
+			for (Path file : files.sorted(Comparator.reverseOrder()).toList()) {
+				Files.deleteIfExists(file);
+			}
+		} catch (IOException | RuntimeException e) {
+			Diorama.LOGGER.warn("Couldn't delete the unfinished export {}", folder, e);
+		}
+	}
+
+	/**
+	 * The file {@code file} in the dimension folder {@code folder} of {@code world}, refused unless
+	 * it's exactly that: a hand-edited waypoint file can give a dimension or map any ID, and a
+	 * {@code ..} or a separator in one mustn't write anywhere else. Names longer than a file
+	 * system allows (Xaero's escapes each {@code _} in a save's name as four characters) are refused
+	 * too; Xaero's couldn't make that folder either.
+	 */
+	public static Path within(Path world, String folder, String file) throws IOException {
+		for (String name : List.of(world.getFileName().toString(), folder, file)) {
+			if (name.length() > MAX_NAME_LENGTH || name.getBytes(StandardCharsets.UTF_8).length > MAX_NAME_LENGTH) {
+				throw new IOException("the name " + name.substring(0, 24) + "... is too long for a file");
+			}
+		}
+		Path root = world.toAbsolutePath().normalize();
+		Path target = root.resolve(folder).resolve(file);
+		if (target.getNameCount() != root.getNameCount() + 2 || !target.normalize().equals(target) || !target.startsWith(root)) {
+			throw new IOException(folder + "/" + file + " would be outside the export's folder");
+		}
+		return target;
 	}
 
 	/**
@@ -133,13 +186,14 @@ public final class WaypointExport {
 		List<String> sets = store.customFolders().stream().map(WaypointExport::setName).toList();
 		int count = 0;
 		for (Map.Entry<String, Map<String, List<Waypoint>>> dimension : files.entrySet()) {
-			Path folder = world.resolve(dimensionFolder(dimension.getKey()));
-			Files.createDirectories(folder);
+			String folder = dimensionFolder(dimension.getKey());
 			for (Map.Entry<String, List<Waypoint>> map : dimension.getValue().entrySet()) {
 				String file = singleplayer && map.getKey().equals(maps.active(dimension.getKey()))
 					? "waypoints.txt"
 					: "cm$" + (map.getKey().isEmpty() ? "main" : map.getKey()) + "_" + fileName(maps.name(dimension.getKey(), map.getKey())) + ".txt";
-				Files.writeString(folder.resolve(file), text(store, map.getValue(), sets), StandardCharsets.UTF_8);
+				Path target = within(world, folder, file);
+				Files.createDirectories(target.getParent());
+				Files.writeString(target, text(store, map.getValue(), sets), StandardCharsets.UTF_8);
 				count += map.getValue().size();
 			}
 		}

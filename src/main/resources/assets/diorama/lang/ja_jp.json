@@ -66,7 +66,7 @@
 	"diorama.xaero.imported": "Xaero's Minimapから%sをインポートしました",
 	"diorama.xaero.imported_elsewhere": "Xaero's Minimapから%sをインポートしました、%sは他ディメンション内に存在します",
 	"diorama.waypoints.export": "ウェイポイントをエクスポート",
-	"diorama.waypoints.export.tooltip": "このワールドのウェイポイントをXaero's Minimapのファイルとして.minecraft/diorama/exportsに保存します。Xaero's Minimapで使うには、中のフォルダーを.minecraft/xaero/minimapにコピーしてください。",
+	"diorama.waypoints.export.tooltip": "このワールドのウェイポイントをXaero's Minimapのファイルとして.minecraft/diorama/exportsに保存します。Xaero's Minimapで使うには、中のフォルダーを.minecraft/xaero/minimapにコピーしてください。このワールドのウェイポイントがXaero'sに既にある場合、コピーすると置き換えられます。サーバーでは各マップがサブワールドになるので、Xaero'sのウェイポイント一覧で選んでください。",
 	"diorama.waypoints.exported": "%sを%sにエクスポートしました",
 	"diorama.waypoints.export_failed": "ウェイポイントをエクスポートできませんでした：%s",
 	"diorama.xaero.pick_title": "Xaero's Minimapからインポート",

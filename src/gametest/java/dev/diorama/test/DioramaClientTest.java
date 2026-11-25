@@ -1239,6 +1239,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-6-waypoint-list");
+				// Export's tooltip is the longest text in the list: pointed at, so it shows whole.
+				net.minecraft.client.gui.components.Button export = context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(),
+					net.minecraft.network.chat.Component.translatable("diorama.waypoints.export").getString()));
+				double exportScale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+				context.getInput().setCursorPos((export.getX() + export.getWidth() / 2.0) * exportScale, (export.getY() + export.getHeight() / 2.0) * exportScale);
+				context.waitTicks(30);
+				context.takeScreenshot("languages-" + language + "-6-export-tooltip");
+				context.getInput().setCursorPos(2, 2);
 				context.setScreen(() -> new dev.diorama.MinimapPositionScreen(new SettingsScreen(null)));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-7-position");

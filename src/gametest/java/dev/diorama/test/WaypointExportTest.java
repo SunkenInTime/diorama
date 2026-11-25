@@ -2,6 +2,7 @@ package dev.diorama.test;
 
 import dev.diorama.Settings;
 import dev.diorama.waypoint.Waypoint;
+import dev.diorama.waypoint.WaypointExport;
 import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointStore;
 import dev.diorama.waypoint.XaeroImport;
@@ -47,6 +48,7 @@ final class WaypointExportTest {
 	}
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		containment();
 		List<Waypoint> made = make(context, world);
 		List<Expected> expected = context.computeOnClient(mc -> made.stream().map(w -> expect(WaypointStore.get(), w)).toList());
 		Path folder = exportWithButton(context, "waypoint-export", expected.size());
@@ -115,6 +117,7 @@ final class WaypointExportTest {
 		context.setScreen(() -> null);
 		List<Waypoint> back = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList());
 		compare(expected, back, "imported again");
+		refusesEscape(context);
 
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
@@ -128,6 +131,79 @@ final class WaypointExportTest {
 		delete(copied);
 		for (String rule : new String[] {"show_death_messages", "showDeathMessages"}) {
 			world.getServer().runCommand("gamerule " + rule + " true");
+		}
+	}
+
+	/**
+	 * The rule that keeps every file inside the export: a dimension's folder and a map's file are
+	 * one name each, with no way out, and no name is longer than a file system allows.
+	 */
+	private static void containment() {
+		Path world = Path.of("export-check", "waypoints_x", "World");
+		try {
+			Path fine = WaypointExport.within(world, "dim%0", "cm$a_Map.txt");
+			if (!fine.equals(world.toAbsolutePath().normalize().resolve("dim%0").resolve("cm$a_Map.txt"))) {
+				throw new AssertionError("An ordinary file went to " + fine);
+			}
+		} catch (IOException e) {
+			throw new AssertionError("An ordinary file was refused", e);
+		}
+		// A save folder named Home and 64 underscores: Xaero's escapes it to 260 characters.
+		String longWorld = XaeroImport.singleplayerFolders("Home" + "_".repeat(64)).get(0);
+		List<String[]> refused = List.of(
+			new String[] {"export-check/waypoints_x/World", "dim%0", "cm$../../../../escape_Map.txt"},
+			new String[] {"export-check/waypoints_x/World", "dim%0", "cm$a/b_Map.txt"},
+			new String[] {"export-check/waypoints_x/World", "..", "waypoints.txt"},
+			new String[] {"export-check/waypoints_x/World", "dim%0/../..", "waypoints.txt"},
+			new String[] {"export-check/waypoints_x/World", "dim%0", Path.of("escape.txt").toAbsolutePath().toString()},
+			new String[] {"export-check/waypoints_x/" + longWorld, "dim%0", "waypoints.txt"});
+		for (String[] c : refused) {
+			try {
+				Path got = WaypointExport.within(Path.of(c[0]), c[1], c[2]);
+				throw new AssertionError(c[1] + " / " + c[2] + " in " + c[0] + " should be refused, not written to " + got);
+			} catch (IOException expectedRefusal) {
+				// The export fails with this, and says so.
+			}
+		}
+	}
+
+	/**
+	 * A hand-edited waypoint file whose map ID leads out of the export: the export fails and says
+	 * so, after the Overworld's ordinary file was already written, and leaves no folder behind.
+	 */
+	private static void refusesEscape(ClientGameTestContext context) {
+		Path exports = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("diorama").resolve("exports"));
+		Set<Path> before = folders(exports);
+		Waypoint bad = new Waypoint("Escape", 1, 64, 1, OVERWORLD, Waypoint.PALETTE[0]);
+		context.runOnClient(mc -> {
+			WaypointStore.get().add(bad);
+			// After add, which notes the map in use: as if waypoints.json said so.
+			bad.map = "../../../../escape";
+		});
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(5);
+		DioramaClientTest.clickWidget(context, context.computeOnClient(mc -> DioramaClientTest.buttonLabelled(mc.gui.screen(), "Export waypoints")));
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(5);
+		context.takeScreenshot("waypoint-export-6-refused");
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> WaypointStore.get().remove(bad));
+		String notice = context.computeOnClient(mc -> lastChat(mc));
+		if (!notice.startsWith("Couldn't export the waypoints: ")) {
+			throw new AssertionError("A map ID leading out of the export should fail it; chat says " + notice);
+		}
+		Set<Path> after = folders(exports);
+		if (!after.equals(before)) {
+			throw new AssertionError("A failed export left " + after.stream().filter(p -> !before.contains(p)).toList());
+		}
+		Path diorama = exports.getParent();
+		try (Stream<Path> files = Files.walk(diorama.getParent(), 3)) {
+			List<Path> escaped = files.filter(p -> p.getFileName().toString().startsWith("escape")).toList();
+			if (!escaped.isEmpty()) {
+				throw new AssertionError("The export wrote outside its folder: " + escaped);
+			}
+		} catch (IOException e) {
+			throw new AssertionError(e);
 		}
 	}
 
@@ -191,6 +267,9 @@ final class WaypointExportTest {
 		context.takeScreenshot("waypoint-export-xaero-4-u-key");
 		String opened = context.computeOnClient(mc -> mc.gui.screen() == null ? "nothing" : mc.gui.screen().getClass().getName());
 		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: U opened {}", opened);
+		if (!opened.equals("xaero.common.gui.GuiWaypoints")) {
+			throw new AssertionError("U should open Xaero's Minimap's waypoint list, and opened " + opened);
+		}
 		context.setScreen(() -> null);
 	}
 
