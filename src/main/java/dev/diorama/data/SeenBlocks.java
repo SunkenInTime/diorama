@@ -1,6 +1,7 @@
 package dev.diorama.data;
 
 import dev.diorama.Diorama;
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -9,8 +10,13 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import net.minecraft.core.SectionPos;
@@ -19,10 +25,17 @@ import net.minecraft.core.SectionPos;
  * Which blocks the player has had line of sight to, one bit per block. The client thread is the
  * only writer and bits are only ever set, so bake threads can read without locking; at worst
  * they see a block as unseen for one more bake. Saved to disk so fog-of-war progress survives
- * leaving the world.
+ * leaving the world, on a thread of its own: a well-explored world's table takes tens of
+ * milliseconds to compress.
  */
 public final class SeenBlocks {
 	private static final int MAGIC = 0x4F4D5331;
+	/** One thread, so saves reach the file in the order they were taken. */
+	private static final ExecutorService DISK = Executors.newSingleThreadExecutor(task -> {
+		Thread thread = new Thread(task, "diorama-seen-writer");
+		thread.setDaemon(true);
+		return thread;
+	});
 
 	private final ConcurrentHashMap<Long, long[]> sections = new ConcurrentHashMap<>();
 	private volatile boolean changed;
@@ -77,19 +90,45 @@ public final class SeenBlocks {
 		return seen;
 	}
 
-	/** Writes the bits if any changed since the last save. Client thread. */
+	/**
+	 * Has the bits written in the background if any changed since the last save. Client thread; the
+	 * disk thread lists, compresses and writes them. Bits are only ever set, in place, so it takes
+	 * them as they are when it gets there: a bit or section added since this call marks the table
+	 * changed again, and the next save writes it if this one didn't.
+	 */
 	public void save(Path file) {
 		if (!this.changed) {
 			return;
 		}
 		this.changed = false;
+		DISK.execute(() -> this.write(file));
+	}
+
+	/** Writes what changed and waits for it, and for any save still on its way: the map is closing. */
+	public void close(Path file) {
+		this.save(file);
+		try {
+			DISK.submit(() -> {
+			}).get();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		} catch (ExecutionException e) {
+			Diorama.LOGGER.warn("Couldn't finish saving fog-of-war progress to {}", file, e);
+		}
+	}
+
+	/** Disk thread. On failure the table counts as changed, so the next save tries again. */
+	private void write(Path file) {
 		try {
 			Files.createDirectories(file.getParent());
 			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-			try (OutputStream out = Files.newOutputStream(temp); DataOutputStream data = new DataOutputStream(new DeflaterOutputStream(out))) {
+			// Listed first, so the count matches the sections written while the client thread adds more.
+			List<Map.Entry<Long, long[]>> entries = new ArrayList<>(this.sections.entrySet());
+			// The buffer hands the compressor 32 KB at a time instead of each 8-byte long.
+			try (OutputStream out = Files.newOutputStream(temp); DataOutputStream data = new DataOutputStream(new BufferedOutputStream(new DeflaterOutputStream(out), 1 << 15))) {
 				data.writeInt(MAGIC);
-				data.writeInt(this.sections.size());
-				for (Map.Entry<Long, long[]> entry : this.sections.entrySet()) {
+				data.writeInt(entries.size());
+				for (Map.Entry<Long, long[]> entry : entries) {
 					data.writeLong(entry.getKey());
 					for (long word : entry.getValue()) {
 						data.writeLong(word);

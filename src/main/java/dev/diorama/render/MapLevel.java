@@ -1632,7 +1632,9 @@ public final class MapLevel implements ChunkSource {
 		if (this.memory != null) {
 			this.memory.close();
 		}
-		this.saveSeen();
+		if (this.folder != null && !this.savedOnly) {
+			this.seen.close(this.folder.resolve("seen.bin"));
+		}
 		for (MapTile tile : this.tiles.values()) {
 			tile.close();
 		}
