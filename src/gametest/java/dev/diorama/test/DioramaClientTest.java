@@ -91,6 +91,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
 			XaeroRealTest.clearXaero(context);
 		}
+		if (tests.contains("addon-api")) {
+			AddonApiTest.titleScreen(context);
+		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
 		int savedChunksGround = 0;
@@ -112,6 +115,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 100);
 			// boat_run.py times the warm-up by this line.
 			Diorama.LOGGER.info("Map warm-up done");
+			if (tests.contains("addon-api")) {
+				AddonApiTest.firstWorld(context, world);
+			}
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
@@ -415,8 +421,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				seenJustBeforeLeaving(context);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if (tests.contains("addon-api")) {
+			AddonApiTest.left(context);
+		}
+		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
+				if (tests.contains("addon-api")) {
+					AddonApiTest.reopened(context, reopened);
+				}
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);
 				}

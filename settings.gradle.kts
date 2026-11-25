@@ -40,3 +40,7 @@ stonecutter {
 }
 
 rootProject.name = "diorama"
+
+// The API other mods compile against, built once and copied into every version's jar (api/), and
+// the addons the game tests install to try it (testaddon/).
+include("api", "testaddon")

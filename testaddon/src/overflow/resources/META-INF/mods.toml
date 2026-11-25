@@ -1,0 +1,17 @@
+modLoader = "lowcodefml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon_overflow"
+version = "${version}"
+displayName = "Diorama Test Addon (overflow)"
+description = "Wraps a StackOverflowError in its own exception and throws it from onReady on purpose, for Diorama's game tests. Never released."
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.diorama_test_addon_overflow]]
+modId = "diorama"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"

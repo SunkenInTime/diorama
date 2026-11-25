@@ -1,0 +1,17 @@
+{
+	"schemaVersion": 1,
+	"id": "diorama_test_addon_assertion",
+	"version": "${version}",
+	"name": "Diorama Test Addon (assertion)",
+	"description": "Throws an AssertionError from onReady on purpose, for Diorama's game tests. Never released.",
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"diorama": [
+			"dev.diorama.testaddon.assertion.AssertionAddon"
+		]
+	},
+	"suggests": {
+		"diorama": "*"
+	}
+}

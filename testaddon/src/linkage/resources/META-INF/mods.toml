@@ -1,0 +1,17 @@
+modLoader = "lowcodefml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon_linkage"
+version = "${version}"
+displayName = "Diorama Test Addon (linkage)"
+description = "Fails with a LinkageError on purpose, for Diorama's game tests. Never released."
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.diorama_test_addon_linkage]]
+modId = "diorama"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"
