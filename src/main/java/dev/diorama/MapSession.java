@@ -627,8 +627,9 @@ public final class MapSession {
 			// refuses an instanceof pattern that can't fail.
 			Object loaded = this.level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
 			if (loaded instanceof LevelChunk chunk) {
-				boolean known = this.map.worldChunk(cx, cz) != null;
-				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level);
+				ChunkSnapshot before = this.map.worldChunk(cx, cz);
+				boolean known = before != null;
+				ChunkSnapshot snapshot = ChunkSnapshot.take(chunk, this.level, before);
 				this.map.put(snapshot, known ? p.box : null, playerChunkX, playerChunkZ);
 				if (this.seenBiomes != null) {
 					this.seenBiomes.record(chunk);

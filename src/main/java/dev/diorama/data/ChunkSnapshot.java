@@ -207,8 +207,13 @@ public final class ChunkSnapshot {
 		return this.facing.turned(state);
 	}
 
+	/**
+	 * A chunk as the client has it now. Whatever of {@code previous}, the map's snapshot of the same
+	 * chunk until now, is still the same is kept from it and not copied again: a snapshot is taken
+	 * anew whenever light in the chunk changes, and most of its sections haven't changed then.
+	 */
 	@SuppressWarnings("unchecked")
-	private ChunkSnapshot(LevelChunk chunk, ClientLevel level) {
+	private ChunkSnapshot(LevelChunk chunk, ClientLevel level, @Nullable ChunkSnapshot previous) {
 		this.facing = Facing.NORTH;
 		this.base = null;
 		this.views = new ChunkSnapshot[4];
@@ -216,7 +221,9 @@ public final class ChunkSnapshot {
 		this.chunkZ = chunk.getPos().z();
 		this.minSectionY = chunk.getMinSectionY();
 		LevelChunkSection[] sections = chunk.getSections();
-		PalettedContainer<BlockState>[] ownStates = new PalettedContainer[sections.length];
+		Blocks[] blocks = new Blocks[sections.length];
+		// Packed ones are of a chunk the game unloaded since: this one is loaded anew.
+		Body before = previous == null || previous.base != null || previous.mixed.length != sections.length ? null : previous.body;
 		this.uniform = new BlockState[sections.length];
 		// The game never writes into a section's biome container: new biomes arrive in a new one,
 		// swapped in. So holding the containers keeps the biomes as they are now, without copying.
@@ -251,17 +258,27 @@ public final class ChunkSnapshot {
 				if (single != null) {
 					this.uniform[i] = single;
 				} else {
-					ownStates[i] = states.copy();
+					Blocks kept = before == null ? null : before.blocks()[i];
+					if (kept != null && samePacked(Sections.packed(states), kept.packed())) {
+						blocks[i] = kept;
+						KEPT_SECTIONS.incrementAndGet();
+					} else {
+						blocks[i] = new Copied(states.copy());
+						COPIED_SECTIONS.incrementAndGet();
+					}
 				}
 			}
 			SectionPos pos = SectionPos.of(this.chunkX, this.minSectionY + i, this.chunkZ);
 			DataLayer block = light.getLayerListener(LightLayer.BLOCK).getDataLayerData(pos);
 			DataLayer sky = light.getLayerListener(LightLayer.SKY).getDataLayerData(pos);
-			blockLight[i] = block == null ? null : block.copy();
-			skyLight[i] = sky == null ? null : sky.copy();
+			blockLight[i] = copiedLight(block, before == null ? null : before.blockLight()[i]);
+			skyLight[i] = copiedLight(sky, before == null ? null : before.skyLight()[i]);
 		}
-		this.mixed = mixed(ownStates);
-		this.body = new Body(copied(ownStates), blockLight, skyLight, null);
+		this.mixed = new boolean[sections.length];
+		for (int i = 0; i < sections.length; i++) {
+			this.mixed[i] = blocks[i] != null;
+		}
+		this.body = new Body(blocks, blockLight, skyLight, null);
 
 		int top = Integer.MIN_VALUE;
 		int floor = Integer.MAX_VALUE;
@@ -475,7 +492,39 @@ public final class ChunkSnapshot {
 	}
 
 	public static ChunkSnapshot take(LevelChunk chunk, ClientLevel level) {
-		return new ChunkSnapshot(chunk, level);
+		return new ChunkSnapshot(chunk, level, null);
+	}
+
+	/** A snapshot of a chunk the map has {@code previous} of, or null: what hasn't changed since is kept from that. Client thread. */
+	public static ChunkSnapshot take(LevelChunk chunk, ClientLevel level, @Nullable ChunkSnapshot previous) {
+		return new ChunkSnapshot(chunk, level, previous);
+	}
+
+	private static final java.util.concurrent.atomic.AtomicLong KEPT_SECTIONS = new java.util.concurrent.atomic.AtomicLong();
+	private static final java.util.concurrent.atomic.AtomicLong COPIED_SECTIONS = new java.util.concurrent.atomic.AtomicLong();
+	private static final java.util.concurrent.atomic.AtomicLong KEPT_LIGHT = new java.util.concurrent.atomic.AtomicLong();
+	private static final java.util.concurrent.atomic.AtomicLong COPIED_LIGHT = new java.util.concurrent.atomic.AtomicLong();
+
+	/** How many sections' blocks and light layers new snapshots kept from the one before, and how many they copied, since the game started; for tests and the debug log. */
+	public static long[] takeStats() {
+		return new long[] {KEPT_SECTIONS.get(), COPIED_SECTIONS.get(), KEPT_LIGHT.get(), COPIED_LIGHT.get()};
+	}
+
+	/** A copy of the game's light layer, or {@code kept}, the snapshot before's, when that holds the same light. */
+	private static @Nullable DataLayer copiedLight(@Nullable DataLayer live, @Nullable DataLayer kept) {
+		if (live == null) {
+			return null;
+		}
+		if (kept != null) {
+			// A layer of one value has no array, and asking for it would make one.
+			boolean one = live.isDefinitelyHomogenous();
+			if (one == kept.isDefinitelyHomogenous() && (one ? live.get(0, 0, 0) == kept.get(0, 0, 0) : java.util.Arrays.equals(live.getData(), kept.getData()))) {
+				KEPT_LIGHT.incrementAndGet();
+				return kept;
+			}
+		}
+		COPIED_LIGHT.incrementAndGet();
+		return live.copy();
 	}
 
 	private static @Nullable Blocks[] copied(@Nullable PalettedContainer<BlockState>[] states) {
