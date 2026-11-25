@@ -6,7 +6,8 @@ package dev.diorama.api;
  */
 public interface Handle extends AutoCloseable {
 	/**
-	 * Lets go. Closing a handle that is already closed, by the addon or by Diorama, does nothing.
+	 * Lets go. Closing a handle that is already closed, by the addon or by Diorama after the addon
+	 * failed, does nothing.
 	 *
 	 * @throws IllegalStateException if called off the client thread
 	 */
@@ -14,7 +15,8 @@ public interface Handle extends AutoCloseable {
 	void close();
 
 	/**
-	 * {@return whether the handle still holds} False once it was closed, by the addon or by Diorama.
+	 * {@return whether the handle still holds} False once the addon closed it, or Diorama did
+	 * because the addon failed.
 	 *
 	 * @throws IllegalStateException if called off the client thread
 	 */

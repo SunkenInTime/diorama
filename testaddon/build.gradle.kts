@@ -9,6 +9,10 @@
 //   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError
 //   diorama-test-addon-unprintable.jar  hides the minimap, then throws an exception whose
 //                                       toString() throws
+//   diorama-test-addon-overflow.jar     hides the minimap, then throws a StackOverflowError
+//                                       wrapped in its own RuntimeException
+//   diorama-test-addon-recursive.jar    hides the minimap, then throws an exception whose
+//                                       getMessage() calls itself
 // ./gradlew :testaddon:assemble puts them in testaddon/build/libs; boat_run.py --mods takes that
 // folder (docs/development.md). Never released.
 plugins {
@@ -27,7 +31,9 @@ val missing = sourceSets.create("missing")
 val linkage = sourceSets.create("linkage")
 val assertion = sourceSets.create("assertion")
 val unprintable = sourceSets.create("unprintable")
-val addons = listOf(main, broken, linkage, assertion, unprintable)
+val overflow = sourceSets.create("overflow")
+val recursive = sourceSets.create("recursive")
+val addons = listOf(main, broken, linkage, assertion, unprintable, overflow, recursive)
 
 dependencies {
 	for (set in addons) {
@@ -55,7 +61,7 @@ for (set in addons) {
 tasks.named<Jar>("jar") {
 	archiveFileName = "diorama-test-addon.jar"
 }
-for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable")) {
+for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable", overflow to "overflow", recursive to "recursive")) {
 	val jar = tasks.register<Jar>("${name}Jar") {
 		from(set.output)
 		archiveFileName = "diorama-test-addon-$name.jar"

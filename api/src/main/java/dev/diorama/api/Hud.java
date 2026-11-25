@@ -18,17 +18,16 @@ public interface Hud {
 	/**
 	 * Hides these parts until the returned handle is closed.
 	 *
-	 * <p>Hiding lives only in memory. It never changes the player's settings, and nothing is
-	 * written to Diorama's settings file, so a crash or a missed {@link Handle#close} can't leave a
-	 * part switched off for good. A part shows again once every handle hiding it, from any addon,
-	 * is closed, and only if Diorama would show it anyway: the player's settings, F1 and the
-	 * server's rules still apply. Hiding only takes away; it never shows anything those would
-	 * hide.
+	 * <p>The handle holds until this addon closes it, this addon is switched off after a failure,
+	 * or the game exits. Opening, leaving or switching worlds and changing dimension don't close
+	 * it, so an addon that wants a part hidden for as long as it is installed calls this once, from
+	 * {@link DioramaAddon#onReady}.
 	 *
-	 * <p>Diorama closes the handle itself when the player leaves the world, when this addon is
-	 * switched off after a failure, and when the game exits. A handle taken with no world open
-	 * lasts until the player leaves the next one. {@link Handle#isOpen} tells whether it still
-	 * holds.
+	 * <p>Hiding lives only in memory. It never changes the player's settings, and nothing is
+	 * written to Diorama's settings file, so the game always starts again with nothing hidden,
+	 * after a crash too. A part shows again once every handle hiding it, from any addon, is
+	 * closed, and only if Diorama would show it anyway: the player's settings, F1 and the server's
+	 * rules still apply. Hiding only takes away; it never shows anything those would hide.
 	 *
 	 * <p>While the player places the minimap in Diorama's settings, the minimap shows regardless.
 	 *

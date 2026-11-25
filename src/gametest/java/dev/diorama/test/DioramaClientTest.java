@@ -116,7 +116,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// boat_run.py times the warm-up by this line.
 			Diorama.LOGGER.info("Map warm-up done");
 			if (tests.contains("addon-api")) {
-				AddonApiTest.firstWorld(context);
+				AddonApiTest.firstWorld(context, world);
 			}
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
@@ -205,9 +205,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("tour")) {
 				tour(context, world);
-			}
-			if (tests.contains("addon-api")) {
-				AddonApiTest.run(context, world);
 			}
 			if (tests.contains("radar")) {
 				radar(context, world);
@@ -430,7 +427,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("addon-api")) {
-					AddonApiTest.reopened(context);
+					AddonApiTest.reopened(context, reopened);
 				}
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);

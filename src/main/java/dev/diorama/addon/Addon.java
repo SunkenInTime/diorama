@@ -4,10 +4,10 @@ import dev.diorama.Diorama;
 import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -20,6 +20,20 @@ import org.jspecify.annotations.Nullable;
  * calls do nothing, and nothing of it is called again.
  */
 final class Addon implements DioramaApi, Hud {
+	/**
+	 * What reflection and the loaders wrap a constructor's error in, by exact class name, so a
+	 * subclass of one can't stand in for it: {@link #fatal} looks inside these and nothing else.
+	 * Fabric wraps a constructor's error as EntrypointException, around LanguageAdapterException,
+	 * around InvocationTargetException (Fabric Loader 0.19.5, EntrypointContainerImpl and
+	 * DefaultLanguageAdapter).
+	 */
+	private static final Set<String> WRAPPERS = Set.of(
+		"java.lang.reflect.InvocationTargetException",
+		"java.lang.ExceptionInInitializerError",
+		"java.lang.reflect.UndeclaredThrowableException",
+		"net.fabricmc.loader.api.EntrypointException",
+		"net.fabricmc.loader.api.LanguageAdapterException");
+
 	private final String modId;
 	/** Its open handles, so they can be closed for it. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
@@ -37,9 +51,9 @@ final class Addon implements DioramaApi, Hud {
 	}
 
 	/**
-	 * Calls into the addon, its constructor included. Whatever it throws switches it off instead of
-	 * reaching Diorama or other addons, except what no addon can recover from ({@link #fatal}),
-	 * which goes on up. Null if it threw, or was already switched off.
+	 * Calls into the addon, its constructor included. If it throws, the addon is switched off and
+	 * its handles closed first; then a {@link #fatal} error goes on up, and anything else is logged
+	 * once and goes no further. Null if it threw, or was already switched off.
 	 */
 	<T> @Nullable T call(String what, Callable<T> call) {
 		if (this.failed) {
@@ -48,134 +62,63 @@ final class Addon implements DioramaApi, Hud {
 		try {
 			return call.call();
 		} catch (Throwable thrown) {
-			rethrowFatal(thrown);
-			this.fail(what, thrown);
+			this.failed = true;
+			for (HudHides.Hold hold : this.holds) {
+				hold.release();
+			}
+			this.holds.clear();
+			Error fatal = fatal(thrown);
+			if (fatal != null) {
+				throw fatal;
+			}
+			log(this.modId, what, thrown);
 			return null;
 		}
 	}
 
 	/**
 	 * The JVM running out of memory or stack, or breaking ({@link VirtualMachineError}), or the
-	 * thread being stopped: not the addon's failure to recover from, so not caught. Looked for
-	 * through the causes too, since reflection wraps a constructor's (InvocationTargetException,
-	 * ExceptionInInitializerError) and Fabric wraps those again. Null for anything else.
+	 * thread being stopped, thrown as it is or inside one of the {@link #WRAPPERS}. Null for
+	 * anything else, including one of those errors an addon wrapped in an exception of its own.
 	 */
-	static @Nullable Error fatal(Throwable thrown) {
-		Map<Throwable, Boolean> seen = new IdentityHashMap<>();
-		for (Throwable at = thrown; at != null && seen.put(at, Boolean.TRUE) == null && seen.size() <= 32; at = causeOf(at)) {
-			if (isFatal(at)) {
+	@SuppressWarnings("removal")
+	private static @Nullable Error fatal(Throwable thrown) {
+		Throwable at = thrown;
+		for (int depth = 0; at != null && depth < 8; depth++) {
+			if (at instanceof VirtualMachineError || at instanceof ThreadDeath) {
 				return (Error) at;
 			}
+			if (!WRAPPERS.contains(at.getClass().getName())) {
+				return null;
+			}
+			at = at.getCause();
 		}
 		return null;
 	}
 
-	@SuppressWarnings("removal")
-	private static boolean isFatal(Throwable thrown) {
-		return thrown instanceof VirtualMachineError || thrown instanceof ThreadDeath;
-	}
-
-	static void rethrowFatal(Throwable thrown) {
-		Error fatal = fatal(thrown);
-		if (fatal != null) {
-			throw fatal;
-		}
-	}
-
-	/** Its cause, or null if getCause() (the addon's to override) throws. */
-	private static @Nullable Throwable causeOf(Throwable thrown) {
-		try {
-			return thrown.getCause();
-		} catch (Throwable unreadable) {
-			if (isFatal(unreadable)) {
-				throw (Error) unreadable;
-			}
-			return null;
-		}
-	}
-
-	/** Switches the addon off for the session: lets go of what it holds and logs it, once. */
-	void fail(String what, Throwable cause) {
-		if (this.failed) {
-			return;
-		}
-		this.failed = true;
-		this.releaseAll();
-		log(this.modId, what, cause);
-	}
-
 	/**
-	 * One ERROR line naming the addon, with the stack trace under it. The throwable is the addon's,
-	 * and its toString() or getMessage() can throw, here or as the logger prints it, so it is logged
-	 * as it is only if they can be read, and otherwise as a stand-in with its class and stack. Nothing
-	 * thrown while logging gets out of here, apart from {@link #fatal} errors.
+	 * One ERROR line naming the addon and what it threw, by class name, with the stack trace under
+	 * it. The throwable is the addon's, and printing it runs the addon's own code (getMessage(),
+	 * toString()), which may throw anything, a StackOverflowError included: then the line goes out
+	 * without the trace. Nothing gets out of here.
 	 */
-	private static void log(String modId, String what, Throwable cause) {
-		String message = "Diorama addon {} failed in {} and is switched off until the game restarts: {}";
+	private static void log(String modId, String what, Throwable thrown) {
+		String line = "Diorama addon " + modId + " failed in " + what + " and is switched off until the game restarts: " + thrown.getClass().getName();
 		try {
-			String described = describe(cause);
-			Throwable printed = readable(cause) ? cause : standIn(cause, described);
-			Diorama.LOGGER.error(message, modId, what, described, printed);
-		} catch (Throwable logging) {
-			rethrowFatal(logging);
+			StringWriter trace = new StringWriter();
+			thrown.printStackTrace(new PrintWriter(trace));
+			Diorama.LOGGER.error("{}{}{}", line, System.lineSeparator(), trace);
+		} catch (Throwable printing) {
 			try {
-				Diorama.LOGGER.error(message, modId, what, cause.getClass().getName());
-			} catch (Throwable again) {
-				rethrowFatal(again);
+				Diorama.LOGGER.error("{} (its stack trace couldn't be printed: {})", line, printing.getClass().getName());
+			} catch (Throwable ignored) {
+				// Nowhere left to say it.
 			}
 		}
-	}
-
-	/** toString(), or the class name and why that couldn't be read. */
-	private static String describe(Throwable thrown) {
-		try {
-			return String.valueOf(thrown);
-		} catch (Throwable unreadable) {
-			rethrowFatal(unreadable);
-			return thrown.getClass().getName() + " (its message couldn't be read: " + unreadable.getClass().getName() + ")";
-		}
-	}
-
-	/** Whether the logger can print it and its causes without one of them throwing. */
-	private static boolean readable(Throwable thrown) {
-		Map<Throwable, Boolean> seen = new IdentityHashMap<>();
-		try {
-			for (Throwable at = thrown; at != null && seen.put(at, Boolean.TRUE) == null; at = at.getCause()) {
-				at.toString();
-				at.getLocalizedMessage();
-				at.getStackTrace();
-				for (Throwable suppressed : at.getSuppressed()) {
-					suppressed.toString();
-				}
-			}
-			return true;
-		} catch (Throwable unreadable) {
-			rethrowFatal(unreadable);
-			return false;
-		}
-	}
-
-	/** A plain Throwable saying what it was, with its stack where that can be read. */
-	private static Throwable standIn(Throwable thrown, String described) {
-		Throwable standIn = new Throwable(described);
-		try {
-			standIn.setStackTrace(thrown.getStackTrace());
-		} catch (Throwable unreadable) {
-			rethrowFatal(unreadable);
-		}
-		return standIn;
 	}
 
 	boolean failed() {
 		return this.failed;
-	}
-
-	/** Closes every handle it holds. */
-	void releaseAll() {
-		for (HudHides.Hold hold : this.holds) {
-			hold.release();
-		}
-		this.holds.clear();
 	}
 
 	void forget(HudHides.Hold hold) {

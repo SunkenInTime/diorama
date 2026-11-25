@@ -141,7 +141,6 @@ public final class DioramaNeoForge {
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
-			Addons.left();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
@@ -158,7 +157,6 @@ public final class DioramaNeoForge {
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
-			Addons.joined();
 		});
 		// Lowest: mod bus events run priority by priority across mods, so a mod that has Xaero's
 		// channels has them by then.
@@ -173,10 +171,7 @@ public final class DioramaNeoForge {
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking. This
 		// fires as the window is asked to close, before the last frame, so from then on nothing may
 		// start the map again (Minecraft.isRunning() is false).
-		NeoForge.EVENT_BUS.addListener(GameShuttingDownEvent.class, event -> {
-			MapSession.close();
-			Addons.stop();
-		});
+		NeoForge.EVENT_BUS.addListener(GameShuttingDownEvent.class, event -> MapSession.close());
 		NeoForge.EVENT_BUS.addListener(ClientTickEvent.Post.class, event -> {
 			Minecraft mc = Minecraft.getInstance();
 			if (mc.isRunning()) {

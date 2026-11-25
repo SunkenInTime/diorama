@@ -121,7 +121,6 @@ public final class DioramaFabric implements ClientModInitializer {
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
-			Addons.left();
 		});
 		// A network moving the player to another of its servers joins again without leaving.
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
@@ -136,7 +135,6 @@ public final class DioramaFabric implements ClientModInitializer {
 			TrackedPlayers.clear();
 			Waystones.clear();
 			Claims.clear();
-			Addons.joined();
 		});
 		// Once every mod has started, so a mod that has Xaero's channels has them by then.
 		ClientLifecycleEvents.CLIENT_STARTED.register(mc -> {
@@ -163,10 +161,7 @@ public final class DioramaFabric implements ClientModInitializer {
 			});
 		*///?}
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
-		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> {
-			MapSession.close();
-			Addons.stop();
-		});
+		ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> MapSession.close());
 		ClientTickEvents.END_CLIENT_TICK.register(DioramaClient::tick);
 	}
 }

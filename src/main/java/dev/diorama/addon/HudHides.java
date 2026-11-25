@@ -38,13 +38,13 @@ public final class HudHides {
 		}
 	}
 
-	/** One addon's hold on some parts of the HUD, open until it or Diorama closes it. */
+	/** One addon's hold on some parts of the HUD, open until the addon closes it or fails. */
 	static final class Hold implements Handle {
 		private final Addon owner;
 		private final int parts;
 		private boolean open;
 
-		/** Open, counted, and kept by its owner, which closes it if it fails or the world closes. */
+		/** Open, counted, and kept by its owner, which closes it if it fails. */
 		Hold(Addon owner, int parts) {
 			this.owner = owner;
 			this.parts = parts;
