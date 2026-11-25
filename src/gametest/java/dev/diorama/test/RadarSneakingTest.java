@@ -3,25 +3,32 @@ package dev.diorama.test;
 import com.mojang.authlib.GameProfile;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
+import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.bake.TileKey;
-import dev.diorama.render.Radar;
+import dev.diorama.render.MapViewport;
 import dev.diorama.share.ShareProtocol;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import javax.imageio.ImageIO;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -33,7 +40,8 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  * <li>{@code radar-sneaking}: in singleplayer, with stand-ins added on the client as in {@code
  *     radar}, since a test runs one real client. Also a sneaking player the server reports as a
- *     teammate (far players) shows, as Xaero's party tracker shows party members.
+ *     teammate (far players) shows, as Xaero's party tracker shows party members, and a sneaking
+ *     player's torch doesn't light the map in a dark room, while a standing player's does.
  * <li>{@code radar-sneaking-server}: real players on a real server with Diorama ({@code --env
  *     DIORAMA_REAL_SERVER=1 --type large}, Fabric): a vanilla client stands, and a second game like
  *     this one ({@link SecondPlayer}) holds its sneak key.
@@ -85,6 +93,8 @@ final class RadarSneakingTest {
 		context.runOnClient(mc -> sneaking.setShiftKeyDown(false));
 		context.waitTicks(2);
 		expect(context, wrong, SNEAKING, true, "standing up again");
+
+		torch(context, world, sneaking, wrong, x, y, z);
 
 		context.runOnClient(mc -> {
 			for (int id : new int[] {-424300, -424301}) {
@@ -221,19 +231,104 @@ final class RadarSneakingTest {
 		context.setScreen(() -> null);
 	}
 
-	/** Whether the map's radar shows the player called {@code name}; says so in {@code wrong} if not as expected. */
+	/**
+	 * Whether the map draws the player called {@code name} on its radar, read off the blips it drew
+	 * last frame; says so in {@code wrong} if not as expected. A player missing from the world is
+	 * wrong either way: it would be off the radar for no reason this test checks.
+	 */
 	private static void expect(ClientGameTestContext context, List<String> wrong, String name, boolean shown, String state) {
 		context.setScreen(MapScreen::new);
 		DioramaClientTest.lookAtPlayer(context, 6.0, TileKey.SURFACE);
 		context.waitTicks(2);
-		boolean onMap = context.computeOnClient(mc -> {
+		Boolean onMap = context.computeOnClient(mc -> {
 			Player player = player(mc, name);
-			return player != null && Radar.collect(((MapScreen) mc.gui.screen()).view(), 1, true).stream().anyMatch(blip -> blip.entity() == player);
+			return player == null ? null : ((MapScreen) mc.gui.screen()).blips().stream().anyMatch(blip -> blip.entity() == player);
 		});
 		context.setScreen(() -> null);
-		if (onMap != shown) {
+		if (onMap == null) {
+			wrong.add(name + " is " + state + " but isn't in the world");
+		} else if (onMap != shown) {
 			wrong.add(name + " is " + state + " and " + (shown ? "not on the radar" : "still on the radar"));
 		}
+	}
+
+	/**
+	 * A torch held by a sneaking player on another team leaves the map dark around them, as their
+	 * face is left off the radar; standing, the torch lights it. In a closed stone room under the
+	 * player, seen on the map's cave view, read off the screen's own pixels a few blocks north of
+	 * {@code alex}, clear of their face and name.
+	 */
+	private static void torch(ClientGameTestContext context, TestSingleplayerContext world, RemotePlayer alex, List<String> wrong, int x, int y, int z) {
+		java.util.function.Consumer<String> command = c -> world.getServer().runCommand(c);
+		command.accept("fill " + (x - 12) + " -42 " + (z - 12) + " " + (x + 12) + " -34 " + (z + 12) + " stone");
+		command.accept("fill " + (x - 10) + " -40 " + (z - 10) + " " + (x + 10) + " -37 " + (z + 10) + " air");
+		command.accept("tp @a " + (x + 6.5) + " -40 " + (z + 0.5));
+		context.waitFor(mc -> mc.player.blockPosition().getY() == -40, 400);
+		context.runOnClient(mc -> alex.snapTo(x - 4.5, -40, z + 0.5));
+		DioramaClientTest.settle(context, 120);
+		int layer = context.computeOnClient(mc -> MapSession.caveLayerFor(mc.player.getY()));
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(Projection.u(x - 4.5, z + 0.5), Projection.v(x - 4.5, -40, z + 0.5), 6.0, layer));
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(40);
+		boolean present = context.computeOnClient(mc -> player(mc, SNEAKING) == alex);
+		double dark = brightness(context, "radar-sneaking-4-dark-room", x - 4.5, -40, z - 3.5);
+
+		context.runOnClient(mc -> {
+			alex.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(Items.TORCH));
+			alex.setShiftKeyDown(true);
+		});
+		context.waitTicks(40);
+		double sneakingLit = brightness(context, "radar-sneaking-5-sneaking-torch", x - 4.5, -40, z - 3.5);
+
+		context.runOnClient(mc -> alex.setShiftKeyDown(false));
+		context.waitTicks(40);
+		double standingLit = brightness(context, "radar-sneaking-6-standing-torch", x - 4.5, -40, z - 3.5);
+		context.setScreen(() -> null);
+		System.out.printf("radar-sneaking torch: dark room %.1f, sneaking with a torch %.1f, standing with a torch %.1f%n", dark, sneakingLit, standingLit);
+
+		context.runOnClient(mc -> alex.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY));
+		command.accept("tp @a " + (x + 0.5) + " " + y + " " + (z + 0.5));
+		context.waitFor(mc -> mc.player.blockPosition().getY() == y, 400);
+		if (!present) {
+			wrong.add(SNEAKING + " is holding a torch in a dark room but isn't in the world");
+		} else if (standingLit < dark + 12) {
+			wrong.add(SNEAKING + " is standing with a torch in a dark room and the map isn't lit around them (" + fmt(dark) + " dark, " + fmt(standingLit) + " lit)");
+		} else if (sneakingLit > dark + 6) {
+			wrong.add(SNEAKING + " is sneaking with a torch in a dark room and the map is lit around them (" + fmt(dark) + " dark, " + fmt(sneakingLit) + " sneaking)");
+		}
+	}
+
+	/** How bright the screen is around where the world's (wx, wy, wz) is on the open map: 0..255, over a 7 by 7 pixel square. */
+	private static double brightness(ClientGameTestContext context, String screenshot, double wx, double wy, double wz) {
+		Path file = context.takeScreenshot(screenshot);
+		int[] at = context.computeOnClient(mc -> {
+			MapViewport.View view = ((MapScreen) mc.gui.screen()).view();
+			double u = Projection.u(wx, wz);
+			double v = Projection.v(wx, wy, wz);
+			double scale = mc.getWindow().getGuiScale();
+			return new int[] {(int) (view.screenX(u, v) * scale), (int) (view.screenY(u, v) * scale)};
+		});
+		BufferedImage shot;
+		try {
+			shot = ImageIO.read(file.toFile());
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		double sum = 0;
+		int n = 0;
+		for (int dx = -3; dx <= 3; dx++) {
+			for (int dy = -3; dy <= 3; dy++) {
+				int rgb = shot.getRGB(at[0] + dx, at[1] + dy);
+				sum += ((rgb >> 16 & 0xFF) * 299 + (rgb >> 8 & 0xFF) * 587 + (rgb & 0xFF) * 114) / 1000.0;
+				n++;
+			}
+		}
+		return sum / n;
+	}
+
+	private static String fmt(double brightness) {
+		return String.format(java.util.Locale.ROOT, "%.1f", brightness);
 	}
 
 	/** A far-players message from Diorama on the server naming {@code id}, or no one, in the Overworld. */
