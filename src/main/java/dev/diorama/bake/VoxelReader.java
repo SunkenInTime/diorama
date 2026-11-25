@@ -495,7 +495,7 @@ public final class VoxelReader {
 		if (chunk == null) {
 			return 0;
 		}
-		return chunk.snapshot.blockLight((y >> 4) - chunk.snapshot.minSectionY, x & 15, y & 15, z & 15);
+		return chunk.held().blockLight((y >> 4) - chunk.snapshot.minSectionY, x & 15, y & 15, z & 15);
 	}
 
 	int skyLight(int x, int y, int z) {
@@ -509,7 +509,7 @@ public final class VoxelReader {
 		if (chunk == null) {
 			return 15;
 		}
-		return chunk.snapshot.skyLight((y >> 4) - chunk.snapshot.minSectionY, x & 15, y & 15, z & 15);
+		return chunk.held().skyLight((y >> 4) - chunk.snapshot.minSectionY, x & 15, y & 15, z & 15);
 	}
 
 	/** The chunk snapshot holding this column, for biome tints. */
@@ -578,6 +578,20 @@ public final class VoxelReader {
 
 		/** What earlier bakes worked out from these blocks under these looks, shared with them; null where nothing is shared. */
 		final @Nullable ChunkBakeData shared;
+		/** See {@link #held}. */
+		private @Nullable Object held;
+
+		/**
+		 * The snapshot, to read blocks or light from. The first read holds on to them for as long as
+		 * this reader lasts: a snapshot whose blocks and light are packed unpacks them once for the
+		 * whole bake, not again whenever the collector has run.
+		 */
+		ChunkSnapshot held() {
+			if (this.held == null) {
+				this.held = this.snapshot.hold();
+			}
+			return this.snapshot;
+		}
 
 		Decoded(ChunkSnapshot snapshot, @Nullable Looks looks, @Nullable ChunkBakeData shared) {
 			this.snapshot = snapshot;
@@ -618,12 +632,12 @@ public final class VoxelReader {
 					}
 				} else if (section == BY_BLOCK && this.ids[index] == null) {
 					// Straight from the blocks, without numbering every block of the section.
-					PalettedContainer<BlockState> states = this.snapshot.section(index);
+					PalettedContainer<BlockState> states = this.held().section(index);
 					mask = new long[64];
 					BlockState last = null;
 					int f = 0;
 					for (int i = 0; i < 4096; i++) {
-						BlockState state = this.snapshot.state(states, i & 15, i >> 8, i >> 4 & 15);
+						BlockState state = this.held().state(states, i & 15, i >> 8, i >> 4 & 15);
 						if (state != last) {
 							last = state;
 							f = solidFlags(this.id(state), kinds, shapes);
@@ -775,7 +789,7 @@ public final class VoxelReader {
 		}
 
 		private Section read(int index) {
-			PalettedContainer<BlockState> states = this.snapshot.section(index);
+			PalettedContainer<BlockState> states = this.held().section(index);
 			BlockState uniform = this.snapshot.uniformSection(index);
 			if (states == null && uniform == null) {
 				return AIR_SECTION;
@@ -785,7 +799,7 @@ public final class VoxelReader {
 				if (uniform != null) {
 					return new Section(this.id(this.snapshot.turned(uniform)), null, null, null, null);
 				}
-				ChunkSnapshot.Packed packed = this.snapshot.packed(index);
+				ChunkSnapshot.Packed packed = this.held().packed(index);
 				int[] palette = packed == null ? null : this.paletteIds(packed);
 				return palette != null ? new Section(-1, null, packed.storage(), palette, this.snapshot.columns()) : BY_BLOCK;
 			}
@@ -807,14 +821,14 @@ public final class VoxelReader {
 
 		/** Every block's id in a section with a container, looked up block by block. */
 		private int[] byBlock(int index) {
-			PalettedContainer<BlockState> states = this.snapshot.section(index);
+			PalettedContainer<BlockState> states = this.held().section(index);
 			int[] ids = new int[4096];
 			BlockState lastState = null;
 			int lastId = 0;
 			for (int y = 0; y < 16; y++) {
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
-						BlockState state = this.snapshot.state(states, x, y, z);
+						BlockState state = this.held().state(states, x, y, z);
 						if (state != lastState) {
 							lastState = state;
 							lastId = this.id(state);
