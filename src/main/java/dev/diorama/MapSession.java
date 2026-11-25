@@ -171,6 +171,11 @@ public final class MapSession {
 		return started;
 	}
 
+	/** For tests: ticks until fog-of-war progress is next saved, short of leaving. */
+	public int ticksToNextSeenSave() {
+		return 600 - this.ticks % 600;
+	}
+
 	/**
 	 * The world seed, which places slime chunks. Only known in singleplayer, and slime chunks
 	 * only exist in the overworld.

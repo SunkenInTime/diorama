@@ -406,6 +406,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
 				waitUntilGenerated(context, world);
+				seenJustBeforeLeaving(context);
 			}
 		}
 		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
@@ -434,6 +435,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (spawnCell != null) {
 					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+					seenAfterLeaving(context);
 				}
 			}
 		}
@@ -2048,6 +2050,42 @@ public class DioramaClientTest implements FabricClientGameTest {
 		});
 	}
 
+	/** Blocks seen just before leaving, deep under the far spot the player leaves from, and one beside them that wasn't. */
+	private static final int[][] SEEN_BEFORE_LEAVING = {{3001, -60, 3001}, {3002, -60, 3001}, {3017, -61, 2990}, {2980, -59, 3040}};
+	private static final int[] UNSEEN_BESIDE = {3003, -60, 3001};
+
+	/**
+	 * Sees blocks with the next periodic save still far off, then the world is left at once: only
+	 * the save on leaving can keep them.
+	 */
+	private static void seenJustBeforeLeaving(ClientGameTestContext context) {
+		context.waitFor(mc -> MapSession.get().ticksToNextSeenSave() > 300, 700);
+		context.runOnClient(mc -> {
+			dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+			for (int[] b : SEEN_BEFORE_LEAVING) {
+				if (!seen.markSeen(b[0], b[1], b[2])) {
+					throw new AssertionError("Block " + java.util.Arrays.toString(b) + " was already seen before the test saw it");
+				}
+			}
+			Diorama.LOGGER.info("Saw {} blocks {} ticks before the next periodic save, leaving now", SEEN_BEFORE_LEAVING.length, MapSession.get().ticksToNextSeenSave());
+		});
+	}
+
+	/** After reopening: what {@link #seenJustBeforeLeaving} saw is still seen, and only that. */
+	private static void seenAfterLeaving(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+			for (int[] b : SEEN_BEFORE_LEAVING) {
+				if (!seen.isSeen(b[0], b[1], b[2])) {
+					throw new AssertionError("Fog-of-war progress made just before leaving was lost: " + java.util.Arrays.toString(b) + " isn't seen after reopening");
+				}
+			}
+			if (seen.isSeen(UNSEEN_BESIDE[0], UNSEEN_BESIDE[1], UNSEEN_BESIDE[2])) {
+				throw new AssertionError("A block nobody saw, " + java.util.Arrays.toString(UNSEEN_BESIDE) + ", is seen after reopening");
+			}
+		});
+	}
+
 	/**
 	 * After leaving and reopening the world 3000 blocks from spawn: the spawn tile shows from disk
 	 * alone, and the fog-of-war corridor is still seen.
@@ -3193,6 +3231,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("diorama-09-fog-of-war-room");
 		context.setScreen(() -> null);
 			world.getServer().runCommand("tellraw @a \"\u00a7r\u00a7e\u00a7s\u00a7e\u00a7t\u00a7x\u00a7a\u00a7e\u00a7r\u00a7o\"");
+		try {
+			SeenSaveTest.run();
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 	/**

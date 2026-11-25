@@ -17,9 +17,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 import net.minecraft.core.SectionPos;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Which blocks the player has had line of sight to, one bit per block. The client thread is the
@@ -38,7 +41,14 @@ public final class SeenBlocks {
 	});
 
 	private final ConcurrentHashMap<Long, long[]> sections = new ConcurrentHashMap<>();
-	private volatile boolean changed;
+	/**
+	 * Set after a bit is, and taken back by the disk thread just before it lists the table: a bit
+	 * that write misses was set after that, so it leaves the table changed for the next one.
+	 */
+	private final AtomicBoolean changed = new AtomicBoolean();
+	/** A save is waiting behind the one being written. It reads the table when it starts, so one is enough. */
+	private final AtomicBoolean queued = new AtomicBoolean();
+	private volatile @Nullable WriteHook writeHook;
 
 	public boolean isSeen(int x, int y, int z) {
 		long[] bits = this.sections.get(SectionPos.asLong(x >> 4, y >> 4, z >> 4));
@@ -58,7 +68,7 @@ public final class SeenBlocks {
 			return false;
 		}
 		bits[i >>> 6] |= mask;
-		this.changed = true;
+		this.changed.set(true);
 		return true;
 	}
 
@@ -92,34 +102,52 @@ public final class SeenBlocks {
 
 	/**
 	 * Has the bits written in the background if any changed since the last save. Client thread; the
-	 * disk thread lists, compresses and writes them. Bits are only ever set, in place, so it takes
-	 * them as they are when it gets there: a bit or section added since this call marks the table
-	 * changed again, and the next save writes it if this one didn't.
+	 * disk thread lists, compresses and writes them. With a save already waiting to be written this
+	 * does nothing: that one will take the table as it is when it starts.
 	 */
 	public void save(Path file) {
-		if (!this.changed) {
-			return;
+		if (this.changed.get() && this.queued.compareAndSet(false, true)) {
+			DISK.execute(() -> {
+				this.queued.set(false);
+				this.writeIfChanged(file);
+			});
 		}
-		this.changed = false;
-		DISK.execute(() -> this.write(file));
 	}
 
-	/** Writes what changed and waits for it, and for any save still on its way: the map is closing. */
+	/**
+	 * The map is closing: writes what's changed once every save before it has finished, so one
+	 * that failed is tried again, and waits for that. Waits through an interrupt too: the map
+	 * reopened before the write lands would read the older file and later save over this one.
+	 */
 	public void close(Path file) {
-		this.save(file);
-		try {
-			DISK.submit(() -> {
-			}).get();
-		} catch (InterruptedException e) {
+		Future<?> last = DISK.submit(() -> this.writeIfChanged(file));
+		boolean interrupted = false;
+		while (true) {
+			try {
+				last.get();
+				break;
+			} catch (InterruptedException e) {
+				interrupted = true;
+			} catch (ExecutionException e) {
+				Diorama.LOGGER.warn("Couldn't finish saving fog-of-war progress to {}", file, e);
+				break;
+			}
+		}
+		if (interrupted) {
 			Thread.currentThread().interrupt();
-		} catch (ExecutionException e) {
-			Diorama.LOGGER.warn("Couldn't finish saving fog-of-war progress to {}", file, e);
 		}
 	}
 
 	/** Disk thread. On failure the table counts as changed, so the next save tries again. */
-	private void write(Path file) {
+	private void writeIfChanged(Path file) {
+		if (!this.changed.getAndSet(false)) {
+			return;
+		}
 		try {
+			WriteHook hook = this.writeHook;
+			if (hook != null) {
+				hook.beforeWrite();
+			}
 			Files.createDirectories(file.getParent());
 			Path temp = file.resolveSibling(file.getFileName() + ".tmp");
 			// Listed first, so the count matches the sections written while the client thread adds more.
@@ -137,8 +165,19 @@ public final class SeenBlocks {
 			}
 			Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 		} catch (IOException | RuntimeException e) {
-			this.changed = true;
+			this.changed.set(true);
 			Diorama.LOGGER.error("Couldn't save fog-of-war progress to {}", file, e);
 		}
+	}
+
+	/** For tests: runs on the disk thread before each write; throwing fails that write, as a full disk would. */
+	public void beforeEachWrite(@Nullable WriteHook hook) {
+		this.writeHook = hook;
+	}
+
+	/** For tests: see {@link #beforeEachWrite}. */
+	@FunctionalInterface
+	public interface WriteHook {
+		void beforeWrite() throws IOException;
 	}
 }
