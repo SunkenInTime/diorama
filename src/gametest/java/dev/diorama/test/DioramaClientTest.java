@@ -88,7 +88,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
 		}
-		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
+		if (tests.contains("xaero-real") || tests.contains("xaero-real-server") || tests.contains("waypoint-export-xaero")) {
 			XaeroRealTest.clearXaero(context);
 		}
 		TestWorldSave save = null;
@@ -263,6 +263,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
 			}
+			if (tests.contains("waypoint-export")) {
+				WaypointExportTest.run(context, world);
+			}
+			if (tests.contains("waypoint-export-xaero")) {
+				WaypointExportTest.forXaero(context, world);
+			}
 			if (tests.contains("xaero-real")) {
 				XaeroRealTest.singleplayer(context, world);
 			}
@@ -408,7 +414,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				waitUntilGenerated(context, world);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if (tests.contains("waypoint-export-xaero")) {
+			WaypointExportTest.intoXaero(context);
+		}
+		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoint-export-xaero") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);
@@ -428,6 +437,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (tests.contains("xaero-real")) {
 					XaeroRealTest.reopened(context);
+				}
+				if (tests.contains("waypoint-export-xaero")) {
+					WaypointExportTest.readByXaero(context);
 				}
 				if (tests.contains("waystones")) {
 					waystonesAfterRejoin(context, reopened);
@@ -1167,6 +1179,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
 			// One waypoint, far enough not to be reached, so the list shows its row and the sort buttons.
 			context.runOnClient(mc -> dev.diorama.waypoint.Waypoints.addTemporary(mc.player.blockPosition().offset(300, 0, 0), "minecraft:overworld"));
+			// And one kept waypoint, so the list's footer has Export waypoints beside Done.
+			context.runOnClient(mc -> dev.diorama.waypoint.WaypointStore.get().add(new dev.diorama.waypoint.Waypoint("Home",
+				mc.player.getBlockX() - 300, mc.player.getBlockY(), mc.player.getBlockZ(), "minecraft:overworld", dev.diorama.waypoint.Waypoint.PALETTE[0])));
 			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
 				switchLanguage(context, language);
 				context.waitTicks(10);
