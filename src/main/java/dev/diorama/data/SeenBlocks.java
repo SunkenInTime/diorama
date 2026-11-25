@@ -7,6 +7,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -86,11 +87,14 @@ public final class SeenBlocks {
 				return seen;
 			}
 			int count = data.readInt();
+			// A section's key and bits in one read, not 65: each read is a trip through the inflater.
+			ByteBuffer section = ByteBuffer.allocate(Long.BYTES * 65);
 			for (int s = 0; s < count; s++) {
-				long key = data.readLong();
+				data.readFully(section.array());
+				long key = section.getLong(0);
 				long[] bits = new long[64];
 				for (int i = 0; i < 64; i++) {
-					bits[i] = data.readLong();
+					bits[i] = section.getLong(Long.BYTES * (i + 1));
 				}
 				seen.sections.put(key, bits);
 			}
