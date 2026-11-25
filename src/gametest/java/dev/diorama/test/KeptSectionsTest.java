@@ -20,19 +20,35 @@ final class KeptSectionsTest {
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		BlockPos feet = context.computeOnClient(mc -> mc.player.blockPosition());
-		// A light in the air beside the player: one block in one section, and light around it.
-		BlockPos lamp = feet.offset(2, 6, 0);
-		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().worldChunk(lamp.getX() >> 4, lamp.getZ() >> 4) != null, 1200);
+		// A light in place of the ground beside the player: one block in a section that has others, and light around it.
+		BlockPos lamp = feet.offset(2, -1, 0);
+		int cx = lamp.getX() >> 4;
+		int cz = lamp.getZ() >> 4;
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().worldChunk(cx, cz) != null, 1200);
 		DioramaClientTest.settle(context, 20);
+		BlockState ground = world.getServer().computeOnServer(server -> server.overworld().getBlockState(lamp));
+		ChunkSnapshot old = context.computeOnClient(mc -> MapSession.get().map().worldChunk(cx, cz));
 		long[] before = ChunkSnapshot.takeStats();
 		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(lamp, Blocks.GLOWSTONE.defaultBlockState()));
 		context.waitFor(mc -> stateAt(lamp) == Blocks.GLOWSTONE.defaultBlockState(), 1200);
 		// Until the light has settled and the map has taken it.
 		context.waitTicks(60);
 		long[] after = ChunkSnapshot.takeStats();
+		// In the chunk itself: sections of the snapshot from before the lamp that the one now still has.
+		int[] shared = context.computeOnClient(mc -> {
+			ChunkSnapshot now = MapSession.get().map().worldChunk(cx, cz);
+			int lampSection = (lamp.getY() >> 4) - now.minSectionY;
+			int same = 0;
+			int mixed = 0;
+			for (int i = 0; i < now.sectionCount(); i++) {
+				if (old.hasBlocks(i) && now.hasBlocks(i)) {
+					mixed++;
+					same += old.section(i) == now.section(i) ? 1 : 0;
+				}
+			}
+			return new int[] {same, mixed, old.section(lampSection) == now.section(lampSection) ? 1 : 0};
+		});
 		String differs = context.computeOnClient(mc -> {
-			int cx = lamp.getX() >> 4;
-			int cz = lamp.getZ() >> 4;
 			ChunkSnapshot kept = MapSession.get().map().worldChunk(cx, cz);
 			ChunkSnapshot whole = ChunkSnapshot.take(mc.level.getChunk(cx, cz), mc.level);
 			return difference(kept, whole);
@@ -41,10 +57,16 @@ final class KeptSectionsTest {
 		if (differs != null) {
 			throw new AssertionError("The map's snapshot of a changed chunk isn't what the game has: " + differs);
 		}
-		if (after[0] == before[0]) {
-			throw new AssertionError("A block placed in one section had every section of the chunk copied again");
+		if (shared[2] != 0) {
+			throw new AssertionError("The section the lamp went into was kept from before it");
 		}
-		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(lamp, Blocks.AIR.defaultBlockState()));
+		if (shared[1] < 2 || shared[0] != shared[1] - 1) {
+			throw new AssertionError("Of the chunk's " + shared[1] + " sections with blocks, " + shared[0] + " were kept after a lamp went into one");
+		}
+		if (after[2] == before[2]) {
+			throw new AssertionError("A lamp placed in one section had every light layer copied again");
+		}
+		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(lamp, ground));
 		context.waitTicks(40);
 	}
 
