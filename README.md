@@ -58,6 +58,7 @@ Open them with the **Settings** button on the fullscreen map, or from the mod li
 - **Slower computer?** Set **Quality** to Fast. The map fills in about four times sooner and the fog is cheaper to draw.
 - **GPU baking** draws the map on your graphics card instead of the processor, so it fills in faster and the game uses less CPU. It's on by default. If your graphics card draws the map differently from the processor, is too slow or crashes, Diorama goes back to the processor by itself and remembers that for this card. You can turn it off in the settings.
 - **Fill in from world save.** In singleplayer the map fills in from the world's own save, a little at a time in the background, nearest to you first. Every finished chunk shows up, including areas made by tools like Chunky, without walking there. Caves stay hidden until you've been there, and only the main map fills in, so a new map you make starts blank. Turn it off if you'd rather uncover the map yourself; what's already drawn stays.
+- **Minimap gone?** Another mod may be hiding it: mods made for Diorama can hide the minimap or the waypoints in the world while they show their own view. The Minimap tab says which mod is doing it, and the **Addons** tab, there when you have such a mod, lists them and lets you untick any one to stop it.
 - **Sharing your settings.** They're saved in `.minecraft/diorama/config.json`. Copy that file into a friend's `.minecraft/diorama/` folder to give them the same setup.
 
 Your maps and waypoints are saved next to it, in `.minecraft/diorama/`, one folder per world.

@@ -56,7 +56,8 @@ public final class DioramaFabric implements ClientModInitializer {
 		Addons.finder(() -> {
 			java.util.List<Addons.Found> found = new java.util.ArrayList<>();
 			for (EntrypointContainer<DioramaAddon> container : FabricLoader.getInstance().getEntrypointContainers("diorama", DioramaAddon.class)) {
-				found.add(new Addons.Found(container.getProvider().getMetadata().getId(), container::getEntrypoint));
+				net.fabricmc.loader.api.metadata.ModMetadata mod = container.getProvider().getMetadata();
+				found.add(new Addons.Found(mod.getId(), mod.getName(), container::getEntrypoint));
 			}
 			return found;
 		});

@@ -232,6 +232,12 @@ public final class Settings {
 	 */
 	public java.util.Set<String> mapOffDimensions = new java.util.TreeSet<>();
 	/**
+	 * The mod IDs of the addons the player has stopped from hiding parts of Diorama, such as the
+	 * minimap (the Addons tab). Every other addon may. What an addon hides is never saved; only
+	 * this choice is.
+	 */
+	public java.util.Set<String> addonHidesOff = new java.util.TreeSet<>();
+	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
 	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
 	 * lighting them from the sun.
@@ -473,7 +479,7 @@ public final class Settings {
 		this.apply();
 	}
 
-	/** Pushes the settings that live elsewhere: the map look and fog of war. */
+	/** Pushes the settings that live elsewhere: the map look, fog of war, and which addons may hide parts of Diorama. */
 	public void apply() {
 		// The map session re-bakes only if the tiles would look different.
 		MapStyle.set(this.style());
@@ -487,6 +493,7 @@ public final class Settings {
 			}
 		}
 		ServerRules.setAlwaysFogOfWar(this.alwaysFogOfWar);
+		dev.diorama.addon.Addons.hidesOff(this.addonHidesOff);
 	}
 
 	private static Settings load() {
@@ -574,6 +581,15 @@ public final class Settings {
 			}
 		}
 		settings.mapOffDimensions = off;
+		java.util.Set<String> addonsOff = new java.util.TreeSet<>();
+		if (settings.addonHidesOff != null) {
+			for (String modId : settings.addonHidesOff) {
+				if (modId != null && !modId.isBlank()) {
+					addonsOff.add(modId.strip());
+				}
+			}
+		}
+		settings.addonHidesOff = addonsOff;
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		settings.arrowSize = snapArrowSize(settings.arrowSize);
 		// Hand-edited numbers: snap to a value the settings screen can show.

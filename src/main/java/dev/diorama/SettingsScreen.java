@@ -1,5 +1,7 @@
 package dev.diorama;
 
+import dev.diorama.addon.Addons;
+import dev.diorama.addon.HudHides;
 import dev.diorama.render.Pins;
 import dev.diorama.render.TextSize;
 import java.util.ArrayList;
@@ -15,6 +17,7 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Checkbox;
+import net.minecraft.client.gui.components.MultiLineTextWidget;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.tabs.GridLayoutTab;
@@ -59,12 +62,16 @@ public final class SettingsScreen extends Screen {
 	private final TabManager tabManager = new TabManager(this::addRenderableWidget, this::removeWidget);
 	private final MinimapHud preview = new MinimapHud();
 	private @Nullable TabNavigationBar tabBar;
-	private List<SettingsTab> tabs = List.of();
+	private List<Tab> tabs = List.of();
 	/** Right edge of the settings side: left of the preview where there's room, else the whole screen. */
 	private int side = SIDE;
 	/** GPU baking's button, which says so if the check turns it off while the screen is open. */
 	private @Nullable Button gpuBaking;
 	private boolean gpuFailedShown;
+	/** What addons hid, or whether one ran, when the Addons tab and the minimap's note were made. */
+	private int addonChanges;
+	/** The Addons tab's page, kept when the screen is made again. */
+	private int addonPage;
 
 	public SettingsScreen(@Nullable Screen parent) {
 		super(Component.translatable("diorama.settings.title"));
@@ -116,6 +123,9 @@ public final class SettingsScreen extends Screen {
 		minimap.cycle("lock_north", () -> s.minimapLockNorth ? 1 : 0, 2, i -> s.minimapLockNorth = i == 1,
 			i -> i == 1 ? net.minecraft.network.chat.CommonComponents.OPTION_ON : net.minecraft.network.chat.CommonComponents.OPTION_OFF);
 		minimap.lastThreeSideBySide();
+		this.addonChanges = HudHides.changes();
+		List<Addons.Listed> addons = Addons.listed();
+		minimap.addonNote(addons);
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		Boolean radarSet = ServerRules.radarAllowed() ? null : false;
@@ -227,20 +237,27 @@ public final class SettingsScreen extends Screen {
 		// Beside its colour, so the tab doesn't grow.
 		look.lastTwoSideBySide();
 
+		// Only with an addon installed, so the screen is as it was without one.
+		List<Tab> tabs = new ArrayList<>(List.of(minimap, radar, overlays, waypoints, look));
+		if (!addons.isEmpty()) {
+			tabs.add(new AddonsTab(addons));
+		}
+		Tab[] all = tabs.toArray(new Tab[0]);
+
 		// Vanilla's tab bar, over the settings side instead of the whole screen. It's drawn by hand
 		// (extractRenderState), clipped to the side: its separator line runs on past the last tab.
 		//? if >=26.2 {
-		MenuTabBar bar = MenuTabBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		MenuTabBar bar = MenuTabBar.builder(this.tabManager, this.side).addTabs(all).build();
 		bar.arrangeElements(this.side);
 		//?} else if >=26.1 {
-		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(all).build();
 		bar.updateWidth(this.side);
 		*///?} else {
-		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(minimap, radar, overlays, waypoints, look).build();
+		/*TabNavigationBar bar = TabNavigationBar.builder(this.tabManager, this.side).addTabs(all).build();
 		bar.setWidth(this.side);
 		bar.arrangeElements();
 		*///?}
-		this.tabs = List.of(minimap, radar, overlays, waypoints, look);
+		this.tabs = List.copyOf(tabs);
 		this.tabBar = this.addWidget(bar);
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
 			.bounds(this.side / 2 - 100, this.height - 26, 200, 20).build());
@@ -260,6 +277,11 @@ public final class SettingsScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
+		// An addon hid or showed something, failed, or the player switched one: the Addons tab and
+		// the minimap's note say so. Not in the middle of dragging a slider.
+		if (HudHides.changes() != this.addonChanges && !this.isDragging()) {
+			this.rebuildWidgets();
+		}
 		boolean failed = dev.diorama.render.gpu.GpuBakeCheck.failed();
 		if (this.gpuBaking != null && failed != this.gpuFailedShown) {
 			this.gpuFailedShown = failed;
@@ -375,6 +397,25 @@ public final class SettingsScreen extends Screen {
 			this.wide.add(heading);
 		}
 
+		/**
+		 * While an addon hides the minimap, the line under the checkboxes says which, and where to
+		 * switch it off, as the server's note does for what a server sets.
+		 */
+		void addonNote(List<Addons.Listed> addons) {
+			if (!HudHides.minimapHidden()) {
+				return;
+			}
+			List<String> hiding = addons.stream().filter(one -> one.running() && one.allowed() && one.minimap()).map(Addons.Listed::name).toList();
+			Component note = Component.translatable("diorama.settings.addons.minimap_hidden", hiding.isEmpty() ? "" : hiding.get(0));
+			if (hiding.size() != 1 || SettingsScreen.this.font.width(note) > CONTENT) {
+				note = Component.translatable("diorama.settings.addons.minimap_hidden_many");
+			}
+			StringWidget line = new StringWidget(note.copy().withStyle(net.minecraft.ChatFormatting.GRAY), SettingsScreen.this.font);
+			this.headings.add(line);
+			// First of the wide ones, so it's the line under the checkboxes.
+			this.wide.add(0, line);
+		}
+
 		@Override
 		public void visitChildren(Consumer<AbstractWidget> consumer) {
 			this.checkboxes.forEach(consumer);
@@ -429,6 +470,127 @@ public final class SettingsScreen extends Screen {
 				}
 				y += rowStep;
 			}
+		}
+	}
+
+	/**
+	 * The mods using Diorama's API, one to a row: a tick by the mod's name for whether it may hide
+	 * parts of Diorama, and what it's doing on the line under it, as vanilla's pack list puts a
+	 * description under each name. Only there with one installed. A page at a time when there are
+	 * more than fit.
+	 */
+	private final class AddonsTab extends GridLayoutTab {
+		/** Between the checkbox and the line under it, and under that line. */
+		private static final int GAP = 2;
+		private final MultiLineTextWidget about;
+		private final List<Checkbox> ticks = new ArrayList<>();
+		private final List<StringWidget> states = new ArrayList<>();
+		private final Button back;
+		private final Button next;
+		private @Nullable ScreenRectangle area;
+
+		AddonsTab(List<Addons.Listed> addons) {
+			super(Component.translatable("diorama.settings.addons"));
+			net.minecraft.client.gui.Font font = SettingsScreen.this.font;
+			this.about = new MultiLineTextWidget(Component.translatable("diorama.settings.addons.about").withStyle(net.minecraft.ChatFormatting.GRAY), font);
+			this.about.setMaxWidth(CONTENT);
+			for (Addons.Listed addon : addons) {
+				StringWidget line = new StringWidget(Component.translatable(state(addon)).withStyle(net.minecraft.ChatFormatting.GRAY), font);
+				// Cut short only past the row's width, which few names reach.
+				Checkbox tick = checkbox(Component.literal(fit(font, addon.name(), CONTENT - 24)), font, addon.allowed(), CONTENT, allowed -> {
+					java.util.Set<String> off = Settings.get().addonHidesOff;
+					if (allowed) {
+						off.remove(addon.modId());
+					} else {
+						off.add(addon.modId());
+					}
+				});
+				tick.setTooltip(Tooltip.create(Component.translatable("diorama.settings.addons.tooltip", addon.name(), addon.modId())));
+				this.ticks.add(tick);
+				this.states.add(line);
+			}
+			this.back = Button.builder(Component.literal("<"), b -> this.turn(-1)).size(20, 20).build();
+			this.next = Button.builder(Component.literal(">"), b -> this.turn(1)).size(20, 20).build();
+		}
+
+		/** What the addon is doing, in a few words: stopped, hiding something (or kept from it), or just running. */
+		private static String state(Addons.Listed addon) {
+			if (!addon.running()) {
+				return "diorama.settings.addons.stopped";
+			}
+			String parts = addon.minimap() && addon.worldWaypoints() ? "both" : addon.minimap() ? "minimap" : addon.worldWaypoints() ? "world_waypoints" : null;
+			if (parts == null) {
+				return "diorama.settings.addons.running";
+			}
+			return "diorama.settings.addons." + (addon.allowed() ? "hiding." : "wants.") + parts;
+		}
+
+		/** The name, cut to fit {@code width} with an ellipsis. */
+		private static String fit(net.minecraft.client.gui.Font font, String name, int width) {
+			if (font.width(name) <= width) {
+				return name;
+			}
+			return font.plainSubstrByWidth(name, Math.max(0, width - font.width("..."))) + "...";
+		}
+
+		private void turn(int pages) {
+			SettingsScreen.this.addonPage += pages;
+			if (this.area != null) {
+				this.doLayout(this.area);
+			}
+		}
+
+		@Override
+		public void visitChildren(Consumer<AbstractWidget> consumer) {
+			consumer.accept(this.about);
+			for (int i = 0; i < this.ticks.size(); i++) {
+				consumer.accept(this.ticks.get(i));
+				consumer.accept(this.states.get(i));
+			}
+			consumer.accept(this.back);
+			consumer.accept(this.next);
+		}
+
+		@Override
+		public void doLayout(ScreenRectangle area) {
+			this.area = area;
+			int content = Math.min(CONTENT, area.width() - 10);
+			int left = area.left() + (area.width() - content) / 2;
+			int y = area.top() + 6;
+			this.about.setMaxWidth(content);
+			this.about.setPosition(left, y);
+			y += this.about.getHeight() + 6;
+			// The checkbox, its state under its label, and a gap: 30 where a checkbox is 17 high, 33 on 1.20.1.
+			int tickHeight = this.ticks.isEmpty() ? 20 : this.ticks.get(0).getHeight();
+			int row = tickHeight + GAP + SettingsScreen.this.font.lineHeight + GAP;
+			int perPage = Math.max(1, (area.bottom() - y) / row);
+			int pages = (this.ticks.size() + perPage - 1) / perPage;
+			if (pages > 1) {
+				// Room for the page buttons under the rows.
+				perPage = Math.max(1, (area.bottom() - y - 22) / row);
+				pages = (this.ticks.size() + perPage - 1) / perPage;
+			}
+			int page = Math.max(0, Math.min(pages - 1, SettingsScreen.this.addonPage));
+			SettingsScreen.this.addonPage = page;
+			for (int i = 0; i < this.ticks.size(); i++) {
+				int slot = i - page * perPage;
+				boolean shown = slot >= 0 && slot < perPage;
+				Checkbox tick = this.ticks.get(i);
+				StringWidget state = this.states.get(i);
+				tick.visible = shown;
+				state.visible = shown;
+				int rowY = y + Math.max(0, Math.min(perPage - 1, slot)) * row;
+				tick.setPosition(left, rowY);
+				// Under the name, where the checkbox's label starts: 4 past the box, which is as high as the checkbox.
+				state.setPosition(left + tickHeight + 4, rowY + tickHeight + GAP);
+				state.setWidth(Math.min(content - tickHeight - 4, SettingsScreen.this.font.width(state.getMessage())));
+			}
+			this.back.visible = pages > 1;
+			this.next.visible = pages > 1;
+			this.back.active = page > 0;
+			this.next.active = page < pages - 1;
+			this.back.setPosition(left, y + perPage * row);
+			this.next.setPosition(left + content - 20, y + perPage * row);
 		}
 	}
 
