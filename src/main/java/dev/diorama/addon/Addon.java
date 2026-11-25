@@ -4,6 +4,7 @@ import dev.diorama.Diorama;
 import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
+import dev.diorama.api.WorldListener;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
@@ -16,8 +17,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
- * what it holds can be let go when it fails. It fails once: then what it hid shows again, its later
- * calls do nothing, and nothing of it is called again.
+ * what it holds can be let go when it fails. It fails once: then what it hid shows again, its
+ * listeners are closed, its later calls do nothing, and nothing of it is called again.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -37,7 +38,15 @@ final class Addon implements DioramaApi, Hud {
 	private final String modId;
 	/** Its open handles, so they can be closed for it. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
+	/** Its other open handles: world listeners and waypoint listeners. */
+	private final List<Held> held = new ArrayList<>();
 	private boolean failed;
+
+	/** Something an addon holds besides a part of the HUD, let go of when it fails. */
+	interface Held {
+		/** Lets go; true if it still held. */
+		boolean release();
+	}
 
 	Addon(String modId) {
 		this.modId = modId;
@@ -67,6 +76,10 @@ final class Addon implements DioramaApi, Hud {
 				hold.release();
 			}
 			this.holds.clear();
+			for (Held each : List.copyOf(this.held)) {
+				each.release();
+			}
+			this.held.clear();
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
 				throw fatal;
@@ -125,6 +138,14 @@ final class Addon implements DioramaApi, Hud {
 		this.holds.remove(hold);
 	}
 
+	void keep(Held each) {
+		this.held.add(each);
+	}
+
+	void drop(Held each) {
+		this.held.remove(each);
+	}
+
 	String id() {
 		return this.modId;
 	}
@@ -164,6 +185,16 @@ final class Addon implements DioramaApi, Hud {
 		HudHides.Hold hold = new HudHides.Hold(this, bits);
 		this.holds.add(hold);
 		return hold;
+	}
+
+	@Override
+	public Handle onWorld(WorldListener listener) {
+		checkThread();
+		Objects.requireNonNull(listener, "listener");
+		if (this.failed) {
+			return AddonWorlds.closed(this);
+		}
+		return AddonWorlds.register(this, listener);
 	}
 
 	@Override

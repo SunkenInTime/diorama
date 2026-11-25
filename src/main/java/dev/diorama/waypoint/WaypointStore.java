@@ -11,6 +11,9 @@ import dev.diorama.Diorama;
 import dev.diorama.Maps;
 import dev.diorama.Settings;
 import dev.diorama.WorldKey;
+import dev.diorama.addon.AddonWorlds;
+import dev.diorama.api.WaypointChange;
+import dev.diorama.api.WaypointEditor;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -26,8 +29,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
@@ -44,6 +49,10 @@ import org.jspecify.annotations.Nullable;
  * waypoints stay in memory only. Waystones' waystones ({@link Waystones}) aren't kept
  * here, but show with this world's waypoints, and which of them are hidden is saved with the folders.
  * Client thread only.
+ *
+ * <p>Every change to the waypoints goes out through {@link #committed}, after its save: Diorama's
+ * own (the screens, automatic pins, imports) and addons' ({@link #edit}) alike, so an addon
+ * listening hears all of them ({@link AddonWorlds}).
  */
 public final class WaypointStore {
 	/** How many death markers to keep; older ones are dropped as new deaths come in. */
@@ -65,6 +74,8 @@ public final class WaypointStore {
 		.create();
 
 	private static @Nullable WaypointStore current;
+	/** How many times any store has written waypoints.json, for tests. */
+	private static int saves;
 
 	private final String worldKey;
 	private final Path file;
@@ -85,6 +96,12 @@ public final class WaypointStore {
 
 	/** The copies {@link #shownIn} made last for each dimension, by the waypoint each stands in for, to be made again in place. */
 	private final Map<String, Map<Waypoint, Waypoint>> copies = new HashMap<>();
+	/** What addons read of the waypoints. */
+	private final WaypointSnapshots snapshots = new WaypointSnapshots(this);
+	/** Counts switches of saved map in any dimension, so an addon can be told. */
+	private int mapSwitches;
+	/** An addon's edit batch is being put together. */
+	private boolean editing;
 
 	/** {@code from}'s waypoints shown in {@code in}. */
 	private record ShownIn(String in, String from) {
@@ -142,6 +159,26 @@ public final class WaypointStore {
 		return new WaypointStore(worldKey);
 	}
 
+	/** The store loaded last, kept through a dimension change; unlike {@link #get}, never loads one. */
+	public static @Nullable WaypointStore peek() {
+		return current;
+	}
+
+	/** How many times waypoints.json was written since the game started. For tests. */
+	public static int saves() {
+		return saves;
+	}
+
+	/** The world key this store is for. */
+	public String worldKey() {
+		return this.worldKey;
+	}
+
+	/** Goes up each time a dimension switches to another of its saved maps. */
+	public int mapSwitches() {
+		return this.mapSwitches;
+	}
+
 	/**
 	 * A dimension switched to another of its maps: its waypoints become that map's. Temporary ones
 	 * were set on the map that's gone, so they go with it.
@@ -159,6 +196,14 @@ public final class WaypointStore {
 		store.elsewhere.removeAll(coming);
 		store.elsewhere.addAll(leaving);
 		store.waypoints.addAll(coming);
+		// The list is the other map's now, which addons are told as a switch of map, not as
+		// waypoints added and removed: a two-way sync would delete the old map's in its own mod.
+		store.mapSwitches++;
+		if (AddonWorlds.listening(store)) {
+			store.snapshots.rebuild(false);
+		} else {
+			store.snapshots.stale();
+		}
 	}
 
 	/** A map was deleted: the waypoints made on it go too. */
@@ -166,6 +211,7 @@ public final class WaypointStore {
 		WaypointStore store = current != null && current.worldKey.equals(worldKey) ? current : new WaypointStore(worldKey);
 		if (store.elsewhere.removeIf(w -> w.dimension.equals(dimension) && Maps.id(w.map).equals(map))) {
 			store.save();
+			store.committed(null);
 		}
 	}
 
@@ -339,6 +385,7 @@ public final class WaypointStore {
 			this.setFolderHidden(waystoneKey(waypoint.id), !visible);
 		} else {
 			this.save();
+			this.committed(null);
 		}
 	}
 
@@ -424,6 +471,7 @@ public final class WaypointStore {
 		}
 		this.saveFolders();
 		this.save();
+		this.committed(null);
 		return true;
 	}
 
@@ -441,6 +489,7 @@ public final class WaypointStore {
 		this.folders.hidden.remove(customKey(name));
 		this.saveFolders();
 		this.save();
+		this.committed(null);
 	}
 
 	public boolean folderHidden(String key) {
@@ -451,6 +500,8 @@ public final class WaypointStore {
 	public void setFolderHidden(String key, boolean hidden) {
 		if (hidden ? this.folders.hidden.add(key) : this.folders.hidden.remove(key)) {
 			this.saveFolders();
+			// A waystone's own switch is kept here.
+			this.committed(null);
 		}
 	}
 
@@ -515,6 +566,7 @@ public final class WaypointStore {
 			}
 		}
 		this.save();
+		this.committed(null);
 	}
 
 	/**
@@ -526,10 +578,11 @@ public final class WaypointStore {
 			added.forEach(this::onMapInUse);
 			this.waypoints.addAll(added);
 			this.save();
+			this.committed(null);
 		}
 	}
 
-	private void onMapInUse(Waypoint waypoint) {
+	void onMapInUse(Waypoint waypoint) {
 		waypoint.map = Maps.noted(Maps.of(this.worldKey).active(waypoint.dimension));
 	}
 
@@ -545,6 +598,7 @@ public final class WaypointStore {
 		if (waypoint.kind.isPortal()) {
 			waypoint.deleted = true;
 			this.save();
+			this.committed(null);
 		} else {
 			this.forget(waypoint);
 		}
@@ -554,11 +608,131 @@ public final class WaypointStore {
 	void forget(Waypoint waypoint) {
 		this.waypoints.remove(waypoint);
 		this.save();
+		this.committed(null);
 	}
 
 	/** Call after changing a waypoint in place. */
 	public void changed() {
 		this.save();
+		this.committed(null);
+	}
+
+	/**
+	 * After a change to the waypoints and its save: tells the addons listening what changed, put down
+	 * to the addon whose edit it was, or to no one for the player's and Diorama's own. With none
+	 * listening, nothing is compared and nothing made: what addons read is made again when they next
+	 * read it.
+	 */
+	private void committed(@Nullable String by) {
+		if (this != current) {
+			return;
+		}
+		if (!AddonWorlds.listening(this)) {
+			this.snapshots.stale();
+			return;
+		}
+		List<WaypointChange> changes = this.snapshots.rebuild(true);
+		if (changes != null && !changes.isEmpty()) {
+			AddonWorlds.deliver(this, changes, by);
+		}
+	}
+
+	/** What the waypoint list shows: the waypoints of the maps in use but hidden portal pins, then the waystones. */
+	List<Waypoint> listed() {
+		List<Waypoint> out = new ArrayList<>(this.all());
+		out.addAll(this.waystones());
+		return out;
+	}
+
+	WaypointSnapshots snapshots() {
+		return this.snapshots;
+	}
+
+	/**
+	 * What addons read ({@link dev.diorama.api.Waypoints#all}): the same list until something
+	 * changes. While addons listen, Waystones and the portal pin setting reach it on the next tick
+	 * ({@link #outsideChanges}), which tells them; otherwise as soon as it's read.
+	 */
+	public List<dev.diorama.api.Waypoint> published() {
+		this.snapshots.refresh(!AddonWorlds.listening(this));
+		return this.snapshots.all();
+	}
+
+	/** One waypoint of {@link #published()} by its ID. */
+	public Optional<dev.diorama.api.Waypoint> published(UUID id) {
+		this.snapshots.refresh(!AddonWorlds.listening(this));
+		return this.snapshots.get(id);
+	}
+
+	/** An addon started listening: what it hears is compared with the waypoints as they are now. */
+	public void listenFromNow() {
+		this.snapshots.refresh(true);
+	}
+
+	/** Each tick while addons listen: Waystones or the portal pin setting changed what the list shows. */
+	public void outsideChanges() {
+		if (this.snapshots.outsideChanged()) {
+			this.committed(null);
+		}
+	}
+
+	/**
+	 * An addon's edit batch ({@link dev.diorama.api.Waypoints#edit}): {@code edits} says what, then
+	 * all of it is applied, saved once and told once, put down to {@code by}. If {@code edits} throws,
+	 * nothing is applied.
+	 */
+	public void edit(String by, Consumer<WaypointEditor> edits) {
+		if (this.editing) {
+			throw new IllegalStateException("edit() was called from inside another edit()'s batch; make the changes on the editor it was handed");
+		}
+		if (AddonWorlds.listening(this) && this.snapshots.outsideChanged()) {
+			// Waystones or the portal pin setting moved since the last tick: told as Diorama's own
+			// first, so the batch's change holds only what the addon did.
+			this.committed(null);
+		}
+		this.snapshots.refresh(!AddonWorlds.listening(this));
+		WaypointEdits batch = new WaypointEdits(this, by);
+		this.editing = true;
+		try {
+			edits.accept(batch);
+		} finally {
+			batch.close();
+			this.editing = false;
+		}
+		if (batch.isEmpty()) {
+			return;
+		}
+		batch.apply();
+		this.save();
+		this.committed(by);
+	}
+
+	/** Adds an addon's waypoint to the map in use in its dimension, unsaved: part of {@link #edit}. */
+	void addEdited(Waypoint waypoint) {
+		this.onMapInUse(waypoint);
+		this.waypoints.add(waypoint);
+	}
+
+	/** Removes a waypoint for an addon, unsaved: part of {@link #edit}. */
+	void removeEdited(Waypoint waypoint) {
+		this.waypoints.remove(waypoint);
+	}
+
+	/**
+	 * A waypoint an addon put in one of the player's folders: the folder is made if there's none of
+	 * that name, and the waypoint takes the folder's spelling. Part of {@link #edit}.
+	 */
+	void useFolder(Waypoint waypoint) {
+		if (waypoint.folder.isEmpty()) {
+			return;
+		}
+		if (this.folderName(waypoint.folder) == null) {
+			this.addFolder(waypoint.folder);
+		}
+		String spelled = this.folderName(waypoint.folder);
+		if (spelled != null) {
+			waypoint.folder = spelled;
+		}
 	}
 
 	/**
@@ -685,6 +859,7 @@ public final class WaypointStore {
 				GSON.toJson(this.everyWaypoint().stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY).toList(), writer);
 			}
 			Files.move(temp, this.file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			saves++;
 		} catch (IOException | RuntimeException e) {
 			// Gson wraps writer failures (a full disk, say) in unchecked exceptions.
 			Diorama.LOGGER.error("Couldn't save waypoints to {}", this.file, e);

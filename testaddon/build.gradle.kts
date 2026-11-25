@@ -13,6 +13,9 @@
 //                                       wrapped in its own RuntimeException
 //   diorama-test-addon-recursive.jar    hides the minimap, then throws an exception whose
 //                                       getMessage() calls itself
+//   diorama-test-addon-throwing.jar     listens to waypoints, and throws from its listener once
+//                                       the test arms it
+//   diorama-test-addon-looping.jar      answers each of its own waypoint changes with another
 // ./gradlew :testaddon:assemble puts them in testaddon/build/libs; boat_run.py --mods takes that
 // folder (docs/development.md). Never released.
 plugins {
@@ -33,7 +36,9 @@ val assertion = sourceSets.create("assertion")
 val unprintable = sourceSets.create("unprintable")
 val overflow = sourceSets.create("overflow")
 val recursive = sourceSets.create("recursive")
-val addons = listOf(main, broken, linkage, assertion, unprintable, overflow, recursive)
+val throwing = sourceSets.create("throwing")
+val looping = sourceSets.create("looping")
+val addons = listOf(main, broken, linkage, assertion, unprintable, overflow, recursive, throwing, looping)
 
 dependencies {
 	for (set in addons) {
@@ -61,7 +66,7 @@ for (set in addons) {
 tasks.named<Jar>("jar") {
 	archiveFileName = "diorama-test-addon.jar"
 }
-for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable", overflow to "overflow", recursive to "recursive")) {
+for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable", overflow to "overflow", recursive to "recursive", throwing to "throwing", looping to "looping")) {
 	val jar = tasks.register<Jar>("${name}Jar") {
 		from(set.output)
 		archiveFileName = "diorama-test-addon-$name.jar"

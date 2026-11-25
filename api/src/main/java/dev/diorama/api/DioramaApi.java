@@ -24,4 +24,19 @@ public interface DioramaApi {
 
 	/** {@return Diorama's parts of the in-game HUD} */
 	Hud hud();
+
+	/**
+	 * Starts telling {@code listener} when the player's world opens and closes and when their map
+	 * changes; the {@link MapWorld} it is handed is the way to the world's waypoints. If a world is
+	 * open already, {@link WorldListener#opened} is called before this returns. Typically called
+	 * once, from {@link DioramaAddon#onReady}.
+	 *
+	 * @param listener called on the client thread
+	 * @return the handle to close to stop; worlds closing don't close it. Closing it closes the
+	 *     {@link MapWorld} it handed over, and that world's waypoint listeners, without a
+	 *     {@link WorldListener#closed} call
+	 * @throws NullPointerException if {@code listener} is null
+	 * @throws IllegalStateException if called off the client thread
+	 */
+	Handle onWorld(WorldListener listener);
 }
