@@ -59,7 +59,16 @@ final class PackedChunksTest {
 		world.getServer().runCommand("tp @a " + away + " 200 " + HOME);
 		context.waitTicks(100);
 		DioramaClientTest.waitUntilGenerated(context, world);
-		int kept = context.computeOnClient(mc -> count(cx, cz, false) + count(cx, cz, true));
+		// In one pass: counted packed and not packed apart, one being packed meanwhile would count twice.
+		int kept = context.computeOnClient(mc -> {
+			int count = 0;
+			for (ChunkSnapshot chunk : chunks(cx, cz)) {
+				if (chunk != null) {
+					count++;
+				}
+			}
+			return count;
+		});
 		if (kept != side() * side()) {
 			throw new AssertionError("The map kept " + kept + " of the " + side() * side() + " chunks left behind");
 		}
