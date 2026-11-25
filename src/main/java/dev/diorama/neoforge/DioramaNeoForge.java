@@ -13,6 +13,8 @@ import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
 import dev.diorama.ChunkyBorders;
+import dev.diorama.addon.Addons;
+import dev.diorama.api.DioramaEntrypoint;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
@@ -31,6 +33,7 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
@@ -47,6 +50,8 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.GameShuttingDownEvent;
 import net.neoforged.neoforge.event.level.ChunkEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforgespi.language.IModInfo;
+import net.neoforged.neoforgespi.language.ModFileScanData;
 
 /**
  * Diorama's entrypoint on the client on NeoForge: what {@code dev.diorama.fabric.DioramaFabric}
@@ -57,6 +62,25 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 public final class DioramaNeoForge {
 	public DioramaNeoForge(IEventBus modBus, ModContainer container) {
 		DioramaClient.init();
+		// Addons are classes marked @DioramaEntrypoint, found in NeoForge's scan of every mod file
+		// (the way JEI finds its plugins), tied to the mod their file declares. The scan reads class
+		// files without loading them; nothing is loaded until Addons makes them.
+		Addons.finder(() -> {
+			org.objectweb.asm.Type marker = org.objectweb.asm.Type.getType(DioramaEntrypoint.class);
+			java.util.List<Addons.Found> found = new java.util.ArrayList<>();
+			for (ModFileScanData scan : ModList.get().getAllScanData()) {
+				java.util.List<String> mods = scan.getIModInfoData().stream().flatMap(file -> file.getMods().stream()).map(IModInfo::getModId).toList();
+				for (ModFileScanData.AnnotationData annotation : scan.getAnnotations()) {
+					if (marker.equals(annotation.annotationType())) {
+						Addons.Found one = Addons.scanned(mods, annotation.clazz().getClassName());
+						if (one != null) {
+							found.add(one);
+						}
+					}
+				}
+			}
+			return found;
+		});
 		// The channel itself is DioramaNeoForgeCommon's.
 		ShareClient.init();
 		dev.diorama.share.ShareProtocol.toServer(data -> {
