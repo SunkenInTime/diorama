@@ -558,9 +558,10 @@ public final class ChunkSnapshot {
 	}
 
 	/**
-	 * Packs the blocks and light, about a tenth of their size, to be unpacked whenever something
+	 * Packs the blocks and light, about a seventh of their size, to be unpacked whenever something
 	 * reads them again: a redraw after the game has unloaded the chunk, which is rare. Whatever
-	 * reads them meanwhile keeps reading what it has. The packing thread only, after {@link #startPacking}.
+	 * reads them meanwhile keeps reading what it has. A chunk that can't be packed stays as it is;
+	 * see {@link ChunkPack}. The packing thread only, after {@link #startPacking}.
 	 */
 	public void pack() {
 		Body body = this.body;
@@ -580,8 +581,10 @@ public final class ChunkSnapshot {
 		this.unpacked = new java.lang.ref.WeakReference<>(new Body(body.blocks(), body.blockLight(), body.skyLight(), tints));
 		// Last: a reader that finds no body finds the pack.
 		this.body = null;
-		// Tints a bake set meanwhile stay: they aren't in the pack.
-		if (this.tints == tints) {
+		// Only tints that are in the pack go. With none in it, a bake may be setting its own right
+		// now, and those have to stay. With some in it, a bake that set its own meanwhile blended
+		// the same biomes, and loses nothing to the ones in the pack.
+		if (tints != null) {
 			this.tints = null;
 		}
 	}

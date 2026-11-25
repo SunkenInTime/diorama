@@ -29,6 +29,9 @@ import org.jspecify.annotations.Nullable;
  * states themselves, held beside the bytes. So nothing in the bytes depends on how the game
  * numbers its blocks, which a modded server changes, and which some mods' blocks have no number
  * in at all. Light goes in as it is, a layer of one value as that value. All of it deflated.
+ *
+ * <p>A chunk with a section the game doesn't pack that way stays unpacked: one with more block
+ * states than a palette of its own holds, which the game reads through its list of all of them.
  */
 final class ChunkPack {
 	private static final int ABSENT = 0;
@@ -57,8 +60,9 @@ final class ChunkPack {
 		this.table = table;
 	}
 
+	/** About how many bytes the pack takes, the table's references included. */
 	int size() {
-		return this.bytes.length;
+		return this.bytes.length + 4 * this.table.length + 16;
 	}
 
 	/** A section's blocks as unpacked: the game's own packing, with the palette as an array. */
@@ -95,8 +99,8 @@ final class ChunkPack {
 			Map<BlockState, Integer> places = new IdentityHashMap<>();
 			List<BlockState> table = new ArrayList<>();
 			for (ChunkSnapshot.Blocks blocks : body.blocks()) {
-				if (blocks != null) {
-					writeBlocks(buf, blocks, places, table);
+				if (blocks != null && !writeBlocks(buf, blocks, places, table)) {
+					return null;
 				}
 			}
 			for (DataLayer layer : body.blockLight()) {
@@ -151,31 +155,14 @@ final class ChunkPack {
 		return new ChunkSnapshot.Body(blocks, blockLight, skyLight, tints);
 	}
 
-	private static void writeBlocks(FriendlyByteBuf buf, ChunkSnapshot.Blocks blocks, Map<BlockState, Integer> places, List<BlockState> table) {
+	/** Writes a section's blocks; false if they aren't packed the way this reads back. */
+	private static boolean writeBlocks(FriendlyByteBuf buf, ChunkSnapshot.Blocks blocks, Map<BlockState, Integer> places, List<BlockState> table) {
 		ChunkSnapshot.Packed packed = blocks.packed();
-		BitStorage storage = packed == null ? null : packed.storage();
-		BlockState[] palette = packed == null ? null : packed.palette();
-		if (!(storage instanceof SimpleBitStorage) || storage.getSize() != BLOCKS) {
-			// Not packed the game's way, or not readable as packed: packed here, block by block.
-			Map<BlockState, Integer> own = new IdentityHashMap<>();
-			List<BlockState> states = new ArrayList<>();
-			int[] picks = new int[BLOCKS];
-			for (int i = 0; i < BLOCKS; i++) {
-				BlockState state = blocks.get(i & 15, i >> 8, i >> 4 & 15);
-				Integer pick = own.get(state);
-				if (pick == null) {
-					pick = states.size();
-					own.put(state, pick);
-					states.add(state);
-				}
-				picks[i] = pick;
-			}
-			storage = new SimpleBitStorage(Math.max(1, 32 - Integer.numberOfLeadingZeros(states.size() - 1)), BLOCKS);
-			for (int i = 0; i < BLOCKS; i++) {
-				storage.set(i, picks[i]);
-			}
-			palette = states.toArray(new BlockState[0]);
+		if (packed == null || !(packed.storage() instanceof SimpleBitStorage) || packed.storage().getSize() != BLOCKS) {
+			return false;
 		}
+		BitStorage storage = packed.storage();
+		BlockState[] palette = packed.palette();
 		buf.writeByte(storage.getBits());
 		buf.writeVarInt(palette.length);
 		for (BlockState state : palette) {
@@ -194,6 +181,7 @@ final class ChunkPack {
 		for (long word : raw) {
 			buf.writeLong(word);
 		}
+		return true;
 	}
 
 	private ChunkSnapshot.Blocks readBlocks(FriendlyByteBuf buf) {

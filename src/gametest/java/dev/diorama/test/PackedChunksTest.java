@@ -38,6 +38,14 @@ final class PackedChunksTest {
 		int cx = HOME >> 4;
 		int cz = HOME >> 4;
 		context.waitFor(mc -> MapSession.get() != null && count(cx, cz, false) == side() * side(), 2400);
+		// A block state the game never numbered, as some mods put in the world (see UnnumberedStatesTest):
+		// packed chunks have to hand back that very state.
+		net.minecraft.world.level.block.state.StateDefinition<Block, BlockState> definition = new net.minecraft.world.level.block.state.StateDefinition.Builder<Block, BlockState>(net.minecraft.world.level.block.Blocks.GOLD_BLOCK).create(Block::defaultBlockState, BlockState::new);
+		definition.getPossibleStates().forEach(BlockState::initCache);
+		BlockState unnumbered = definition.any();
+		net.minecraft.core.BlockPos odd = new net.minecraft.core.BlockPos(HOME + 3, 150, HOME + 5);
+		context.runOnClient(mc -> mc.level.setBlock(odd, unnumbered, 3));
+		context.waitFor(mc -> stateAt(odd) == unnumbered, 1200);
 		DioramaClientTest.settle(context, 40);
 		// The snapshots themselves: the game can still change a chunk before it's left behind, and the
 		// map then has another snapshot there, which says nothing about packing.
@@ -105,6 +113,9 @@ final class PackedChunksTest {
 		}
 		if (context.computeOnClient(mc -> count(cx, cz, true)) != side() * side()) {
 			throw new AssertionError("Reading packed chunks left them unpacked");
+		}
+		if (context.computeOnClient(mc -> stateAt(odd) != unnumbered)) {
+			throw new AssertionError("A packed chunk lost the block state the game never numbered");
 		}
 
 		// The map turned east over them: those tiles were never drawn, and the chunks are packed.
@@ -175,6 +186,14 @@ final class PackedChunksTest {
 		return count;
 	}
 
+	/** The block the map's snapshot has at a place, null if it has no snapshot or only air there. Client thread. */
+	private static BlockState stateAt(net.minecraft.core.BlockPos at) {
+		ChunkSnapshot chunk = MapSession.get().map().worldChunk(at.getX() >> 4, at.getZ() >> 4);
+		int section = chunk == null ? -1 : (at.getY() >> 4) - chunk.minSectionY;
+		ChunkSnapshot.Blocks blocks = section < 0 || section >= chunk.sectionCount() ? null : chunk.section(section);
+		return blocks == null ? null : blocks.get(at.getX() & 15, at.getY() & 15, at.getZ() & 15);
+	}
+
 	private static void forget(ChunkSnapshot[] chunks) {
 		for (ChunkSnapshot chunk : chunks) {
 			if (chunk.isPacked()) {
@@ -220,11 +239,12 @@ final class PackedChunksTest {
 				for (int i = 0; i < chunk.sectionCount(); i++) {
 					ChunkSnapshot.Blocks states = chunk.section(i);
 					BlockState uniform = chunk.uniformSection(i);
-					digest = digest * 31 + (uniform == null ? -1 : Block.getId(uniform));
+					// The states themselves, not their numbers: these stay put for as long as the game runs.
+					digest = digest * 31 + (uniform == null ? -1 : System.identityHashCode(uniform));
 					for (int y = 0; y < 16; y++) {
 						for (int z = 0; z < 16; z++) {
 							for (int x = 0; x < 16; x++) {
-								int id = states == null ? 0 : Block.getId(states.get(x, y, z));
+								long id = states == null ? 0 : System.identityHashCode(states.get(x, y, z));
 								digest = digest * 31 + (id << 8 | chunk.blockLight(i, x, y, z) << 4 | chunk.skyLight(i, x, y, z));
 							}
 						}
