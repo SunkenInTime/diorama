@@ -190,7 +190,7 @@
 	"diorama.settings.addons.wants.world_waypoints": "Asks to hide waypoints in the world",
 	"diorama.settings.addons.wants.both": "Asks to hide the minimap and world waypoints",
 	"diorama.settings.addons.minimap_hidden": "Minimap hidden by %s: see Addons",
-	"diorama.settings.addons.minimap_hidden_many": "Minimap hidden by addons: see Addons",
+	"diorama.settings.addons.minimap_hidden_any": "Minimap hidden by an addon: see Addons",
 	"diorama.settings.outlines": "Outlines",
 	"diorama.settings.day_night": "Day and night",
 	"diorama.settings.day_night.follow": "World time",

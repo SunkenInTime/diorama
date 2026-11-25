@@ -163,7 +163,7 @@
 	"diorama.settings.addons.wants.world_waypoints": "请求隐藏世界中的路径点",
 	"diorama.settings.addons.wants.both": "请求隐藏小地图和世界中的路径点",
 	"diorama.settings.addons.minimap_hidden": "小地图被 %s 隐藏：见“附加组件”",
-	"diorama.settings.addons.minimap_hidden_many": "小地图被附加组件隐藏：见“附加组件”",
+	"diorama.settings.addons.minimap_hidden_any": "小地图被附加组件隐藏：见“附加组件”",
 	"diorama.settings.outlines": "轮廓",
 	"diorama.settings.day_night": "昼夜",
 	"diorama.settings.day_night.follow": "世界时间",

@@ -12,7 +12,10 @@ import dev.diorama.api.Hud;
 public final class HudHides {
 	private static int minimap;
 	private static int worldWaypoints;
-	/** Goes up whenever a count changes or an addon fails, so the settings screen knows to redraw its list. */
+	/**
+	 * Goes up whenever a handle opens or closes, the player switches an addon, or one fails, so the
+	 * settings screen knows to redraw its list.
+	 */
 	private static int changes;
 
 	private HudHides() {
@@ -67,6 +70,9 @@ public final class HudHides {
 			this.open = true;
 			if (owner.allowed()) {
 				count(parts, 1);
+			} else {
+				// Hides nothing, but the settings screen says what it asks for.
+				changed();
 			}
 		}
 
@@ -103,6 +109,8 @@ public final class HudHides {
 			this.open = false;
 			if (this.owner.allowed()) {
 				count(this.parts, -1);
+			} else {
+				changed();
 			}
 			return true;
 		}

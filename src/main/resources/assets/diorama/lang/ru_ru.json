@@ -190,7 +190,7 @@
     "diorama.settings.addons.wants.world_waypoints": "Просит скрыть точки в мире",
     "diorama.settings.addons.wants.both": "Просит скрыть мини-карту и точки в мире",
     "diorama.settings.addons.minimap_hidden": "Мини-карту скрывает %s: см. «Аддоны»",
-    "diorama.settings.addons.minimap_hidden_many": "Мини-карту скрывают аддоны: см. «Аддоны»",
+    "diorama.settings.addons.minimap_hidden_any": "Мини-карту скрывает аддон: см. «Аддоны»",
     "diorama.settings.outlines": "Контуры",
 	"diorama.settings.day_night": "День и ночь",
 	"diorama.settings.day_night.follow": "Время мира",

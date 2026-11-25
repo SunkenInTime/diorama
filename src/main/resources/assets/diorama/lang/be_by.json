@@ -190,7 +190,7 @@
     "diorama.settings.addons.wants.world_waypoints": "Просіць схаваць меткі ў свеце",
     "diorama.settings.addons.wants.both": "Просіць схаваць мінімапу і меткі ў свеце",
     "diorama.settings.addons.minimap_hidden": "Мінімапу хавае %s: гл. «Дадаткі»",
-    "diorama.settings.addons.minimap_hidden_many": "Мінімапу хаваюць дадаткі: гл. «Дадаткі»",
+    "diorama.settings.addons.minimap_hidden_any": "Мінімапу хавае дадатак: гл. «Дадаткі»",
     "diorama.settings.outlines": "Контуры",
 	"diorama.settings.day_night": "Дзень і ноч",
 	"diorama.settings.day_night.follow": "Час свету",

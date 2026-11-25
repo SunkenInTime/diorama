@@ -92,7 +92,8 @@ public final class Addons {
 
 	/**
 	 * The mod IDs the player has stopped from hiding parts of Diorama, from the settings: what
-	 * their open handles hide shows again at once, and hides again once they're let.
+	 * their open handles hide shows again at once, and hides again at once when the player ticks
+	 * them again.
 	 */
 	public static void hidesOff(Set<String> modIds) {
 		hidesOff = Set.copyOf(modIds);

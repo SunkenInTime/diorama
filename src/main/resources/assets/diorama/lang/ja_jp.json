@@ -190,7 +190,7 @@
 	"diorama.settings.addons.wants.world_waypoints": "ワールド上の目印の非表示を要求",
 	"diorama.settings.addons.wants.both": "ミニマップとワールド上の目印の非表示を要求",
 	"diorama.settings.addons.minimap_hidden": "%sがミニマップを非表示中：「アドオン」を参照",
-	"diorama.settings.addons.minimap_hidden_many": "アドオンがミニマップを非表示中：「アドオン」を参照",
+	"diorama.settings.addons.minimap_hidden_any": "アドオンがミニマップを非表示中：「アドオン」を参照",
 	"diorama.settings.outlines": "アウトライン",
 	"diorama.settings.day_night": "昼と夜",
 	"diorama.settings.day_night.follow": "ワールドの時刻",

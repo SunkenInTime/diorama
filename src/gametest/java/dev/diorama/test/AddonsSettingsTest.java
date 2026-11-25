@@ -100,6 +100,16 @@ final class AddonsSettingsTest {
 		context.getInput().setCursorPos(2, 2);
 		context.waitTicks(3);
 		context.takeScreenshot("addons-settings-04-switched-off");
+		// Switched off, a handle it opens hides nothing, and its row still says what it asks for.
+		Handle waypoints = context.computeOnClient(mc -> TestAddon.hide(Hud.Part.WORLD_WAYPOINTS));
+		context.waitTicks(3);
+		if (context.computeOnClient(mc -> HudHides.worldWaypointsHidden())) {
+			throw new AssertionError("A handle the switched-off test addon opened hides the waypoints in the world");
+		}
+		expectStates(context, "with a handle opened while switched off", "diorama.settings.addons.wants.both");
+		context.runOnClient(mc -> waypoints.close());
+		context.waitTicks(3);
+		expectStates(context, "after closing that handle", "diorama.settings.addons.wants.minimap");
 		openSettings(context, 0);
 		if (context.computeOnClient(mc -> shown(mc, note) != null)) {
 			throw new AssertionError("The Minimap tab still says an addon hides it after the addon was switched off");

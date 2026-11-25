@@ -408,7 +408,7 @@ public final class SettingsScreen extends Screen {
 			List<String> hiding = addons.stream().filter(one -> one.running() && one.allowed() && one.minimap()).map(Addons.Listed::name).toList();
 			Component note = Component.translatable("diorama.settings.addons.minimap_hidden", hiding.isEmpty() ? "" : hiding.get(0));
 			if (hiding.size() != 1 || SettingsScreen.this.font.width(note) > CONTENT) {
-				note = Component.translatable("diorama.settings.addons.minimap_hidden_many");
+				note = Component.translatable("diorama.settings.addons.minimap_hidden_any");
 			}
 			StringWidget line = new StringWidget(note.copy().withStyle(net.minecraft.ChatFormatting.GRAY), SettingsScreen.this.font);
 			this.headings.add(line);
