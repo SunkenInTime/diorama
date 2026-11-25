@@ -125,11 +125,11 @@ final class Sections {
 			if (bits > 8 || size > 1 << bits) {
 				return null;
 			}
-			BlockState[] states = new BlockState[size];
+			BlockState[] entries = new BlockState[size];
 			for (int p = 0; p < size; p++) {
-				states[p] = palette.valueFor(p);
+				entries[p] = palette.valueFor(p);
 			}
-			return new ChunkSnapshot.Packed(storage, states);
+			return new ChunkSnapshot.Packed(storage, entries);
 		} catch (Throwable e) {
 			return null;
 		}
