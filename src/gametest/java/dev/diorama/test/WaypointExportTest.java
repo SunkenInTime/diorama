@@ -130,8 +130,94 @@ final class WaypointExportTest {
 			Settings.get().removeReachedDeaths = true;
 		});
 		delete(copied);
+		namesThatClash(context);
 		for (String rule : new String[] {"show_death_messages", "showDeathMessages"}) {
 			world.getServer().runCommand("gamerule " + rule + " true");
+		}
+	}
+
+	/**
+	 * Map names that differ only by what a file name can't hold: in singleplayer each map not in
+	 * use still gets a folder of its own in {@code Other maps}, none the same as another's in any
+	 * case (as Windows compares them), with its waypoint. On a server a colon in a name is Xaero's
+	 * {@code §§} in the file's name, which Xaero's writes for a sub-world named so.
+	 */
+	private static void namesThatClash(ClientGameTestContext context) {
+		String[] names = {"Camp: 1", "Camp 1.", "camp 1", "Base: east_side"};
+		Map<String, String> ids = new HashMap<>();
+		context.runOnClient(mc -> {
+			BlockPos at = mc.player.blockPosition();
+			for (int i = 0; i < names.length; i++) {
+				String id = Maps.get().create(OVERWORLD, names[i]);
+				if (id == null) {
+					throw new AssertionError("Couldn't make the map " + names[i]);
+				}
+				ids.put(names[i], id);
+				WaypointStore.get().add(new Waypoint("Spot " + i, at.getX() + 50 * i, 64, at.getZ() + 70, OVERWORLD, Waypoint.PALETTE[i]));
+			}
+			Maps.get().use(OVERWORLD, Maps.MAIN);
+		});
+		Path check = context.computeOnClient(mc -> mc.gameDirectory.toPath().resolve("diorama").resolve("export-clash-check"));
+		if (Files.exists(check)) {
+			delete(check);
+		}
+		try {
+			WaypointExport.Result single = context.computeOnClient(mc -> {
+				try {
+					return WaypointExport.write(WaypointStore.get(), Maps.get(), check.resolve("single").resolve("World"), true);
+				} catch (IOException e) {
+					throw new AssertionError("The singleplayer export failed: " + e.getMessage(), e);
+				}
+			});
+			if (single.count() != names.length) {
+				throw new AssertionError("The singleplayer export wrote " + single.count() + " waypoints for " + names.length);
+			}
+			Path others = check.resolve("single").resolve("Other maps");
+			Set<String> spots = new java.util.HashSet<>();
+			Set<String> folders = new java.util.HashSet<>();
+			for (Path other : folders(others)) {
+				if (!folders.add(other.getFileName().toString().toLowerCase(java.util.Locale.ROOT))) {
+					throw new AssertionError("Two maps' folders differ only in case: " + describe(others));
+				}
+				for (String line : fileWaypoints(other.resolve("World").resolve("dim%0").resolve("waypoints.txt"))) {
+					spots.add(line.split("\\|")[1]);
+				}
+			}
+			Set<String> wanted = new java.util.HashSet<>();
+			for (int i = 0; i < names.length; i++) {
+				wanted.add("Spot " + i);
+			}
+			if (folders.size() != names.length || !spots.equals(wanted)) {
+				throw new AssertionError("Each map should have its own folder in Other maps with its waypoint: " + describe(others));
+			}
+
+			WaypointExport.Result server = context.computeOnClient(mc -> {
+				try {
+					return WaypointExport.write(WaypointStore.get(), Maps.get(), check.resolve("server").resolve("World"), false);
+				} catch (IOException e) {
+					throw new AssertionError("The server export failed: " + e.getMessage(), e);
+				}
+			});
+			Path dim = check.resolve("server").resolve("World").resolve("dim%0");
+			String escaped = "cm$" + ids.get("Base: east_side") + "_Base§§ east%us%side.txt";
+			if (server.count() != names.length || !files(dim).contains(escaped)) {
+				throw new AssertionError("The server export should name Base: east_side's file " + escaped + ": " + describe(dim));
+			}
+		} finally {
+			if (Files.exists(check)) {
+				delete(check);
+			}
+			context.runOnClient(mc -> {
+				WaypointStore store = WaypointStore.get();
+				for (Waypoint w : new ArrayList<>(store.all())) {
+					store.remove(w);
+				}
+				for (Maps.Info map : Maps.get().list(OVERWORLD)) {
+					if (!map.active()) {
+						Maps.get().delete(OVERWORLD, map.id());
+					}
+				}
+			});
 		}
 	}
 

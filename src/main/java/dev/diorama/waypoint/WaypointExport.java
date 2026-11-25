@@ -13,9 +13,12 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -204,6 +207,8 @@ public final class WaypointExport {
 			files.computeIfAbsent(waypoint.dimension, d -> new LinkedHashMap<>()).computeIfAbsent(Maps.id(waypoint.map), m -> new ArrayList<>()).add(waypoint);
 		}
 		List<String> sets = store.customFolders().stream().map(WaypointExport::setName).toList();
+		// The Other maps folders taken so far, as Windows compares them.
+		Set<String> taken = new HashSet<>();
 		int count = 0;
 		for (Map.Entry<String, Map<String, List<Waypoint>>> dimension : files.entrySet()) {
 			String folder = dimensionFolder(dimension.getKey());
@@ -215,7 +220,7 @@ public final class WaypointExport {
 				} else if (map.getKey().equals(maps.active(dimension.getKey()))) {
 					target = within(world, folder, "waypoints.txt");
 				} else {
-					String other = plain(Waypoints.dimensionName(dimension.getKey()).getString() + " - " + name);
+					String other = unused(plain(Waypoints.dimensionName(dimension.getKey()).getString() + " - " + name), taken);
 					target = within(within(world.resolveSibling(OTHER_MAPS), other, world.getFileName().toString()), folder, "waypoints.txt");
 				}
 				Files.createDirectories(target.getParent());
@@ -225,6 +230,18 @@ public final class WaypointExport {
 			}
 		}
 		return new Result(world.getParent(), count);
+	}
+
+	/**
+	 * {@code folder}, or with a number after it if another map took it first: two map names can
+	 * differ only by what a folder can't hold ({@code Base:1} and {@code Base1}).
+	 */
+	private static String unused(String folder, Set<String> taken) {
+		String name = folder;
+		for (int i = 2; !taken.add(name.toLowerCase(Locale.ROOT)); i++) {
+			name = folder + " (" + i + ")";
+		}
+		return name;
 	}
 
 	/** One of Xaero's files: its sets, the header, and a line per waypoint. */
@@ -311,15 +328,20 @@ public final class WaypointExport {
 
 	/**
 	 * A map's name as the part of a file name Xaero's reads a world's name from, escaped as Xaero's
-	 * escapes it, less what no file name may hold.
+	 * escapes it ({@code _} as {@code %us%}, {@code :} as {@code §§}), less what no file name may hold.
 	 */
 	static String fileName(String name) {
-		return plain(WaypointShare.chatSafe(name).replace("_", "%us%").replace(":", "§§"));
+		return ending(WaypointShare.chatSafe(name).replace("_", "%us%").replaceAll("[\\\\/*?\"<>|]", "").replace(":", "§§"));
 	}
 
 	/** A name as a file or folder can have it: without what Windows refuses, and not ending in a dot. */
 	static String plain(String name) {
-		String cleaned = WaypointShare.chatSafe(name).replaceAll("[\\\\/*?\"<>|:]", "").trim();
+		return ending(WaypointShare.chatSafe(name).replaceAll("[\\\\/*?\"<>|:]", ""));
+	}
+
+	/** A cleaned name trimmed and not ending in a dot, which Windows drops; {@code Map} if nothing's left. */
+	private static String ending(String name) {
+		String cleaned = name.trim();
 		while (cleaned.endsWith(".")) {
 			cleaned = cleaned.substring(0, cleaned.length() - 1).trim();
 		}
