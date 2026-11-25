@@ -124,6 +124,11 @@ final class SecondPlayer implements AutoCloseable {
 		}
 	}
 
+	/** The player holds the sneak key down, or lets it go. */
+	void sneak(boolean down) {
+		this.command(down ? Puppet.SNEAK : Puppet.STAND);
+	}
+
 	/** Whether the game is still running: a player turned away by the server is back at the title screen, still running. */
 	boolean running() {
 		return this.process.isAlive();
