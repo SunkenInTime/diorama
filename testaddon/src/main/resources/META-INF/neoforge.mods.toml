@@ -1,0 +1,14 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon"
+version = "${version}"
+displayName = "Diorama Test Addon"
+description = "The game tests' addon for Diorama's API. Never released."
+
+[[dependencies.diorama_test_addon]]
+modId = "diorama"
+type = "optional"
+versionRange = "*"

@@ -13,6 +13,8 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.addon.Addons;
+import dev.diorama.api.DioramaEntrypoint;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.render.XaeroRadarIcons;
@@ -36,10 +38,13 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.event.lifecycle.FMLLoadCompleteEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import net.minecraftforge.forgespi.language.IModInfo;
+import net.minecraftforge.forgespi.language.ModFileScanData;
 
 /**
  * What {@code dev.diorama.neoforge.DioramaNeoForge} does on NeoForge, through Forge's events.
@@ -52,6 +57,24 @@ final class DioramaForgeClient {
 	static void init() {
 		IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
 		DioramaClient.init();
+		// Addons are classes marked @DioramaEntrypoint, found in Forge's scan of every mod file, as
+		// on NeoForge (DioramaNeoForge).
+		Addons.finder(() -> {
+			org.objectweb.asm.Type marker = org.objectweb.asm.Type.getType(DioramaEntrypoint.class);
+			java.util.List<Addons.Found> found = new java.util.ArrayList<>();
+			for (ModFileScanData scan : ModList.get().getAllScanData()) {
+				java.util.List<String> mods = scan.getIModInfoData().stream().flatMap(file -> file.getMods().stream()).map(IModInfo::getModId).toList();
+				for (ModFileScanData.AnnotationData annotation : scan.getAnnotations()) {
+					if (marker.equals(annotation.annotationType())) {
+						Addons.Found one = Addons.scanned(mods, annotation.clazz().getClassName());
+						if (one != null) {
+							found.add(one);
+						}
+					}
+				}
+			}
+			return found;
+		});
 		// The channel itself is DioramaForge's.
 		ShareClient.init();
 		dev.diorama.share.ShareProtocol.toServer(data -> {
@@ -91,15 +114,22 @@ final class DioramaForgeClient {
 		// change or hide the line.
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.HIGHEST, true, ClientChatReceivedEvent.System.class, event -> ServerRules.onServerMessage(event.getMessage()));
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, RegisterClientCommandsEvent.class, event -> WaypointShare.register(event.getDispatcher()));
-		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingOut.class, event -> joinedOrLeft());
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingOut.class, event -> {
+			joinedOrLeft();
+			Addons.left();
+		});
 		// A network moving the player to another of its servers joins again without leaving.
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, ClientPlayerNetworkEvent.LoggingIn.class, event -> {
 			joinedOrLeft();
+			Addons.joined();
 			// Forge syncs block ids from the server before this, which can number block states differently.
 			BlockLooks.invalidate();
 		});
 		// Leaving a world saves the map on the next tick, but closing the window stops ticking first.
-		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, GameShuttingDownEvent.class, event -> MapSession.close());
+		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, GameShuttingDownEvent.class, event -> {
+			MapSession.close();
+			Addons.stop();
+		});
 		MinecraftForge.EVENT_BUS.addListener(EventPriority.NORMAL, false, TickEvent.ClientTickEvent.class, event -> {
 			Minecraft mc = Minecraft.getInstance();
 			if (event.phase == TickEvent.Phase.END && mc.isRunning()) {

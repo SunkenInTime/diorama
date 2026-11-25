@@ -200,6 +200,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
+			if (tests.contains("addon-api")) {
+				AddonApiTest.run(context, world);
+			}
 			if (tests.contains("radar")) {
 				radar(context, world);
 			}
@@ -408,8 +411,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 				waitUntilGenerated(context, world);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
+				if (tests.contains("addon-api")) {
+					AddonApiTest.reopened(context);
+				}
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);
 				}

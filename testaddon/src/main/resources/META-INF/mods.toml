@@ -1,0 +1,17 @@
+modLoader = "lowcodefml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon"
+version = "${version}"
+displayName = "Diorama Test Addon"
+description = "The game tests' addon for Diorama's API. Never released."
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.diorama_test_addon]]
+modId = "diorama"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"
