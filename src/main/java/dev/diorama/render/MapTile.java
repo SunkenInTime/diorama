@@ -8,6 +8,7 @@ import dev.diorama.bake.Overlays;
 import dev.diorama.bake.TileImage;
 import dev.diorama.bake.TileSurface;
 import dev.diorama.render.gpu.MapTexture;
+import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
 
@@ -69,9 +70,14 @@ public final class MapTile {
 		}
 	}
 
-	void upload(TileImage image) {
+	/**
+	 * Puts a bake on the GPU. Returns whether the coverage the fog reads changed: most re-bakes,
+	 * after a block or the light changed, leave it as it was, and a fog mask built from it stays right.
+	 */
+	boolean upload(TileImage image) {
 		this.surfaceChanged(image);
 		if (image.isFull()) {
+			boolean changed = !Arrays.equals(this.coverage, image.coverage());
 			this.coverage = image.coverage();
 			this.info = image.info();
 			this.overlayShown = -1;
@@ -80,7 +86,7 @@ public final class MapTile {
 			this.empty = isEmpty(this.coverage);
 			if (this.empty) {
 				this.close();
-				return;
+				return changed;
 			}
 			this.ensureTexture(image);
 			int size = Projection.TILE_PIXELS;
@@ -88,25 +94,24 @@ public final class MapTile {
 				this.texture.write(level, 0, 0, size >> level, image.mips()[level]);
 			}
 			this.uploadLight();
-			return;
+			return changed;
 		}
 		if (this.coverage == null) {
-			return;
+			return false;
 		}
+		boolean changed = false;
 		int cellsPerBlock = TileImage.BLOCK / (Projection.TILE_PIXELS / Projection.COVERAGE_CELLS);
 		for (TileImage.Patch patch : image.patches()) {
 			for (int y = 0; y < cellsPerBlock; y++) {
-				System.arraycopy(
-					patch.coverage(), y * cellsPerBlock,
-					this.coverage, (patch.blockY() * cellsPerBlock + y) * Projection.COVERAGE_CELLS + patch.blockX() * cellsPerBlock,
-					cellsPerBlock
-				);
+				int at = (patch.blockY() * cellsPerBlock + y) * Projection.COVERAGE_CELLS + patch.blockX() * cellsPerBlock;
+				changed |= !Arrays.equals(patch.coverage(), y * cellsPerBlock, (y + 1) * cellsPerBlock, this.coverage, at, at + cellsPerBlock);
+				System.arraycopy(patch.coverage(), y * cellsPerBlock, this.coverage, at, cellsPerBlock);
 			}
 		}
 		this.empty = isEmpty(this.coverage);
 		if (this.empty) {
 			this.close();
-			return;
+			return changed;
 		}
 		if (this.ensureTexture(image)) {
 			// A new texture over a previously empty tile starts blank everywhere outside the patches.
@@ -125,6 +130,7 @@ public final class MapTile {
 			}
 		}
 		this.patchLight(image);
+		return changed;
 	}
 
 	/** Copies the patches' light into the tile's, then puts it on the GPU again: it's small. */
