@@ -406,6 +406,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("radar-categories")) {
 				RadarCategoriesTest.run(context, world);
 			}
+			if (tests.contains("go-to-coordinates")) {
+				GoToCoordinatesTest.run(context, world);
+			}
 			if (tests.contains("radar-categories-cobblemon")) {
 				RadarCategoriesTest.cobblemon(context, world);
 			}
@@ -6106,7 +6109,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Right-clicks the map at a window position, which must open its menu. */
-	private static void rightClickAt(ClientGameTestContext context, double x, double y) {
+	static void rightClickAt(ClientGameTestContext context, double x, double y) {
 		moveCursor(context, x, y);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_RIGHT);
 		context.waitTicks(3);
@@ -6166,7 +6169,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** The block position the open spot menu's first line names: "x, y, z · N m". */
-	private static int[] menuSpot(ClientGameTestContext context) {
+	static int[] menuSpot(ClientGameTestContext context) {
 		String line = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu().labels().get(0));
 		java.util.regex.Matcher m = java.util.regex.Pattern.compile("(-?\\d+), (-?\\d+), (-?\\d+) · \\d+ m").matcher(line);
 		if (!m.matches()) {
@@ -7409,10 +7412,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
