@@ -40,7 +40,14 @@ import org.jspecify.annotations.Nullable;
  * reading allocated 2 MB a build.
  *
  * <p>Logs, for each part: the builds, bytes and time a build, builds a second of game time, and what
- * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe).
+ * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe), and
+ * where the game's memory is ({@link MemoryLog}).
+ *
+ * <p>On boat, run it on a large VM ({@code --type large}). What stays in use after a full collection
+ * is 0.5 to 0.7 GB from the first part to the last, but the heap grows to its cap (40% of the VM)
+ * before collecting it all, memory outside the heap (the GL driver's, on a VM with no GPU, among it)
+ * adds about 1.5 GB, and Gradle keeps 1.1 to 1.9 GB: on a
+ * default VM that left 0.4 to 0.9 GB of its 8 GB, and once the kernel killed the game.
  */
 final class FogMaskBuildTest {
 	private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();

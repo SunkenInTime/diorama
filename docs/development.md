@@ -47,6 +47,7 @@ Set `DIORAMA_TESTS` to a comma-separated list to run only some of them:
 | `portal-unlit` | A stronghold's End portal before it's lit: no pin from overhead, one on reaching the room, the same one once lit, none on frames that don't face in |
 | `xaero-import` | Importing waypoints from Xaero's Minimap |
 | `fog-of-war` | Cave slices under a server's fair-play rule |
+| `fog-mask` | What the fog's mask reads and allocates as the player walks and flies, on the minimap and the full map (in a 5120 by 1440 window too), and after the map's tilt changes. On boat it takes `--type large`: on a default VM the game and Gradle leave under 1 GB of its 8 GB, and the VM's memory killer has stopped the game |
 | `settings` | The settings screen |
 | `overlays` | Chunk grid, slime chunks and spawn spots |
 | `screens` | The minimap while other screens are open |
