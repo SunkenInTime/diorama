@@ -701,19 +701,21 @@ final class AddonWaypointsTest {
 			pins[1].x++;
 			WaypointStore.get().changed();
 		});
-		check(context, results, "a portal pin added", true, mc -> {
-			pins[2] = new Waypoint("Nether Portal", at.getX() + 5002, at.getY(), at.getZ(), "minecraft:overworld", 0xFF8E4EC6);
-			pins[2].kind = Waypoint.Kind.NETHER_PORTAL;
-			WaypointStore.get().add(pins[2]);
-		});
+		// Portal pins are off in the test settings, and a hidden pin isn't in all(): on for these.
 		boolean portalPins = context.computeOnClient(mc -> dev.diorama.Settings.get().portalMarkers);
 		try {
+			context.runOnClient(mc -> dev.diorama.Settings.get().portalMarkers = true);
+			check(context, results, "a portal pin added", true, mc -> {
+				pins[2] = new Waypoint("Nether Portal", at.getX() + 5002, at.getY(), at.getZ(), "minecraft:overworld", 0xFF8E4EC6);
+				pins[2].kind = Waypoint.Kind.NETHER_PORTAL;
+				WaypointStore.get().add(pins[2]);
+			});
 			check(context, results, "portal pins switched off", true, mc -> dev.diorama.Settings.get().portalMarkers = false);
-			check(context, results, "portal pins switched on", true, mc -> dev.diorama.Settings.get().portalMarkers = true);
+			check(context, results, "portal pins switched on again", true, mc -> dev.diorama.Settings.get().portalMarkers = true);
+			check(context, results, "a portal pin deleted by the player", true, mc -> WaypointStore.get().remove(pins[2]));
 		} finally {
 			context.runOnClient(mc -> dev.diorama.Settings.get().portalMarkers = portalPins);
 		}
-		check(context, results, "a portal pin deleted by the player", true, mc -> WaypointStore.get().remove(pins[2]));
 		for (String each : results) {
 			if (!each.endsWith(" ok")) {
 				wrong.add("revision() when " + each);
