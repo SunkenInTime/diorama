@@ -6,6 +6,7 @@ import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.RadarCategories;
 import dev.diorama.Settings;
+import dev.diorama.TrackedPlayers;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Mipmaps;
 import dev.diorama.bake.SurfaceArea;
@@ -291,7 +292,9 @@ public final class Lights {
 	private static boolean onRadar(Player player, Player self, Entity viewer, float partialTick) {
 		Settings settings = Settings.get();
 		return settings.radarPlayers && player.isAlive() && !Radar.hidden(player, self) && (!player.isSpectator() || self.isSpectator())
-			&& Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= RadarCategories.kind(Radar.Kind.PLAYER).reach();
+			// A player the server reports from afar shows at whatever height, and so does their light.
+			&& (Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= RadarCategories.kind(Radar.Kind.PLAYER).reach()
+				|| TrackedPlayers.tracks(player));
 	}
 
 	/**

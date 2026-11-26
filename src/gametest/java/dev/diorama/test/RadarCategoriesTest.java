@@ -344,6 +344,37 @@ final class RadarCategoriesTest {
 			context.takeScreenshot("radar-height-06-list");
 			context.setScreen(() -> null);
 
+			// A range of its own in blocks: 32 m reaches the husk 24 below, 16 m doesn't, whatever the radar's says.
+			context.runOnClient(mc -> RadarCategories.kind(Radar.Kind.HOSTILE).range(32));
+			expectDeep(context, Set.of("husk"), "With hostile mobs at 32 m");
+			context.runOnClient(mc -> {
+				RadarCategories.kind(Radar.Kind.HOSTILE).range(16);
+				Settings.get().radarRange = 128;
+			});
+			// The friend follows the radar's range, now 128 m, and is back; the husk keeps to its own 16 m.
+			expectDeep(context, Set.of("player"), "With hostile mobs at 16 m and the radar's range, which players follow, at 128 m");
+			// One of the player's own categories has its range too: husks in one at any height.
+			context.runOnClient(mc -> {
+				RadarCategories.Category deep = new RadarCategories.Category();
+				deep.name = "Deep";
+				deep.mobs.add("minecraft:husk");
+				deep.range = RadarCategories.ANY_RANGE;
+				Settings.get().radarCategories.add(0, deep);
+				RadarCategories.changed();
+			});
+			expectDeep(context, Set.of("husk", "player"), "With husks in a category of their own at any height");
+			// And the file keeps them.
+			context.runOnClient(mc -> {
+				Settings.get().save();
+				Settings s = Settings.reload();
+				if (s.radarCategories.get(0).range != RadarCategories.ANY_RANGE || RadarCategories.kind(Radar.Kind.HOSTILE).range() != 16
+					|| RadarCategories.kind(Radar.Kind.PLAYER).range() != RadarCategories.SAME_RANGE) {
+					throw new AssertionError("The height ranges didn't come back from the saved file");
+				}
+				s.radarCategories.remove(0);
+				RadarCategories.changed();
+			});
+
 			// Nothing picked: players at any height, every other kind as the radar's.
 			context.runOnClient(mc -> {
 				Settings.get().radarKinds.clear();

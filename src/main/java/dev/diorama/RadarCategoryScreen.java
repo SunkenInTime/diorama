@@ -99,9 +99,9 @@ public final class RadarCategoryScreen extends Screen {
 		int[] ranges = Settings.RANGES;
 		int range = this.entry.range();
 		int rangeStep = range == RadarCategories.SAME_RANGE ? 0 : range == RadarCategories.ANY_RANGE ? ranges.length + 1 : 1 + SettingsScreen.indexOf(ranges, range);
+		java.util.function.IntUnaryOperator atStep = i -> i == 0 ? RadarCategories.SAME_RANGE : i > ranges.length ? RadarCategories.ANY_RANGE : ranges[i - 1];
 		SettingsScreen.StepSlider reach = new SettingsScreen.StepSlider(Component.translatable("diorama.settings.range"), rangeStep, ranges.length + 2,
-			i -> this.entry.range(i == 0 ? RadarCategories.SAME_RANGE : i > ranges.length ? RadarCategories.ANY_RANGE : ranges[i - 1]),
-			i -> rangeValue(i == 0 ? RadarCategories.SAME_RANGE : i > ranges.length ? RadarCategories.ANY_RANGE : ranges[i - 1]));
+			i -> this.entry.range(atStep.applyAsInt(i)), i -> rangeValue(atStep.applyAsInt(i)));
 		reach.setPosition(left, y);
 		reach.setWidth(WIDTH);
 		reach.setTooltip(Tooltip.create(Component.translatable("diorama.radar_category.range.tooltip")));
