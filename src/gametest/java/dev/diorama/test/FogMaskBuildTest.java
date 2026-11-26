@@ -380,10 +380,11 @@ final class FogMaskBuildTest {
 		int cz0 = z - MINIMAP_REACH >> 4;
 		int cz1 = z + MINIMAP_REACH >> 4;
 		for (int waited = 0; ; waited += 20) {
-			String left = context.computeOnClient(mc -> {
+			// {chunks under the flight not drawn yet, or -1 with no import; the import's progress}
+			Object[] state = context.computeOnClient(mc -> {
 				SavedChunkImport chunks = MapSession.get().savedChunks();
 				if (chunks == null) {
-					return "no saved-chunk import running";
+					return new Object[] {-1, "no saved-chunk import running"};
 				}
 				int undrawn = 0;
 				for (int cx = cx0; cx <= cx1; cx++) {
@@ -393,16 +394,14 @@ final class FogMaskBuildTest {
 						}
 					}
 				}
-				String progress = chunks.chunksLeft() + " chunks of the save left, " + chunks.percentDone() + "% done";
-				if (undrawn == 0) {
-					Diorama.LOGGER.info("fog-mask | drawn again under the flight {} ticks after the full map closed ({})", waited, progress);
-					return null;
-				}
-				return undrawn + " chunks under the flight not drawn yet, " + progress;
+				return new Object[] {undrawn, chunks.chunksLeft() + " chunks of the save left, " + chunks.percentDone() + "% done"};
 			});
-			if (left == null) {
+			int undrawn = (int) state[0];
+			if (undrawn == 0) {
+				Diorama.LOGGER.info("fog-mask | drawn again under the flight {} ticks after the full map closed ({})", waited, state[1]);
 				return;
 			}
+			String left = undrawn < 0 ? (String) state[1] : undrawn + " chunks under the flight not drawn yet, " + state[1];
 			if (waited % 400 == 0) {
 				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, left, MemoryLog.line());
 			}
