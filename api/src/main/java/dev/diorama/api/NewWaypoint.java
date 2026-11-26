@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
  * checked as it is set, so a bad one throws where it was given.
  *
  * <pre>{@code
- * world.waypoints().edit(edits -> edits.add(
+ * api.waypoints().edit(world.worldId(), edits -> edits.add(
  *     NewWaypoint.builder("Village", DimensionId.OVERWORLD, BlockCoord.of(120, 70, -340))
  *         .rgb(0x46A758)
  *         .folder("Villages")

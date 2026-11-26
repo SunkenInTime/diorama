@@ -163,8 +163,10 @@ public final class WaypointListScreen extends Screen {
 	private int waystoneChanges;
 	private boolean hadWaystones;
 	/**
-	 * The store's {@link WaypointStore#revision} the rows were made from: when it moves on without
-	 * this screen (an addon changed the waypoints), the screen is made again, as for waystones.
+	 * The store's {@link WaypointStore#revision} the rows were made from, set only when they're
+	 * made. Whenever the store's is another, by the player's own change here or an addon's, the
+	 * rows are made again at the next tick ({@link #refreshRows}), so a row for a waypoint that's
+	 * gone never stays.
 	 */
 	private int storeRevision;
 	/** Set by the add-waypoint key; tick() opens the editor. */
@@ -365,7 +367,7 @@ public final class WaypointListScreen extends Screen {
 	/** Moves the selected rows to one of the player's folders, or with an empty name back to their dimensions' own. */
 	private void moveTo(String folder) {
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		if (store == null || !this.stillHeld(store, this.movable())) {
 			return;
 		}
 		for (Waypoint waypoint : this.movable()) {
@@ -1459,16 +1461,70 @@ public final class WaypointListScreen extends Screen {
 				this.resort(store);
 			}
 		}
-		// Waypoints changed while the list is open, not by this screen: an addon's edit, say. A row
+		// The waypoints changed since the rows were made: by the player here, or by an addon. A row
 		// for one deleted goes, and the selection with it; one changed shows as it is now.
 		WaypointStore store = WaypointStore.get();
 		if (store != null && store.revision() != this.storeRevision) {
-			this.folderMenu = null;
-			this.rebuildWidgets();
+			this.refreshRows();
 		}
 		if (this.newWaypointPressed) {
 			this.newWaypointPressed = false;
 			this.newWaypoint();
+		}
+	}
+
+	/**
+	 * Whether the store still has every one of these rows' waypoints (a waystone is the Waystones
+	 * mod's, and always counts). If one went since the rows were made, by an addon say, the rows
+	 * are made again now and the click does nothing: the player sees what's there and can click
+	 * again.
+	 */
+	private boolean stillHeld(WaypointStore store, java.util.Collection<Waypoint> acting) {
+		for (Waypoint waypoint : acting) {
+			if (waypoint.kind != Waypoint.Kind.WAYSTONE && !store.holds(waypoint)) {
+				this.refreshRows();
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Makes the rows again after the waypoints changed, keeping what the player had in hand: the
+	 * search box's text, whether it had the focus, and where its caret was; and the row at the top
+	 * of the list, if it's still there. What's lost: an open list of folders, a folder's Delete
+	 * waiting for its second click, and a selection of text in the search box.
+	 */
+	private void refreshRows() {
+		EditBox box = this.search;
+		boolean focused = box != null && this.getFocused() == box;
+		int caret = box == null ? 0 : box.getCursorPosition();
+		UUID top = null;
+		int below = 0;
+		for (int line = this.scroll; line < this.lines() && top == null; line++) {
+			int row = this.rowOn(line);
+			if (row >= 0) {
+				top = this.rows.get(row).id;
+				below = line - this.scroll;
+			}
+		}
+		this.rebuildWidgets();
+		EditBox again = this.search;
+		if (again != null) {
+			if (!focused && this.getFocused() == again) {
+				this.setFocused(null);
+			}
+			int at = Math.min(caret, again.getValue().length());
+			again.setCursorPosition(at);
+			again.setHighlightPos(at);
+		}
+		if (top != null) {
+			for (int row = 0; row < this.rows.size(); row++) {
+				if (this.rows.get(row).id.equals(top)) {
+					this.scrollTo(this.lineOf(row) - below);
+					break;
+				}
+			}
 		}
 	}
 
@@ -1485,7 +1541,8 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	private void edit(@Nullable Waypoint waypoint) {
-		if (waypoint != null && waypoint.editable()) {
+		WaypointStore store = WaypointStore.get();
+		if (waypoint != null && waypoint.editable() && store != null && this.stillHeld(store, List.of(waypoint))) {
 			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false));
 		}
 	}
@@ -1495,7 +1552,7 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		if (store == null || !this.stillHeld(store, this.marked.size() > 1 ? this.marked : List.of(waypoint))) {
 			return;
 		}
 		if (this.marked.size() > 1) {
@@ -1508,8 +1565,6 @@ public final class WaypointListScreen extends Screen {
 		} else {
 			store.setVisible(waypoint, !waypoint.visible);
 		}
-		// This screen's own change, followed here and not by making the screen again.
-		this.storeRevision = store.revision();
 		// Hidden waypoints go last, as in Xaero's: the row moves, and the list follows it so the row
 		// and its buttons stay in view.
 		this.resort(store);
@@ -1525,6 +1580,9 @@ public final class WaypointListScreen extends Screen {
 
 	private void delete(@Nullable Waypoint waypoint) {
 		WaypointStore store = WaypointStore.get();
+		if (store != null && !this.stillHeld(store, this.marked.size() > 1 ? this.movable() : waypoint == null ? List.of() : List.of(waypoint))) {
+			return;
+		}
 		if (store != null && this.marked.size() > 1) {
 			this.movable().forEach(store::remove);
 		} else if (store != null && waypoint != null) {

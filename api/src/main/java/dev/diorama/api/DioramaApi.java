@@ -1,9 +1,15 @@
 package dev.diorama.api;
 
+import java.util.Optional;
+
 /**
  * What one addon can do with Diorama, handed to {@link DioramaAddon#onReady}. Each addon gets its
  * own, tied to the mod ID its mod loader knows it by, so whatever it does can be traced back to
  * it and undone when it fails.
+ *
+ * <p>Diorama never calls an addon to tell it something changed. An addon that follows the
+ * player's world or waypoints reads them from its own client tick, which costs nothing while
+ * nothing changes: see {@link Waypoints}.
  *
  * <p>Every method must be called on the client thread (the render thread); calls from any other
  * thread throw {@link IllegalStateException}.
@@ -26,17 +32,14 @@ public interface DioramaApi {
 	Hud hud();
 
 	/**
-	 * Starts telling {@code listener} when the player's world opens and closes and when their map
-	 * changes; the {@link MapWorld} it is handed is the way to the world's waypoints. If a world is
-	 * open already, {@link WorldListener#opened} is called for it at Diorama's next client tick, not
-	 * from inside this call. Typically called once, from {@link DioramaAddon#onReady}.
-	 *
-	 * @param listener called on the client thread
-	 * @return the handle to close to stop; worlds closing don't close it. Closing it closes the
-	 *     {@link MapWorld} it handed over, and that world's waypoint listeners, without a
-	 *     {@link WorldListener#closed} call
-	 * @throws NullPointerException if {@code listener} is null
-	 * @throws IllegalStateException if called off the client thread
+	 * {@return the world the player is in now} Empty at the title screen, and while Diorama
+	 * doesn't know which world it is yet: a server that names its worlds for Xaero's mods can take a
+	 * moment to name the next one after a dimension change. The same instance on every call until
+	 * the world, the player's dimension or a dimension's saved map in use changes, so calling it
+	 * every tick costs nothing.
 	 */
-	Handle onWorld(WorldListener listener);
+	Optional<World> world();
+
+	/** {@return the waypoints of the world the player is in now, whichever that is when each method is called} */
+	Waypoints waypoints();
 }

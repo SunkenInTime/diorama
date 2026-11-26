@@ -126,14 +126,18 @@ public final class Addons {
 	/**
 	 * Called every client tick. The first tick after the game has finished loading (its loading
 	 * overlay gone, so every mod is set up and the title screen is up) makes the addons and calls
-	 * their onReady. Every tick after tells them about the world ({@link AddonWorlds}).
+	 * their onReady.
 	 */
 	public static void tick(Minecraft mc) {
 		if (!started && mc.gui.overlay() == null) {
 			started = true;
 			start();
 		}
-		AddonWorlds.tick();
+	}
+
+	/** Throws unless this is the client thread, where everything addons can reach lives. */
+	public static void checkThread() {
+		Addon.checkThread();
 	}
 
 	private static void start() {

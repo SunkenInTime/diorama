@@ -73,7 +73,6 @@ public final class Waystones {
 	private static volatile boolean failed;
 	private static @Nullable Method activated;
 	private static long nextCheck;
-	private static long nextPlacedCheck;
 
 	private Waystones() {
 	}
@@ -367,21 +366,9 @@ public final class Waystones {
 	}
 
 	private static void check() {
-		long now = System.currentTimeMillis();
-		if (!PICKED_UP.isEmpty() && now >= nextPlacedCheck) {
-			// A waystone placed again where it was picked up, which no event says: found here as
-			// well as when something lists it, so what only reads the count of changes sees it too.
-			nextPlacedCheck = now + CHECK_MS;
-			for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
-				for (Waypoint waypoint : waystones.values()) {
-					if (PICKED_UP.containsKey(waypoint.id)) {
-						placed(waypoint);
-					}
-				}
-			}
-		}
 		Map<UUID, Waypoint> ordinary = KNOWN.get(WAYSTONE);
 		Method method = activated;
+		long now = System.currentTimeMillis();
 		if (failed || method == null || ordinary == null || ordinary.isEmpty() || now < nextCheck) {
 			return;
 		}

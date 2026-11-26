@@ -37,8 +37,7 @@ public interface Waypoint {
 	/**
 	 * {@return its ID, the same for as long as the waypoint exists, across saves and restarts}
 	 * Diorama picks it. A hand-edited {@code waypoints.json} can give two waypoints the same ID:
-	 * both are in {@link Waypoints#all}, but {@link Waypoints#get}, the editor and change events
-	 * only know the first of them in {@code all()}'s order.
+	 * then only the first is in {@link Waypoints#all}.
 	 */
 	UUID id();
 
@@ -71,8 +70,8 @@ public interface Waypoint {
 
 	/**
 	 * {@return whether the player has it shown} This is the waypoint's own switch; a folder the
-	 * player hid hides it too, which this doesn't say, and hiding or showing a whole folder sends
-	 * no change event.
+	 * player hid hides it too, which this doesn't say: hiding or showing a whole folder changes
+	 * neither this nor {@link Waypoints#revision}.
 	 */
 	boolean visible();
 

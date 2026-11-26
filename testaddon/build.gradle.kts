@@ -3,7 +3,8 @@
 // classpath. Each jar is one mod with metadata for Fabric, NeoForge and Forge, found on Fabric
 // through its diorama entrypoint and on NeoForge and Forge through @DioramaEntrypoint.
 //   diorama-test-addon.jar              works, and lets the test hide and show Diorama's HUD through
-//                                       it; it also has a class marked @DioramaEntrypoint by mistake
+//                                       it and sync waypoints with a pretend map mod by polling; it
+//                                       also has a class marked @DioramaEntrypoint by mistake
 //   diorama-test-addon-broken.jar       hides the minimap, then throws from onReady
 //   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
 //   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError
@@ -13,9 +14,6 @@
 //                                       wrapped in its own RuntimeException
 //   diorama-test-addon-recursive.jar    hides the minimap, then throws an exception whose
 //                                       getMessage() calls itself
-//   diorama-test-addon-throwing.jar     listens to waypoints, and throws from its listener once
-//                                       the test arms it
-//   diorama-test-addon-looping.jar      answers each of its own waypoint changes with another
 // ./gradlew :testaddon:assemble puts them in testaddon/build/libs; boat_run.py --mods takes that
 // folder (docs/development.md). Never released.
 plugins {
@@ -36,9 +34,7 @@ val assertion = sourceSets.create("assertion")
 val unprintable = sourceSets.create("unprintable")
 val overflow = sourceSets.create("overflow")
 val recursive = sourceSets.create("recursive")
-val throwing = sourceSets.create("throwing")
-val looping = sourceSets.create("looping")
-val addons = listOf(main, broken, linkage, assertion, unprintable, overflow, recursive, throwing, looping)
+val addons = listOf(main, broken, linkage, assertion, unprintable, overflow, recursive)
 
 dependencies {
 	for (set in addons) {
@@ -66,7 +62,7 @@ for (set in addons) {
 tasks.named<Jar>("jar") {
 	archiveFileName = "diorama-test-addon.jar"
 }
-for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable", overflow to "overflow", recursive to "recursive", throwing to "throwing", looping to "looping")) {
+for ((set, name) in listOf(broken to "broken", linkage to "linkage", assertion to "assertion", unprintable to "unprintable", overflow to "overflow", recursive to "recursive")) {
 	val jar = tasks.register<Jar>("${name}Jar") {
 		from(set.output)
 		archiveFileName = "diorama-test-addon-$name.jar"

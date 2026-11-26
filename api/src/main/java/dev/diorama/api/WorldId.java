@@ -4,7 +4,7 @@ import java.util.Objects;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Which world a {@link MapWorld} is, as Diorama tells worlds apart: the same each time the player
+ * Which world a {@link World} is, as Diorama tells worlds apart: the same each time the player
  * comes back to it, and opaque. Its {@link #toString} is 32 lowercase hex digits, safe in a file
  * name, and not something to take apart. Two are equal when their text is. Diorama makes these;
  * an addon that kept one as text gets it back with {@link #of}.

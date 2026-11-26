@@ -6432,7 +6432,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Presses a button the way a click does. */
-	private static void press(net.minecraft.client.gui.components.Button button) {
+	static void press(net.minecraft.client.gui.components.Button button) {
 		//? if >=1.21.9 {
 		button.onPress(null);
 		//?} else {

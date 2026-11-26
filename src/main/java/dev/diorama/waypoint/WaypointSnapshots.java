@@ -7,7 +7,6 @@ import dev.diorama.api.BlockCoord;
 import dev.diorama.api.DimensionId;
 import dev.diorama.api.MapId;
 import dev.diorama.api.ResourceId;
-import dev.diorama.api.WaypointChange;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -25,9 +24,11 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * What addons read of one world's waypoints ({@link dev.diorama.api.Waypoints#all}): the waypoints
- * the waypoint list shows, its waystones included, as snapshots that never change. The list is
- * made again only after something changed, and a waypoint that didn't change keeps its snapshot,
- * so reading it costs nothing and comparing two lists says what changed. Client thread only.
+ * the waypoint list shows, its waystones included, as snapshots that never change, the first of
+ * each ID only. The list is made again only when it's read after something changed, and a
+ * waypoint that didn't change keeps its snapshot; if none changed, the list stays the same
+ * instance and its {@link #revision} stays put. So reading it while nothing changes costs nothing.
+ * Client thread only.
  *
  * <p>It's out of date ({@link #pending}) when the store's {@link WaypointStore#revision} moved on
  * since it was made, or Waystones' count of changes, or the portal pin setting: every change that
@@ -41,11 +42,15 @@ final class WaypointSnapshots {
 	/** Map IDs by Diorama's own, which is empty for the main map. */
 	private static final Map<String, MapId> MAPS = new HashMap<>();
 	private static final Set<String> WARNED = new HashSet<>();
+	/** The last revision handed out, by any store: a list is never given a number another had. */
+	private static long revisions;
 
 	private final WaypointStore store;
 	private List<dev.diorama.api.Waypoint> list = List.of();
-	/** The first snapshot in the list with each ID. */
+	/** The list's snapshots by ID. */
 	private Map<UUID, Snapshot> byId = Map.of();
+	/** What {@link dev.diorama.api.Waypoints#revision} reads: a new number each time the list changes; 0 before it's first made. */
+	private long published;
 	/** What the list was made from: the store's revision, Waystones' count of changes, and the portal pin setting. */
 	private int revision = -1;
 	private int waystoneChanges;
@@ -60,7 +65,7 @@ final class WaypointSnapshots {
 		return this.list;
 	}
 
-	/** One waypoint of the list as last made: the first with this ID. */
+	/** One waypoint of the list as last made. */
 	Optional<dev.diorama.api.Waypoint> get(UUID id) {
 		Snapshot snapshot = this.byId.get(id);
 		return snapshot == null ? Optional.empty() : snapshot.self;
@@ -71,26 +76,29 @@ final class WaypointSnapshots {
 		return this.byId.get(id);
 	}
 
+	/** The list's revision as last made; {@link #refresh} first. */
+	long revision() {
+		return this.published;
+	}
+
 	/** Whether something changed since the list was made that may change it. */
 	boolean pending() {
 		return this.revision != this.store.revision() || this.waystoneChanges != Waystones.changes() || this.portalPins != Settings.get().portalMarkers;
 	}
 
-	/** Makes the list again if it's out of date, telling no one. */
+	/** Makes the list again if it's out of date. */
 	void refresh() {
 		if (this.pending()) {
-			this.rebuild(false);
+			this.rebuild();
 		}
 	}
 
 	/**
-	 * Makes the list again from the store. With {@code compare}, returns what changed since it was
-	 * last made, in the list's order, with the removed ones last; otherwise null. A waypoint that
-	 * didn't change keeps its snapshot, and if none did, the list itself stays the same instance.
-	 * A second waypoint with an ID already listed (a hand-edited file can have one) is listed, but
-	 * the ID stays the first's: comparing goes by the first with each ID.
+	 * Makes the list again from the store. A waypoint that didn't change keeps its snapshot, and
+	 * if none did, the list stays the same instance with the same revision. A second waypoint with
+	 * an ID already listed (a hand-edited file can have one) is left out.
 	 */
-	@Nullable List<WaypointChange> rebuild(boolean compare) {
+	private void rebuild() {
 		this.revision = this.store.revision();
 		this.portalPins = Settings.get().portalMarkers;
 		List<Waypoint> listed = this.store.listed();
@@ -101,43 +109,21 @@ final class WaypointSnapshots {
 		Map<UUID, Snapshot> oldById = this.byId;
 		for (Waypoint waypoint : listed) {
 			DimensionId dimension = dimension(waypoint.dimension);
-			if (dimension == null) {
+			if (dimension == null || nextById.containsKey(waypoint.id)) {
 				continue;
 			}
 			String folder = waypoint.kind == Waypoint.Kind.WAYSTONE ? null : this.store.folderName(waypoint.folder);
 			Snapshot old = oldById.get(waypoint.id);
 			Snapshot snapshot = old != null && old.source == waypoint && old.sameAs(waypoint, folder) ? old : new Snapshot(waypoint, dimension, folder);
 			next.add(snapshot);
-			nextById.putIfAbsent(waypoint.id, snapshot);
+			nextById.put(waypoint.id, snapshot);
 		}
-		List<WaypointChange> changes = null;
-		if (compare) {
-			changes = new ArrayList<>();
-			for (Snapshot now : next) {
-				if (nextById.get(now.id) != now) {
-					continue;
-				}
-				Snapshot before = oldById.get(now.id);
-				if (before == null) {
-					changes.add(new Change(WaypointChange.Type.ADDED, now.id, Optional.empty(), now.self));
-				} else if (before != now && !before.sameAs(now.source, now.folderName)) {
-					// The same ID may now be another waypoint (its first went, or the waystone came again): told only if what addons read changed.
-					changes.add(new Change(WaypointChange.Type.CHANGED, now.id, before.self, now.self));
-				}
-			}
-			for (dev.diorama.api.Waypoint was : this.list) {
-				Snapshot before = (Snapshot) was;
-				if (oldById.get(before.id) == before && !nextById.containsKey(before.id)) {
-					changes.add(new Change(WaypointChange.Type.REMOVED, before.id, before.self, Optional.empty()));
-				}
-			}
-		}
-		if (!this.sameAs(next)) {
+		if (this.published == 0 || !this.sameAs(next)) {
 			this.list = List.copyOf(next);
+			this.published = ++revisions;
 		}
 		// Always the new index: the same snapshots in the same order can stand for other waypoints.
 		this.byId = nextById;
-		return changes;
 	}
 
 	private boolean sameAs(List<Snapshot> next) {
@@ -349,9 +335,5 @@ final class WaypointSnapshots {
 		public String toString() {
 			return "Waypoint[" + this.name + " " + this.kind + " at " + this.pos.x() + " " + this.pos.y() + " " + this.pos.z() + " in " + this.dimension + ", " + this.id + "]";
 		}
-	}
-
-	/** One waypoint's change, as a listener hears it. */
-	record Change(WaypointChange.Type type, UUID id, Optional<dev.diorama.api.Waypoint> before, Optional<dev.diorama.api.Waypoint> after) implements WaypointChange {
 	}
 }

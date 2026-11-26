@@ -49,6 +49,8 @@ public final class WaypointEditScreen extends Screen {
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
 	private final boolean isNew;
+	/** Whether the first tick has checked the waypoint is still there; see {@link #tick}. */
+	private boolean checkedOpen;
 	/** What the preview draws: the waypoint as the form shows it now. */
 	private final Waypoint preview = new Waypoint();
 	private final MapPiece piece = new MapPiece(64, 40, 12);
@@ -736,7 +738,7 @@ public final class WaypointEditScreen extends Screen {
 		// No world, or the waypoint was deleted while the editor was open (by an addon, say): saving
 		// closes the editor and changes nothing, as with no world, rather than bring it back or
 		// change a waypoint that's gone.
-		if (store == null || !this.isNew && !store.holds(this.waypoint)) {
+		if (store == null || this.gone(store)) {
 			this.onClose();
 			return;
 		}
@@ -814,9 +816,23 @@ public final class WaypointEditScreen extends Screen {
 		}
 	}
 
+	/** Whether the waypoint being edited was deleted since the screen that opened this saw it, by an addon say. */
+	private boolean gone(WaypointStore store) {
+		return !this.isNew && !store.holds(this.waypoint);
+	}
+
 	@Override
 	public void tick() {
 		super.tick();
+		if (!this.checkedOpen) {
+			// Opened from a list row or a pin made before an addon deleted its waypoint: nothing to edit.
+			this.checkedOpen = true;
+			WaypointStore store = WaypointStore.get();
+			if (store != null && this.gone(store)) {
+				this.onClose();
+				return;
+			}
+		}
 		this.hintHere();
 		this.piece.tick();
 	}

@@ -4,12 +4,14 @@ import dev.diorama.Diorama;
 import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
-import dev.diorama.api.WorldListener;
+import dev.diorama.api.Waypoints;
+import dev.diorama.api.World;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import net.minecraft.client.Minecraft;
@@ -18,9 +20,10 @@ import org.jspecify.annotations.Nullable;
 /**
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
  * what it holds can be let go when it fails. It fails once: then what it hid shows again, its
- * listeners are closed, its later calls do nothing, and nothing of it is called again. The player
- * can stop it hiding anything ({@link #allow}): its handles stay open for it, and just aren't
- * counted.
+ * later calls do nothing, and nothing of it is called again. The player can stop it hiding
+ * anything ({@link #allow}): its handles stay open for it, and just aren't counted. That doesn't
+ * stop its waypoint edits ({@link AddonWaypoints}): the Addons tab says it stops what the addon
+ * hides.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -42,16 +45,9 @@ final class Addon implements DioramaApi, Hud {
 	private final String name;
 	/** Its open handles, so they can be closed for it, and counted or not as the player picks. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
-	/** Its other open handles: world listeners and waypoint listeners. */
-	private final List<Held> held = new ArrayList<>();
+	private final AddonWaypoints waypoints = new AddonWaypoints(this);
 	private boolean failed;
 	private boolean allowed;
-
-	/** Something an addon holds besides a part of the HUD, let go of when it fails. */
-	interface Held {
-		/** Lets go; true if it still held. */
-		boolean release();
-	}
 
 	Addon(String modId, String name, boolean allowed) {
 		this.modId = modId;
@@ -89,8 +85,7 @@ final class Addon implements DioramaApi, Hud {
 
 	/**
 	 * Switches the addon off: its handles are closed, what it hid shows again, and unless it was a
-	 * {@link #fatal} error, one line is logged. Once only: an addon switched off from inside one of
-	 * its own calls (a refused edit, a batch that threw) isn't logged again when that call throws.
+	 * {@link #fatal} error, one line is logged. Once only.
 	 */
 	void fail(String what, Throwable thrown) {
 		if (this.failed) {
@@ -101,10 +96,6 @@ final class Addon implements DioramaApi, Hud {
 			hold.release();
 		}
 		this.holds.clear();
-		for (Held each : List.copyOf(this.held)) {
-			each.release();
-		}
-		this.held.clear();
 		HudHides.changed();
 		if (fatal(thrown) == null) {
 			log(this.modId, what, thrown);
@@ -198,14 +189,6 @@ final class Addon implements DioramaApi, Hud {
 		this.holds.remove(hold);
 	}
 
-	void keep(Held each) {
-		this.held.add(each);
-	}
-
-	void drop(Held each) {
-		this.held.remove(each);
-	}
-
 	String id() {
 		return this.modId;
 	}
@@ -248,13 +231,15 @@ final class Addon implements DioramaApi, Hud {
 	}
 
 	@Override
-	public Handle onWorld(WorldListener listener) {
+	public Optional<World> world() {
 		checkThread();
-		Objects.requireNonNull(listener, "listener");
-		if (this.failed) {
-			return AddonWorlds.closed(this);
-		}
-		return AddonWorlds.register(this, listener);
+		return CurrentWorld.world();
+	}
+
+	@Override
+	public Waypoints waypoints() {
+		checkThread();
+		return this.waypoints;
 	}
 
 	@Override

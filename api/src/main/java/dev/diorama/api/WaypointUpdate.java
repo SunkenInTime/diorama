@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
  * is set changes. Every value is checked as {@link NewWaypoint}'s are.
  *
  * <pre>{@code
- * world.waypoints().edit(edits -> edits.update(id, WaypointUpdate.builder().name("Old mine").visible(false).build()));
+ * api.waypoints().edit(world.worldId(), edits -> edits.update(id, WaypointUpdate.builder().name("Old mine").visible(false).build()));
  * }</pre>
  */
 public final class WaypointUpdate {

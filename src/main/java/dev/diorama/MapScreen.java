@@ -127,12 +127,6 @@ public final class MapScreen extends Screen {
 	/** The status line as drawn last frame. */
 	private String statusShown = "";
 	private List<WaypointOverlay.Pin> pins = List.of();
-	/**
-	 * The waypoint the open menu is for, and the store's revision when it opened: a menu whose
-	 * waypoint was deleted since (by an addon, say) closes, rather than act on one that's gone.
-	 */
-	private @Nullable Waypoint menuWaypoint;
-	private int menuRevision;
 	private MapViewport.@Nullable View lastView;
 	/** Where the current mouse press started, to tell a click from a drag. */
 	private double pressX;
@@ -400,19 +394,6 @@ public final class MapScreen extends Screen {
 			this.otherMap.map().update();
 		}
 		CreateTrains.tick(true);
-		Waypoint menuFor = this.menuWaypoint;
-		if (menuFor != null) {
-			WaypointStore store = WaypointStore.get();
-			if (this.menu == null || store == null) {
-				this.menuWaypoint = null;
-			} else if (store.revision() != this.menuRevision) {
-				this.menuRevision = store.revision();
-				if (menuFor.kind != Waypoint.Kind.WAYSTONE && !store.holds(menuFor)) {
-					this.menu = null;
-					this.menuWaypoint = null;
-				}
-			}
-		}
 	}
 
 	/** Puts the zoom buttons beside the gauge on the cave map, in the corner otherwise. */
@@ -931,11 +912,9 @@ public final class MapScreen extends Screen {
 	/** Opens the menu for what's under a screen point: a waypoint's, or the spot's. */
 	private void openMenu(double screenX, double screenY) {
 		WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, screenX, screenY);
-		if (pin != null) {
+		// The pins are last frame's: one whose waypoint was deleted since (by an addon, say) gets no menu.
+		if (pin != null && held(pin.waypoint().source())) {
 			this.menu = new MapMenu(this.waypointItems(pin.waypoint()), this.font, screenX, screenY, this.width, this.height);
-			WaypointStore store = WaypointStore.get();
-			this.menuWaypoint = pin.waypoint().source();
-			this.menuRevision = store == null ? 0 : store.revision();
 			return;
 		}
 		CompletableFuture<MapLevel.Spot> spot = this.spotAt(screenX, screenY, true);
@@ -1073,40 +1052,59 @@ public final class MapScreen extends Screen {
 		items.add(MapMenu.Item.title(Component.literal(shown.shownName())));
 		items.add(MapMenu.Item.info(this.where(shown.x, shown.y, shown.z)));
 		if (waypoint.editable()) {
-			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
+			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, ifHeld(waypoint, () ->
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false)))));
 		}
-		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(waypoint.dimension), () -> {
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(waypoint.dimension), ifHeld(waypoint, () -> {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
-		}));
+		})));
 		items.add(this.copyItem(shown.x + " " + shown.y + " " + shown.z));
-		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
+		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), ifHeld(waypoint, () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
 			}
-		}));
+		})));
 		if (waypoint.kind == Waypoint.Kind.TEMPORARY) {
-			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.keep"), true, () -> {
+			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.keep"), true, ifHeld(waypoint, () -> {
 				waypoint.kind = Waypoint.Kind.MANUAL;
 				this.changed();
-			}));
+			})));
 		}
-		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, () -> {
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, ifHeld(waypoint, () -> {
 			WaypointStore store = WaypointStore.get();
 			if (store != null) {
 				store.setVisible(waypoint, false);
 			}
-		}));
+		})));
 		if (waypoint.editable()) {
-			items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), () -> {
+			items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), ifHeld(waypoint, () -> {
 				WaypointStore store = WaypointStore.get();
 				if (store != null) {
 					store.remove(waypoint);
 				}
-			}));
+			})));
 		}
 		return items;
+	}
+
+	/**
+	 * Whether a waypoint is still one the store has: false for one deleted since a pin or a menu
+	 * was made for it, by an addon say. A waystone is the Waystones mod's, never the store's, and
+	 * goes by what that mod sends.
+	 */
+	private static boolean held(Waypoint waypoint) {
+		WaypointStore store = WaypointStore.get();
+		return store != null && (waypoint.kind == Waypoint.Kind.WAYSTONE || store.holds(waypoint));
+	}
+
+	/** A menu item's action that does nothing once its waypoint is gone ({@link #held}). */
+	private static Runnable ifHeld(Waypoint waypoint, Runnable action) {
+		return () -> {
+			if (held(waypoint)) {
+				action.run();
+			}
+		};
 	}
 
 	/** A line putting {@code coordinates} on the clipboard, spaced the way commands take them. */
@@ -1836,6 +1834,11 @@ public final class MapScreen extends Screen {
 	/** For tests: the Export button. */
 	public Button exportButton() {
 		return this.export;
+	}
+
+	/** For tests: what a right-click at this GUI point opens, from the pins drawn last frame, without a mouse event. */
+	public void openMenuForTests(double x, double y) {
+		this.openMenu(x, y);
 	}
 
 	/** For tests: the right-click menu, if it's open. */

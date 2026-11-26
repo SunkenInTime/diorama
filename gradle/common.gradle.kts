@@ -67,7 +67,7 @@ dependencies {
 evaluationDependsOn(":testaddon")
 val testAddons = project(":testaddon").extensions.getByType(SourceSetContainer::class.java)
 extensions.getByType(SourceSetContainer::class.java).matching { it.name == "gametest" }.configureEach {
-	for (name in listOf("main", "broken", "linkage", "assertion", "unprintable", "overflow", "recursive", "throwing", "looping")) {
+	for (name in listOf("main", "broken", "linkage", "assertion", "unprintable", "overflow", "recursive")) {
 		dependencies.add(compileOnlyConfigurationName, testAddons.getByName(name).output)
 	}
 }
