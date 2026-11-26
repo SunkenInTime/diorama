@@ -253,11 +253,6 @@ public final class MapMemory {
 		return this.savedTiles.get(lod);
 	}
 
-	/** For fog-mask's check: what's known of a remembered tile, or null if it isn't read. Render thread. */
-	public byte @Nullable [] knownForTests(TileKey key) {
-		return this.knownTiles.get(key);
-	}
-
 	/** For tests: how many remembered tiles with something on them are loaded. */
 	public long shownTiles() {
 		return this.shown;
