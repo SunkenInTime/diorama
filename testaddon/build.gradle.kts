@@ -6,6 +6,8 @@
 //                                       it and sync waypoints with a pretend map mod by polling; it
 //                                       also has a class marked @DioramaEntrypoint by mistake, and
 //                                       shows markers and lines on the maps (markers/MapMarkers)
+//                                       with an icon of its own: its pack.mcmeta is for Forge 1.20.1,
+//                                       which loads no assets from a mod jar without one
 //   diorama-test-addon-broken.jar       hides the minimap and opens a layer of markers, then throws
 //                                       from onReady
 //   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
