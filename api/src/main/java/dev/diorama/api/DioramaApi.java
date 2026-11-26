@@ -42,4 +42,24 @@ public interface DioramaApi {
 
 	/** {@return the waypoints of the world the player is in now, whichever that is when each method is called} */
 	Waypoints waypoints();
+
+	/**
+	 * Opens a layer of markers and lines on Diorama's maps, empty until its first
+	 * {@link MapLayer#replace}. See {@link MapLayer} for how long it holds, how it is drawn, and
+	 * how a new world empties it: hand content over while {@link #world} is present, and again
+	 * when its ID changes. Content handed over while it's empty may be emptied once the world is
+	 * known.
+	 *
+	 * @param name what this addon calls it: 1 to 32 characters, {@code a-z 0-9 _ - .}, such as
+	 *     {@code trains}; not the name of another layer this addon has open
+	 * @return the layer, open until this addon closes it or fails. An addon that failed, so that
+	 *     Diorama switched it off, gets a layer that is already closed: {@link MapLayer#isOpen}
+	 *     is false, {@link MapLayer#replace} does nothing, and it never shows.
+	 * @throws IllegalArgumentException if the name won't do, or this addon already has a layer of
+	 *     that name open
+	 * @throws IllegalStateException if this addon already has {@link MapLayer#MAX_OPEN} layers
+	 *     open, or if called off the client thread
+	 * @throws NullPointerException if {@code name} is null
+	 */
+	MapLayer openLayer(String name);
 }

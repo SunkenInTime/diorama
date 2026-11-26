@@ -13,6 +13,7 @@ import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
 import dev.diorama.ChunkyBorders;
+import dev.diorama.addon.AddonLayers;
 import dev.diorama.addon.Addons;
 import dev.diorama.api.DioramaEntrypoint;
 import dev.diorama.drawing.DrawingStore;
@@ -134,6 +135,7 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingOut.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			AddonLayers.onJoinOrLeave();
 			Maps.onLeave();
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
@@ -148,6 +150,7 @@ public final class DioramaNeoForge {
 		NeoForge.EVENT_BUS.addListener(ClientPlayerNetworkEvent.LoggingIn.class, event -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			AddonLayers.onJoinOrLeave();
 			Maps.onLeave();
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();

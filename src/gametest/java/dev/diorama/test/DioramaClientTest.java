@@ -463,6 +463,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("addon-api")) {
 					AddonWaypointsTest.reopened(context);
 					AddonApiTest.reopened(context, reopened);
+					AddonMarkersTest.run(context, reopened);
 					//? if >=1.21.6 && fabric {
 					AddonWaypointsTest.frames(context, reopened);
 					//?}
@@ -494,6 +495,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
 					seenAfterLeaving(context);
 				}
+			}
+			if (tests.contains("addon-api")) {
+				// Layers kept from the reopened world, checked at the title screen and in a new world.
+				AddonMarkersTest.afterReopened(context);
 			}
 		}
 		if (tests.contains("recreated-world")) {

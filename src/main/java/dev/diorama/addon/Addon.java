@@ -4,6 +4,7 @@ import dev.diorama.Diorama;
 import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
+import dev.diorama.api.MapLayer;
 import dev.diorama.api.Waypoints;
 import dev.diorama.api.World;
 import java.io.PrintWriter;
@@ -21,8 +22,9 @@ import org.jspecify.annotations.Nullable;
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
  * what it holds can be let go when it fails. It fails once: then what it hid shows again, its later
  * calls do nothing, and nothing of it is called again. The player can stop it hiding anything
- * ({@link #allow}): its handles stay open for it, and just aren't counted. That doesn't stop its
- * waypoint edits ({@link AddonWaypoints}): the Addons tab says it stops what the addon hides.
+ * ({@link #allow}): its handles stay open for it, and just aren't counted, and its layers of
+ * markers stay open and aren't drawn ({@link AddonLayers}). That doesn't stop its waypoint edits
+ * ({@link AddonWaypoints}): the Addons tab says it stops what the addon hides and shows.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -44,6 +46,8 @@ final class Addon implements DioramaApi, Hud {
 	private final String name;
 	/** Its open handles, so they can be closed for it, and counted or not as the player picks. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
+	/** Its open layers of markers and lines, so they can be closed for it. */
+	private final List<AddonLayers.Layer> layers = new ArrayList<>();
 	private final AddonWaypoints waypoints = new AddonWaypoints(this);
 	private boolean failed;
 	private boolean allowed;
@@ -78,6 +82,10 @@ final class Addon implements DioramaApi, Hud {
 				hold.release();
 			}
 			this.holds.clear();
+			for (AddonLayers.Layer layer : this.layers) {
+				layer.release();
+			}
+			this.layers.clear();
 			HudHides.changed();
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
@@ -150,6 +158,8 @@ final class Addon implements DioramaApi, Hud {
 			HudHides.count(hold.parts(), allowed ? 1 : -1);
 		}
 		HudHides.changed();
+		// Its layers are drawn or not as they're read, each frame.
+		AddonLayers.changed();
 	}
 
 	/** The parts its open handles ask to hide, as {@link HudHides#bit} bits, counted or not. */
@@ -167,6 +177,10 @@ final class Addon implements DioramaApi, Hud {
 
 	void forget(HudHides.Hold hold) {
 		this.holds.remove(hold);
+	}
+
+	void forget(AddonLayers.Layer layer) {
+		this.layers.remove(layer);
 	}
 
 	String id() {
@@ -220,6 +234,43 @@ final class Addon implements DioramaApi, Hud {
 	public Waypoints waypoints() {
 		checkThread();
 		return this.waypoints;
+	}
+
+	/** 1 to 32 of a-z 0-9 _ - . */
+	private static boolean layerName(String name) {
+		if (name.isEmpty() || name.length() > 32) {
+			return false;
+		}
+		for (int i = 0; i < name.length(); i++) {
+			char c = name.charAt(i);
+			if (!(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.')) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public MapLayer openLayer(String name) {
+		checkThread();
+		Objects.requireNonNull(name, "name");
+		if (!layerName(name)) {
+			throw new IllegalArgumentException("Not a layer name: \"" + name + "\" (1 to 32 of a-z 0-9 _ - .)");
+		}
+		if (this.failed) {
+			return AddonLayers.Layer.closed(this, name);
+		}
+		for (AddonLayers.Layer layer : this.layers) {
+			if (layer.layerName().equals(name)) {
+				throw new IllegalArgumentException(this.modId + " already has a layer named \"" + name + "\" open; close it first, or replace its content");
+			}
+		}
+		if (this.layers.size() >= MapLayer.MAX_OPEN) {
+			throw new IllegalStateException(this.modId + " already has " + MapLayer.MAX_OPEN + " layers open, the most an addon can have: close one first");
+		}
+		AddonLayers.Layer layer = AddonLayers.Layer.opened(this, name);
+		this.layers.add(layer);
+		return layer;
 	}
 
 	@Override

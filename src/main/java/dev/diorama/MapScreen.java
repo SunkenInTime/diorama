@@ -1,6 +1,8 @@
 package dev.diorama;
 
 import dev.diorama.bake.BlockLooks;
+import dev.diorama.api.DimensionId;
+import dev.diorama.render.AddonOverlay;
 import dev.diorama.bake.MapPick;
 import dev.diorama.drawing.DrawMode;
 import dev.diorama.drawing.DrawingStore;
@@ -158,6 +160,8 @@ public final class MapScreen extends Screen {
 	private Button drawButton;
 	private final DrawMode draw = new DrawMode();
 	private final WorldBorderOverlay worldBorder = new WorldBorderOverlay();
+	/** Addons' markers and lines. */
+	private final AddonOverlay addons = new AddonOverlay();
 	/** The tabs' left edges and widths as drawn last frame, and where the status text starts. */
 	private final int[] tabX = new int[2];
 	private final int[] tabWidth = new int[2];
@@ -523,6 +527,11 @@ public final class MapScreen extends Screen {
 		if (drawings != null && (this.draw.active() || Settings.get().drawings != Settings.DrawingsShown.OFF)) {
 			this.draw.drawMap(graphics, this.font, view, drawings.in(this.dimension()), mouseX, mouseY, !this.overControls(mouseX, mouseY));
 		}
+		// The shown dimension's, from another dimension too: they're at places in the world it shows.
+		DimensionId addonDimension = AddonOverlay.any() ? this.addons.dimension(this.dimension()) : null;
+		if (addonDimension != null) {
+			this.addons.drawLines(graphics, view, addonDimension, true);
+		}
 		boolean caves = this.layer != TileKey.SURFACE;
 		this.placeControls();
 		Radar.Blip hovered = null;
@@ -531,6 +540,9 @@ public final class MapScreen extends Screen {
 			this.blips = Radar.collect(view, a, true);
 			Radar.draw(graphics, view, this.blips, true, false);
 			hovered = Radar.under(view, this.blips, mouseX, mouseY);
+		}
+		if (addonDimension != null) {
+			this.addons.drawMarkers(graphics, view, addonDimension, true);
 		}
 		WaypointStore store = WaypointStore.get();
 		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.shownIn(this.dimension()));

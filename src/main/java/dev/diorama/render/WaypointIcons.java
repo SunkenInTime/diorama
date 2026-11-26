@@ -4,7 +4,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,7 +32,17 @@ public final class WaypointIcons {
 	/** What a portal's pin shows, and what marks a waypoint of the player's as a portal's. */
 	public static final String PORTAL = "diorama:portal";
 	private static final String FOLDER = "textures/waypoint_icons/";
-	private static final Map<String, Optional<PinArt.Image>> IMAGES = new HashMap<>();
+	/**
+	 * How many icons' pixels are kept, found or not: an addon's markers can ask for any ID, so the
+	 * ones asked for longest ago are let go past this, and read again if asked for again.
+	 */
+	static final int MAX_KEPT = 512;
+	private static final Map<String, Optional<PinArt.Image>> IMAGES = new LinkedHashMap<>(16, 0.75F, true) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, Optional<PinArt.Image>> eldest) {
+			return this.size() > MAX_KEPT;
+		}
+	};
 
 	private WaypointIcons() {
 	}
@@ -48,10 +58,16 @@ public final class WaypointIcons {
 		return known.orElse(null);
 	}
 
+	/** How many icons' pixels are kept now, found or not: for the tests. */
+	public static int kept() {
+		return IMAGES.size();
+	}
+
 	/** Forgets the icons and the pins drawn with them: a resource reload may have changed them. */
 	public static void reload() {
 		IMAGES.clear();
 		Pins.forgetIcons();
+		MarkerAtlas.forget();
 	}
 
 	/** Every icon there is: Diorama's own in order, then any a resource pack adds, by id. */

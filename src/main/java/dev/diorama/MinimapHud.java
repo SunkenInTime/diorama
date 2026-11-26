@@ -1,6 +1,8 @@
 package dev.diorama;
 
 import dev.diorama.addon.HudHides;
+import dev.diorama.api.DimensionId;
+import dev.diorama.render.AddonOverlay;
 import dev.diorama.bake.TileKey;
 import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
@@ -83,6 +85,8 @@ public final class MinimapHud implements HudElement {
 	private long fadeStart = -1;
 	private final DrawingOverlay drawings = new DrawingOverlay();
 	private final WorldBorderOverlay worldBorder = new WorldBorderOverlay();
+	/** Addons' markers and lines. */
+	private final AddonOverlay addons = new AddonOverlay();
 	/** The slice on screen. Moving into another slice keeps this one until the next has baked. */
 	private int shownLayer;
 	private boolean showing;
@@ -268,11 +272,19 @@ public final class MinimapHud implements HudElement {
 		if (drawings != null && settings.drawings == Settings.DrawingsShown.ALWAYS) {
 			this.drawings.draw(graphics, font, ground, drawings.in(mc.level.dimension().identifier().toString()), null, null, false);
 		}
+		DimensionId addonDimension = AddonOverlay.any() ? this.addons.dimension(mc.level.dimension().identifier().toString()) : null;
+		if (addonDimension != null) {
+			// Placed and turned by the overlay itself, so the minimap's own view: what can be seen is all that's cut into pieces.
+			this.addons.drawLines(graphics, view, addonDimension, false);
+		}
 		graphics.disableScissor();
 		// Over the map, since a resource pack's frame can reach in over its edge, and under what's marked on it.
 		MinimapFrames.draw(graphics, settings.minimapFrame, round, x, y, size);
 		List<Radar.Blip> blips = ServerRules.radarAllowed() && settings.radarOnMinimap ? Radar.collect(view, partialTick, false) : List.of();
 		Radar.draw(graphics, view, blips, false, false);
+		if (addonDimension != null) {
+			this.addons.drawMarkers(graphics, view, addonDimension, false);
+		}
 		WaypointStore store = WaypointStore.get();
 		if (store != null && settings.waypointsOnMap) {
 			List<Waypoint> near = store.shownIn(mc.level.dimension().identifier().toString()).stream().filter(w -> WaypointStore.isNear(w, viewer)).toList();

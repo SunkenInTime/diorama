@@ -169,6 +169,20 @@ public final class Circle {
 		return left < 3 ? null : fan(shape, left);
 	}
 
+	/**
+	 * The part of a convex polygon inside the circle, allocating nothing: its corners go into
+	 * {@link #cutCorners}, in the polygon's own turning order, and this returns how many; fewer
+	 * than 3 when none of it is inside. For drawing straight into arrays kept between frames.
+	 */
+	public int cutConvex(float[] polygon, int count) {
+		return this.cut(polygon, count);
+	}
+
+	/** The corners the last {@link #cutConvex} left, x then y: good until the next cut. Render thread only. */
+	public static float[] cutCorners() {
+		return shape;
+	}
+
 	/** Cuts the rectangle by each side of the polygon it crosses, into {@link #shape}. Returns its corner count. */
 	private int cut(float x0, float y0, float x1, float y1) {
 		return this.cut(new float[] {x0, y0, x0, y1, x1, y1, x1, y0}, 4);
