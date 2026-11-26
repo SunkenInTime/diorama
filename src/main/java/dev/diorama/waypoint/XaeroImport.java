@@ -42,6 +42,8 @@ import org.jspecify.annotations.Nullable;
 public final class XaeroImport {
 	/** Xaero's colour index (its colour list starts with the 16 chat colours) to the dye that index stands for. */
 	private static final DyeColor[] EXTRA_COLORS = {DyeColor.MAGENTA, DyeColor.LIGHT_BLUE, DyeColor.LIME, DyeColor.PINK, DyeColor.BROWN};
+	/** How many colours Xaero's has, by index from 0. */
+	static final int COLORS = 16 + EXTRA_COLORS.length;
 	/** Names Xaero's gives its own waypoints, stored as translation keys, in English for when Xaero's isn't installed. */
 	private static final Map<String, String> XAERO_NAMES = Map.of(
 		"gui.xaero_deathpoint", "Latest Death",
@@ -97,21 +99,9 @@ public final class XaeroImport {
 			// Before 2021 or so Xaero's kept the same folders here; it moves them on its next start.
 			base = mc.gameDirectory.toPath().resolve("XaeroWaypoints");
 		}
-		IntegratedServer server = mc.getSingleplayerServer();
-		ServerData data = mc.getCurrentServer();
 		try {
-			List<String> roots;
-			if (server != null) {
-				roots = singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
-			} else if (data != null && !WorldKey.isRealm(data)) {
-				//? if fabric {
-				Path config = FabricLoader.getInstance().getConfigDir();
-				//?} else {
-				/*Path config = FMLPaths.CONFIGDIR.get();
-				*///?}
-				roots = serverFolders(data.ip, byAddress(config.resolve("xaero").resolve("minimap").resolve("client.cfg")));
-			} else {
-				// Xaero's names a Realm by its owner and id, which only the Realms screen knows.
+			List<String> roots = worldFolders(mc);
+			if (roots == null) {
 				return null;
 			}
 			//? if >=1.21.9 {
@@ -122,11 +112,32 @@ public final class XaeroImport {
 			*///?}
 			String spawnId = "mw" + (spawn.getX() >> 6) + "," + (spawn.getY() >> 6) + "," + (spawn.getZ() >> 6);
 			int height = mc.player != null ? mc.player.getBlockY() : 64;
-			return find(base, roots, server != null, spawnId, height);
+			return find(base, roots, mc.getSingleplayerServer() != null, spawnId, height);
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.warn("Couldn't read Xaero's Minimap waypoints from {}", base, e);
 			return null;
 		}
+	}
+
+	/**
+	 * The names Xaero's may give the folder of the world the client is in, newest naming first; null
+	 * in a Realm, which Xaero's names by its owner and id, which only the Realms screen knows.
+	 */
+	static @Nullable List<String> worldFolders(Minecraft mc) {
+		IntegratedServer server = mc.getSingleplayerServer();
+		ServerData data = mc.getCurrentServer();
+		if (server != null) {
+			return singleplayerFolders(server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().getFileName().toString());
+		}
+		if (data != null && !WorldKey.isRealm(data)) {
+			//? if fabric {
+			Path config = FabricLoader.getInstance().getConfigDir();
+			//?} else {
+			/*Path config = FMLPaths.CONFIGDIR.get();
+			*///?}
+			return serverFolders(data.ip, byAddress(config.resolve("xaero").resolve("minimap").resolve("client.cfg")));
+		}
+		return null;
 	}
 
 	/**

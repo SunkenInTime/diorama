@@ -36,7 +36,8 @@ import org.jspecify.annotations.Nullable;
  * Move, which sends them all to a folder picked from a list, hide or show, and delete. A grey line
  * under the list says so. With no waypoints in
  * this dimension, a pin standing on a piece of the map shows what one is and how to add one.
- * When Xaero's Minimap has waypoints for this world that aren't here yet, a button imports them.
+ * When Xaero's Minimap has waypoints for this world that aren't here yet, a button imports them;
+ * Export waypoints, beside Done, saves this world's as Xaero's Minimap's files ({@link WaypointExport}).
  */
 public final class WaypointListScreen extends Screen {
 	private static final int LIST_WIDTH = 340;
@@ -167,7 +168,10 @@ public final class WaypointListScreen extends Screen {
 	private XaeroImport.@Nullable Found xaero;
 	/** What the last import brought in, shown above the import button. */
 	private @Nullable Component imported;
-	private int importedY;
+	/** How the last export went, shown in the same place; the newer of the two shows. */
+	private @Nullable Component exported;
+	private boolean exportFailed;
+	private int noticeY;
 	/** Top of the empty list's block: the piece of map, then the words and New waypoint. */
 	private int emptyTop;
 
@@ -424,9 +428,18 @@ public final class WaypointListScreen extends Screen {
 		int cx = this.width / 2;
 		int left = cx - LIST_WIDTH / 2;
 
-		// The footer: Done alone, and the import button above it when Xaero's has something new.
+		// The footer: Done, with Export waypoints beside it while there's anything to export, as
+		// vanilla's pack screen has Open Pack Folder beside Done, and the import button above them
+		// when Xaero's has something new.
 		int footer = this.height - 26;
-		this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> this.onClose()).bounds(cx - 100, footer, 200, 20).build());
+		if (WaypointExport.available()) {
+			Button export = this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoints.export"), b -> this.export())
+				.bounds(cx - 152, footer, 150, 20).build());
+			export.setTooltip(Tooltip.create(Component.translatable("diorama.waypoints.export.tooltip")));
+			this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> this.onClose()).bounds(cx + 2, footer, 150, 20).build());
+		} else {
+			this.addRenderableWidget(Button.builder(CommonComponents.GUI_DONE, b -> this.onClose()).bounds(cx - 100, footer, 200, 20).build());
+		}
 		int above = footer;
 		Button importButton = this.importButton(store);
 		if (importButton != null) {
@@ -440,9 +453,9 @@ public final class WaypointListScreen extends Screen {
 			importButton.setPosition(cx - 102, above);
 			*///?}
 		}
-		if (this.imported != null) {
+		if (this.notice() != null) {
 			above -= 12;
-			this.importedY = above;
+			this.noticeY = above;
 		}
 		// The hint line under the list wants 18 between the list and what's below it, to sit clear of
 		// both. The list gives up the strip under its last whole row for that, never a row: where the
@@ -1050,9 +1063,7 @@ public final class WaypointListScreen extends Screen {
 			int[] bar = this.scrollbar();
 			ScreenArt.scrollbar(graphics, bar[0], LIST_TOP, this.listBottom, bar[1], bar[2]);
 		}
-		if (this.imported != null) {
-			graphics.centeredText(this.font, this.imported, cx, this.importedY, 0xFFA0E0A0);
-		}
+		this.drawNotice(graphics, cx);
 		// Under the list, like the line under the map: nothing else says several rows can be selected.
 		String hint = Component.translatable("diorama.waypoints.select_hint", MAC ? "Cmd" : "Ctrl").getString();
 		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.hintY, HINT);
@@ -1089,9 +1100,7 @@ public final class WaypointListScreen extends Screen {
 			: Component.translatable("diorama.waypoints.empty", DioramaClient.NEW_WAYPOINT.getTranslatedKeyMessage());
 		graphics.centeredText(this.font, how, cx, 158 + top, HINT);
 		graphics.centeredText(this.font, Component.translatable("diorama.waypoints.empty_map", Component.translatable("diorama.menu.add_waypoint")), cx, 168 + top, HINT);
-		if (this.imported != null) {
-			graphics.centeredText(this.font, this.imported, cx, this.importedY, 0xFFA0E0A0);
-		}
+		this.drawNotice(graphics, cx);
 	}
 
 	/**
@@ -1124,6 +1133,28 @@ public final class WaypointListScreen extends Screen {
 		return this.imported;
 	}
 
+	/** How the last import or export went, whichever was later, or null before either. */
+	private @Nullable Component notice() {
+		return this.exported != null ? this.exported : this.imported;
+	}
+
+	private void drawNotice(GuiGraphicsExtractor graphics, int cx) {
+		Component notice = this.notice();
+		if (notice != null) {
+			int colour = this.exported != null && this.exportFailed ? RED : 0xFFA0E0A0;
+			graphics.centeredText(this.font, Component.literal(this.fit(notice.getString(), this.width - 8)), cx, this.noticeY, colour);
+		}
+	}
+
+	/** Exports this world's waypoints to files and says where they went; chat gets a link to the folder. */
+	private void export() {
+		WaypointExport.Told told = WaypointExport.run();
+		this.exported = told.message();
+		this.exportFailed = !told.done();
+		this.imported = null;
+		this.rebuildWidgets();
+	}
+
 	/** Imports one of Xaero's worlds and says how it went. */
 	void importFrom(XaeroImport.World world) {
 		WaypointStore store = WaypointStore.get();
@@ -1136,6 +1167,7 @@ public final class WaypointListScreen extends Screen {
 		Component count = added.size() == 1
 			? Component.translatable("diorama.xaero.count_one")
 			: Component.translatable("diorama.xaero.count", added.size());
+		this.exported = null;
 		this.imported = elsewhere == 0
 			? Component.translatable("diorama.xaero.imported", count)
 			: Component.translatable("diorama.xaero.imported_elsewhere", count, elsewhere);
