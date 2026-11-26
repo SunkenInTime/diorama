@@ -2,6 +2,7 @@ package dev.diorama.test;
 
 //? if >=26.1 && fabric {
 import dev.diorama.Diorama;
+import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.api.DimensionId;
 import dev.diorama.api.LayerContent;
@@ -33,8 +34,8 @@ import net.minecraft.core.BlockPos;
  *   <li>no layer; one layer of 100 and of 1,000 dots replaced every client tick, 1,000 still, 1,000
  *       icons with labels, the layer open and empty: the minimap and the full map;</li>
  *   <li>the worst lines the limits allow, on the round minimap: 16 layers, each with all the line
- *       points a layer can have, in long zigzags that cross the circle at every piece; and the
- *       same on the full map;</li>
+ *       points a layer can have, every piece crossing the circle between points in the corners of
+ *       the square around it, so every piece is cut by the circle; and the same on the full map;</li>
  *   <li>bytes of arrays the minimap's overlay holds with those 16 layers open, and after they are
  *       all closed;</li>
  *   <li>what one replace of 1,000 markers costs.</li>
@@ -97,13 +98,19 @@ final class MarkersMeasure {
 			table.add(row(context, "layer open, empty", 100, 200));
 			context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
 			table.add(row(context, "layer open, empty, round minimap", 100, 200));
-			context.runOnClient(mc -> layer.close());
 			layers.clear();
 
-			// The worst lines the limits allow, on the round minimap.
+			// The worst lines the limits allow, on the round minimap: first, how big its circle is in blocks.
 			context.runOnClient(mc -> {
 				Settings.get().minimapShape = Settings.Shape.ROUND;
-				LayerContent worst = worstLines(px, py, pz);
+				layer.replace(LayerContent.builder().add(Marker.builder(DimensionId.OVERWORLD, px, py, pz).build()).build());
+			});
+			context.setScreen(() -> null);
+			context.waitTicks(10);
+			double[] circle = context.computeOnClient(mc -> circleOnMinimap(py));
+			context.runOnClient(mc -> layer.close());
+			context.runOnClient(mc -> {
+				LayerContent worst = worstLines(px, py, pz, circle);
 				for (int i = 0; i < MapLayer.MAX_OPEN; i++) {
 					MapLayer each = TestAddon.api().openLayer("worst-" + i);
 					layers.add(each);
@@ -187,18 +194,50 @@ final class MarkersMeasure {
 	}
 
 	/**
-	 * A layer's worth of the costliest lines: as many points as a layer can have, in lines as long
-	 * as a line can be, zigzagging 300 blocks either side of the player and creeping south, so every
-	 * piece crosses the minimap's circle and is cut by it.
+	 * The round minimap's circle, from its AddonOverlay as it last drew: its radius in GUI pixels,
+	 * and GUI pixels a block east and a block south moves a place there. Client thread.
 	 */
-	private static LayerContent worstLines(double px, double py, double pz) {
+	private static double[] circleOnMinimap(double y) {
+		Object overlay = minimapOverlay();
+		try {
+			Field zoomField = AddonOverlay.class.getDeclaredField("zoom");
+			zoomField.setAccessible(true);
+			Field circleField = AddonOverlay.class.getDeclaredField("circle");
+			circleField.setAccessible(true);
+			double zoom = zoomField.getDouble(overlay);
+			Object circle = circleField.get(overlay);
+			if (circle == null) {
+				throw new AssertionError("The minimap's overlay hasn't drawn a round view");
+			}
+			float r = circle.getClass().getField("r").getFloat(circle);
+			double east = zoom * Math.hypot(Projection.u(1, 0) - Projection.u(0, 0), Projection.v(1, y, 0) - Projection.v(0, y, 0));
+			double south = zoom * Math.hypot(Projection.u(0, 1) - Projection.u(0, 0), Projection.v(0, y, 1) - Projection.v(0, y, 0));
+			return new double[] {r, east, south};
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	/**
+	 * A layer's worth of the costliest lines: as many points as a layer can have, in lines as long
+	 * as a line can be, each point in a corner of the square around the round minimap (inside the
+	 * square, outside the circle), going round the corners, so every piece crosses the circle and
+	 * is cut by it.
+	 */
+	private static LayerContent worstLines(double px, double py, double pz, double[] circle) {
+		double ax = circle[0] * 0.9 / circle[1];
+		double az = circle[0] * 0.9 / circle[2];
+		int[][] corners = {{-1, -1}, {1, 1}, {-1, 1}, {1, -1}};
 		LayerContent.Builder content = LayerContent.builder();
 		int perLine = MapLine.MAX_POINTS;
 		int lines = LayerContent.MAX_LINE_POINTS / perLine;
 		for (int l = 0; l < lines; l++) {
 			MapLine.Builder line = MapLine.builder(DimensionId.OVERWORLD).rgb(0x3060FF).width(MapLine.MAX_WIDTH);
 			for (int k = 0; k < perLine; k++) {
-				line.point(px + (k % 2 == 0 ? -300 : 300), py, pz - 20 + 40.0 * (l * perLine + k) / (lines * perLine));
+				int[] corner = corners[k % 4];
+				// A little further in at each point, so no two points are the same.
+				double in = 1 - 0.05 * (l * perLine + k) / (lines * perLine);
+				line.point(px + corner[0] * ax * in, py, pz + corner[1] * az * in);
 			}
 			content.add(line.build());
 		}
