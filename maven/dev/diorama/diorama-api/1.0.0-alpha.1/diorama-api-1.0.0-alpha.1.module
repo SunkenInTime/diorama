@@ -1,0 +1,100 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "dev.diorama",
+    "module": "diorama-api",
+    "version": "1.0.0-alpha.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.7.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "diorama-api-1.0.0-alpha.1.jar",
+          "url": "diorama-api-1.0.0-alpha.1.jar",
+          "size": 36755,
+          "sha512": "b2529ecec3a171887f9fbd1cb6a83afa755d024c295c58c8df7258b436fa3114a4d89505eeef6d8513f811d990b59770928c2604e68baf4caad25bb4c0475f27",
+          "sha256": "a7b72d4166e349cecc30fd5d80d14727011b16c0bbba01e60923cf9076590f07",
+          "sha1": "75360ced2d42e4f748f21705e17d55f074d125a8",
+          "md5": "a406077060bc35d99658752268b9fd0b"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "diorama-api-1.0.0-alpha.1.jar",
+          "url": "diorama-api-1.0.0-alpha.1.jar",
+          "size": 36755,
+          "sha512": "b2529ecec3a171887f9fbd1cb6a83afa755d024c295c58c8df7258b436fa3114a4d89505eeef6d8513f811d990b59770928c2604e68baf4caad25bb4c0475f27",
+          "sha256": "a7b72d4166e349cecc30fd5d80d14727011b16c0bbba01e60923cf9076590f07",
+          "sha1": "75360ced2d42e4f748f21705e17d55f074d125a8",
+          "md5": "a406077060bc35d99658752268b9fd0b"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "diorama-api-1.0.0-alpha.1-sources.jar",
+          "url": "diorama-api-1.0.0-alpha.1-sources.jar",
+          "size": 36026,
+          "sha512": "8158af06b00616ece453bddadbffa93d5dbc36797a6459794c3e56a2a8e0a76d6eca29800eec34e2cd3e211365afc7ce3e617109206e181e109679a174b38de1",
+          "sha256": "e3e347e4cfaba1cb4f1ab1e3a8a8edf26c10a9afe9938f557c89c72ba6a053dc",
+          "sha1": "fd585fde18fe8232eeb6f66a220f62702f4f68ef",
+          "md5": "1465e0faca98122d459a4dede3475e0a"
+        }
+      ]
+    },
+    {
+      "name": "javadocElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "diorama-api-1.0.0-alpha.1-javadoc.jar",
+          "url": "diorama-api-1.0.0-alpha.1-javadoc.jar",
+          "size": 4279040,
+          "sha512": "f5112e1b7b441c302ebae8b7fe0e41814473cdfc6e4899e959bee09f397f47786a1c2199d5623aab6dc13093b1b41bf6f2474d9058d6280552e1ca2611e86e86",
+          "sha256": "2615d85f4d64546c1c8d8f5bf9b99245c90f5e31d68a097228735c7880f06616",
+          "sha1": "db9e3bb4efe7881203ae0121e55735df3d5b16bc",
+          "md5": "ac5e792580993ad1ff5f3094601732d5"
+        }
+      ]
+    }
+  ]
+}
