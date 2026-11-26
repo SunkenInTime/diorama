@@ -1,6 +1,8 @@
 package dev.diorama.api;
 
 import java.util.Optional;
+import java.util.Set;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * What one addon can do with Diorama, handed to {@link DioramaAddon#onReady}. Each addon gets its
@@ -62,4 +64,21 @@ public interface DioramaApi {
 	 * @throws NullPointerException if {@code name} is null
 	 */
 	MapLayer openLayer(String name);
+
+	/**
+	 * Opens a view of Diorama's map for one of this addon's own screens to draw in, drawing these
+	 * parts of Diorama's over the map. See {@link MapView} for what it shows, its limits and how
+	 * long it holds. Experimental.
+	 *
+	 * @param parts what of Diorama's to draw over the map besides addons' markers and lines; empty
+	 *     for the map alone, as a map mod that draws its own pins and arrow over it would want
+	 * @return the view, open until this addon closes it or fails. An addon that failed, so that
+	 *     Diorama switched it off, gets a view that is already closed: {@link MapView#isOpen} is
+	 *     false and {@link MapView#render} draws nothing.
+	 * @throws IllegalStateException if this addon already has {@link MapView#MAX_OPEN} views open,
+	 *     or if called off the client thread
+	 * @throws NullPointerException if {@code parts} is null or holds null
+	 */
+	@ApiStatus.Experimental
+	MapView openView(Set<MapView.Part> parts);
 }

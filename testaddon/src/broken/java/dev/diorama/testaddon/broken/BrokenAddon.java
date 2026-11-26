@@ -9,18 +9,21 @@ import dev.diorama.api.Hud;
 import dev.diorama.api.LayerContent;
 import dev.diorama.api.MapLayer;
 import dev.diorama.api.MapLine;
+import dev.diorama.api.MapView;
 import dev.diorama.api.Marker;
 import java.util.EnumSet;
 
 /**
- * Hides the minimap and opens a layer of markers and lines across the Overworld's spawn, then
- * fails: Diorama should switch it off, show the minimap again and take its layer off the maps.
+ * Hides the minimap, opens a layer of markers and lines across the Overworld's spawn and a view of
+ * the map, then fails: Diorama should switch it off, show the minimap again, take its layer off the
+ * maps and close its view.
  */
 @DioramaEntrypoint
 public final class BrokenAddon implements DioramaAddon {
 	private static DioramaApi api;
 	private static Handle held;
 	private static MapLayer layer;
+	private static MapView view;
 
 	@Override
 	public void onReady(DioramaApi api) {
@@ -36,6 +39,7 @@ public final class BrokenAddon implements DioramaAddon {
 		content.add(MapLine.builder(DimensionId.OVERWORLD).point(-256, 70, -256).point(256, 70, 256).rgb(0x00FF00).width(8).build());
 		content.add(MapLine.builder(DimensionId.OVERWORLD).point(-256, 70, 256).point(256, 70, -256).rgb(0x00FF00).width(8).build());
 		layer.replace(content.build());
+		view = api.openView(EnumSet.allOf(MapView.Part.class));
 		throw new IllegalStateException("Diorama test addon: broken on purpose");
 	}
 
@@ -52,5 +56,10 @@ public final class BrokenAddon implements DioramaAddon {
 	/** The layer it opened before it failed. */
 	public static MapLayer layer() {
 		return layer;
+	}
+
+	/** The view it opened before it failed. */
+	public static MapView view() {
+		return view;
 	}
 }
