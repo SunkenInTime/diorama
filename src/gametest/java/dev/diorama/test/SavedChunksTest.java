@@ -272,6 +272,13 @@ final class SavedChunksTest {
 	 */
 	private static void farTileDrawnAgainAsSaved(ClientGameTestContext context, TestSingleplayerContext world, int ground) {
 		TileKey tile = tileAt(X + 24, ground, Z + 24);
+		// Loaded again, the land around the far chunks can come out further made than the first
+		// time, and some of it is drawn then: new land in the tile. Once first, so the time after
+		// writes everything as it was.
+		loadForAWhile(context, world, X, Z, X + CHUNKS * 16 - 1, Z + CHUNKS * 16 - 1, true, server -> {
+		});
+		save(context, world);
+		rescanAndWait(context);
 		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
 		MapLevel map = context.computeOnClient(mc -> MapSession.get().map());
 		map.forgetSpots(tile);
