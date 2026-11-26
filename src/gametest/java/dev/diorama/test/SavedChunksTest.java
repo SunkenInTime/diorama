@@ -1,13 +1,17 @@
 package dev.diorama.test;
 
+import dev.diorama.Claims;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
+import dev.diorama.render.MapLevel;
+import dev.diorama.render.MapTile;
 import dev.diorama.render.SavedChunkImport;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
@@ -40,6 +44,8 @@ final class SavedChunksTest {
 		int ground = farChunksShowUp(context, world);
 		placesPlayedInAreNotDrawnAgain(context, world);
 		chunksWrittenAgainChangeNothing(context, world);
+		farTileDrawnAgainAsSaved(context, world, ground);
+		newLandMovesTheFog(context, world, ground);
 		sameHeightBlockKeepsTheFog(context, world);
 		settingStopsIt(context);
 		return ground;
@@ -194,9 +200,9 @@ final class SavedChunksTest {
 	/**
 	 * The game writes a chunk again whenever something in it changed, and the chunks the server keeps
 	 * loaded past what the client sees get written every minute or so, mostly with nothing new to
-	 * show. Drawn again, a tile that comes out as it was saved stays on the GPU as it is, and none
-	 * of them has the fog built again. Not every one comes out the same to the last bit: by the
-	 * edge of the client's chunks some colours can be one step off from the last time.
+	 * show. Drawn again, none of them has the fog built again. Not every one comes out the same to
+	 * the last bit: by the edge of the client's chunks some colours can be one step off from the
+	 * last time. One that does stays on the GPU as it is ({@link #farTileDrawnAgainAsSaved}).
 	 */
 	private static void chunksWrittenAgainChangeNothing(ClientGameTestContext context, TestSingleplayerContext world) {
 		save(context, world);
@@ -235,8 +241,6 @@ final class SavedChunksTest {
 		}
 		int minY = context.computeOnClient(mc -> MapSession.get().map().minY());
 		int drawnBefore = drawn(context);
-		int shownBefore = context.computeOnClient(mc -> MapSession.get().map().savedTilesShown());
-		int keptBefore = context.computeOnClient(mc -> MapSession.get().map().savedTilesKept());
 		int coverageBefore = context.computeOnClient(mc -> MapSession.get().map().coverageChanges());
 		// A second on, so the save time moves. A block changed and changed back makes the game
 		// write the chunk again as it was.
@@ -254,15 +258,189 @@ final class SavedChunksTest {
 		if (drawn(context) <= drawnBefore) {
 			throw new AssertionError("None of the " + ring.size() + " chunks written again was drawn again");
 		}
-		int shown = context.computeOnClient(mc -> MapSession.get().map().savedTilesShown()) - shownBefore;
-		int kept = context.computeOnClient(mc -> MapSession.get().map().savedTilesKept()) - keptBefore;
-		if (kept == 0) {
-			throw new AssertionError("Of the tiles the map shows drawn again from " + ring.size() + " chunks the game wrote again unchanged, none stayed as it was: "
-				+ shown + " went on the GPU again");
-		}
 		int coverage = context.computeOnClient(mc -> MapSession.get().map().coverageChanges()) - coverageBefore;
 		if (coverage > 0) {
 			throw new AssertionError("Chunks the game wrote again unchanged changed the coverage of " + coverage + " tiles, so the fog was built again");
+		}
+	}
+
+	/**
+	 * The far chunks written again as they were: the tile over them is drawn again, and comes out as
+	 * it was saved, as nothing the client has is near. It stays on the GPU as it is. Saved without its
+	 * spots, it gets them back, and with a claims mod in the game the claims over it, painted on the
+	 * ground the spots say, show again.
+	 */
+	private static void farTileDrawnAgainAsSaved(ClientGameTestContext context, TestSingleplayerContext world, int ground) {
+		TileKey tile = tileAt(X + 24, ground, Z + 24);
+		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
+		MapLevel map = context.computeOnClient(mc -> MapSession.get().map());
+		map.forgetSpots(tile);
+		if (map.hasSavedSpots(tile)) {
+			throw new AssertionError("Tile " + tile + " still has spots after forgetting them");
+		}
+		// A claims mod only has to be there for claims to be shown: these come from the test.
+		boolean claims = context.computeOnClient(mc -> Claims.supported());
+		if (claims) {
+			claimFarChunks(context, TestOwner.ONE);
+			context.waitFor(mc -> Claims.get().at(X >> 4, Z >> 4) != null, 200);
+			context.waitTicks(60);
+			if (context.computeOnClient(mc -> claimsShown(tile))) {
+				throw new AssertionError("Tile " + tile + " shows claims with no spots saved: this wouldn't show them coming back with the spots");
+			}
+		}
+		List<Boolean> taken = new ArrayList<>();
+		context.runOnClient(mc -> map.watchSavedTiles((key, kept, coverageMoved) -> {
+			if (key.equals(tile)) {
+				taken.add(kept);
+			}
+		}));
+		// Closed: on 1.20.1 the map pauses the whole server while the world is paused.
+		context.setScreen(() -> null);
+		int minY = context.computeOnClient(mc -> MapSession.get().map().minY());
+		// Paused, so nothing in them changes while they're loaded.
+		try (WorldPause paused = WorldPause.pause(context)) {
+			loadForAWhile(context, world, X, Z, X + CHUNKS * 16 - 1, Z + CHUNKS * 16 - 1, server -> {
+				for (int dx = 0; dx < CHUNKS; dx++) {
+					for (int dz = 0; dz < CHUNKS; dz++) {
+						BlockPos bottom = new BlockPos(X + dx * 16 + 8, minY, Z + dz * 16 + 8);
+						net.minecraft.world.level.block.state.BlockState was = server.overworld().getBlockState(bottom);
+						server.overworld().setBlockAndUpdate(bottom, was.is(Blocks.STONE) ? Blocks.BEDROCK.defaultBlockState() : Blocks.STONE.defaultBlockState());
+						server.overworld().setBlockAndUpdate(bottom, was);
+					}
+				}
+			});
+			save(context, world);
+		}
+		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
+		rescanAndWait(context);
+		context.runOnClient(mc -> map.watchSavedTiles(null));
+		List<Boolean> seen = context.computeOnClient(mc -> List.copyOf(taken));
+		if (seen.isEmpty()) {
+			throw new AssertionError("Tile " + tile + " over the far chunks the game wrote again unchanged wasn't drawn again");
+		}
+		if (seen.contains(false)) {
+			throw new AssertionError("Tile " + tile + ", drawn again from far chunks the game wrote again unchanged, went on the GPU again (" + seen
+				+ " for each time it was drawn, true for kept)");
+		}
+		if (!map.hasSavedSpots(tile)) {
+			throw new AssertionError("Tile " + tile + ", drawn again from the save, has no spots saved yet");
+		}
+		if (claims) {
+			for (int i = 0; !context.computeOnClient(mc -> claimsShown(tile)); i++) {
+				if (i > 400) {
+					throw new AssertionError("Tile " + tile + " got its spots back from the save, but the claims over it never showed again");
+				}
+				context.waitTick();
+			}
+			context.takeScreenshot("saved-chunks-far-claims");
+			claimFarChunks(context, null);
+		}
+		context.setScreen(() -> null);
+	}
+
+	/**
+	 * New land in a tile the map shows, drawn from the save: the share of the tile the map knows
+	 * grows, and the number the fog mask is kept by moves with it, so the fog lifts there.
+	 */
+	private static void newLandMovesTheFog(ClientGameTestContext context, TestSingleplayerContext world, int ground) {
+		// Past the chunks made around the far ones, in the same column of tiles.
+		int x = X + 136;
+		int z = Z + 24;
+		TileKey tile = tileAt(X + 24, ground, Z + 24);
+		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
+		MapLevel map = context.computeOnClient(mc -> MapSession.get().map());
+		List<Boolean> moved = new ArrayList<>();
+		context.runOnClient(mc -> map.watchSavedTiles((key, kept, coverageMoved) -> {
+			if (key.equals(tile)) {
+				moved.add(!kept && coverageMoved);
+			}
+		}));
+		long versionBefore = context.computeOnClient(mc -> map.coverageVersion());
+		context.setScreen(() -> null);
+		int[] height = new int[1];
+		loadForAWhile(context, world, x, z, x, z, server -> height[0] = server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
+		save(context, world);
+		TileKey landed = tileAt(x, height[0], z);
+		if (!landed.equals(tile)) {
+			throw new AssertionError("The new land at " + x + "," + z + " is in tile " + landed + ", not " + tile + " over the far chunks");
+		}
+		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
+		int pixel = pixelAt(x, height[0], z);
+		rescanAndWait(context);
+		context.runOnClient(mc -> map.watchSavedTiles(null));
+		if ((savedPixel(context, tile, pixel) >>> 24) == 0) {
+			throw new AssertionError("The new land at " + x + "," + z + " wasn't drawn into tile " + tile);
+		}
+		List<Boolean> seen = context.computeOnClient(mc -> List.copyOf(moved));
+		long version = context.computeOnClient(mc -> map.coverageVersion());
+		if (!seen.contains(true) || version == versionBefore) {
+			throw new AssertionError("New land drawn into tile " + tile + " from the save didn't move the coverage the fog is built from (drawn " + seen.size()
+				+ " times, coverage version " + versionBefore + " to " + version + "): the fog would stay over it");
+		}
+		context.setScreen(() -> null);
+	}
+
+	/** Forces chunks loaded on the server, does {@code meanwhile} there, and lets them go again, so the game writes them when it saves. */
+	private static void loadForAWhile(ClientGameTestContext context, TestSingleplayerContext world, int x0, int z0, int x1, int z1, java.util.function.Consumer<MinecraftServer> meanwhile) {
+		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+		for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, true)); i++) {
+			if (i > 2400) {
+				throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " never loaded");
+			}
+			context.waitTick();
+		}
+		world.getServer().runOnServer(meanwhile::accept);
+		world.getServer().runCommand("forceload remove all");
+		for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, false)); i++) {
+			if (i > 2400) {
+				throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " never unloaded");
+			}
+			context.waitTick();
+		}
+	}
+
+	/** Whether every chunk in the square is loaded on the server, or with {@code loaded} false, none is. */
+	private static boolean allLoaded(MinecraftServer server, int cx0, int cz0, int cx1, int cz1, boolean loaded) {
+		for (int cx = cx0; cx <= cx1; cx++) {
+			for (int cz = cz0; cz <= cz1; cz++) {
+				if ((server.overworld().getChunkSource().getChunkNow(cx, cz) != null) != loaded) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/** Opens the map on a point, and waits for it to show the tile there. */
+	private static void lookAt(ClientGameTestContext context, double u, double v, TileKey tile) {
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, 2, TileKey.SURFACE));
+		context.waitFor(mc -> MapSession.get().map().peek(tile) != null, 400);
+	}
+
+	/** Hands the far chunks to {@code owner} as a claims mod would, or to no one. */
+	private static void claimFarChunks(ClientGameTestContext context, TestOwner owner) {
+		context.runOnClient(mc -> {
+			for (int dx = 0; dx < CHUNKS; dx++) {
+				for (int dz = 0; dz < CHUNKS; dz++) {
+					Claims.updated(mc.level.dimension(), (X >> 4) + dx, (Z >> 4) + dz, TestOwner.class, owner, false);
+				}
+			}
+		});
+	}
+
+	private static boolean claimsShown(TileKey key) {
+		MapTile tile = MapSession.get().map().peek(key);
+		return tile != null && tile.claims() != null;
+	}
+
+	/** Whoever the test hands claims to. */
+	private record TestOwner(String name) implements Claims.Owner {
+		static final TestOwner ONE = new TestOwner("Test claim");
+
+		@Override
+		public Optional<Claims.Claim> look() {
+			return Optional.of(new Claims.Claim(this, 0xE04040, this.name, false, false));
 		}
 	}
 
