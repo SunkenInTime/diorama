@@ -297,20 +297,17 @@ final class SavedChunksTest {
 		// Closed: on 1.20.1 the map pauses the whole server while the world is paused.
 		context.setScreen(() -> null);
 		int minY = context.computeOnClient(mc -> MapSession.get().map().minY());
-		// Paused, so nothing in them changes while they're loaded.
-		try (WorldPause paused = WorldPause.pause(context)) {
-			loadForAWhile(context, world, X, Z, X + CHUNKS * 16 - 1, Z + CHUNKS * 16 - 1, server -> {
-				for (int dx = 0; dx < CHUNKS; dx++) {
-					for (int dz = 0; dz < CHUNKS; dz++) {
-						BlockPos bottom = new BlockPos(X + dx * 16 + 8, minY, Z + dz * 16 + 8);
-						net.minecraft.world.level.block.state.BlockState was = server.overworld().getBlockState(bottom);
-						server.overworld().setBlockAndUpdate(bottom, was.is(Blocks.STONE) ? Blocks.BEDROCK.defaultBlockState() : Blocks.STONE.defaultBlockState());
-						server.overworld().setBlockAndUpdate(bottom, was);
-					}
+		loadForAWhile(context, world, X, Z, X + CHUNKS * 16 - 1, Z + CHUNKS * 16 - 1, true, server -> {
+			for (int dx = 0; dx < CHUNKS; dx++) {
+				for (int dz = 0; dz < CHUNKS; dz++) {
+					BlockPos bottom = new BlockPos(X + dx * 16 + 8, minY, Z + dz * 16 + 8);
+					net.minecraft.world.level.block.state.BlockState was = server.overworld().getBlockState(bottom);
+					server.overworld().setBlockAndUpdate(bottom, was.is(Blocks.STONE) ? Blocks.BEDROCK.defaultBlockState() : Blocks.STONE.defaultBlockState());
+					server.overworld().setBlockAndUpdate(bottom, was);
 				}
-			});
-			save(context, world);
-		}
+			}
+		});
+		save(context, world);
 		lookAt(context, X + 24, Projection.v(ground, Z + 24), tile);
 		rescanAndWait(context);
 		context.runOnClient(mc -> map.watchSavedTiles(null));
@@ -358,7 +355,7 @@ final class SavedChunksTest {
 		long versionBefore = context.computeOnClient(mc -> map.coverageVersion());
 		context.setScreen(() -> null);
 		int[] height = new int[1];
-		loadForAWhile(context, world, x, z, x, z, server -> height[0] = server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
+		loadForAWhile(context, world, x, z, x, z, false, server -> height[0] = server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z));
 		save(context, world);
 		TileKey landed = tileAt(x, height[0], z);
 		if (!landed.equals(tile)) {
@@ -380,16 +377,23 @@ final class SavedChunksTest {
 		context.setScreen(() -> null);
 	}
 
-	/** Forces chunks loaded on the server, does {@code meanwhile} there, and lets them go again, so the game writes them when it saves. */
-	private static void loadForAWhile(ClientGameTestContext context, TestSingleplayerContext world, int x0, int z0, int x1, int z1, java.util.function.Consumer<MinecraftServer> meanwhile) {
-		world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
-		for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, true)); i++) {
-			if (i > 2400) {
-				throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " never loaded");
+	/**
+	 * Forces chunks loaded on the server, does {@code meanwhile} there, and lets them go again, so the
+	 * game writes them when it saves. {@code paused}: the world is paused until they're let go, so
+	 * nothing in them changes but what {@code meanwhile} does; paused, the game never unloads them.
+	 */
+	private static void loadForAWhile(ClientGameTestContext context, TestSingleplayerContext world, int x0, int z0, int x1, int z1, boolean paused,
+		java.util.function.Consumer<MinecraftServer> meanwhile) {
+		try (WorldPause pause = paused ? WorldPause.pause(context) : null) {
+			world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
+			for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, true)); i++) {
+				if (i > 2400) {
+					throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " never loaded");
+				}
+				context.waitTick();
 			}
-			context.waitTick();
+			world.getServer().runOnServer(meanwhile::accept);
 		}
-		world.getServer().runOnServer(meanwhile::accept);
 		world.getServer().runCommand("forceload remove all");
 		for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, false)); i++) {
 			if (i > 2400) {
