@@ -1032,7 +1032,8 @@ final class AddonWaypointsTest {
 	/**
 	 * Bytes the minimap's and the world waypoints' drawing allocate a frame with three waypoints in
 	 * view, the world paused: with the test addon's listener open and idle, then with no waypoint
-	 * listener. The draw paths don't know about addons, so the two should match, and match master.
+	 * listener, then with one open again, so the order they're measured in shows apart from the
+	 * listener. The draw paths don't know about addons, so they should match, and match master.
 	 */
 	static void frames(ClientGameTestContext context, TestSingleplayerContext world) {
 		world.getServer().runCommand("time set noon");
@@ -1070,8 +1071,13 @@ final class AddonWaypointsTest {
 			context.runOnClient(mc -> TestAddon.listening().close());
 			long minimapNone = AllocProbe.MINIMAP.count(context, "no waypoint listener", 200);
 			long waypointsNone = AllocProbe.WAYPOINTS.count(context, "no waypoint listener", 200);
-			Diorama.LOGGER.info("addon-api alloc: medians a frame, listener open {}: minimap {} listening, {} not; world waypoints {} listening, {} not",
-				listening, minimapListening, minimapNone, waypointsListening, waypointsNone);
+			Handle again = context.computeOnClient(mc -> TestAddon.world().waypoints().listen(changes -> {
+			}));
+			long minimapAgain = AllocProbe.MINIMAP.count(context, "listening again", 200);
+			long waypointsAgain = AllocProbe.WAYPOINTS.count(context, "listening again", 200);
+			context.runOnClient(mc -> again.close());
+			Diorama.LOGGER.info("addon-api alloc: medians a frame, listener open {}: minimap {} listening, {} not, {} listening again; world waypoints {} listening, {} not, {} listening again",
+				listening, minimapListening, minimapNone, minimapAgain, waypointsListening, waypointsNone, waypointsAgain);
 		}
 		context.runOnClient(mc -> pins.forEach(WaypointStore.get()::remove));
 	}
