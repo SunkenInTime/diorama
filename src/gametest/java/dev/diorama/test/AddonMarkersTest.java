@@ -516,10 +516,15 @@ final class AddonMarkersTest {
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		boolean spotSeen = near(image, spot[0] * scale, spot[1] * scale, 1, SPOT_RGB);
 		boolean mobSeen = near(image, mob[0] * scale, mob[1] * scale, 1, MOB_RGB);
-		boolean lineSeen = near(image, midX * scale, midY * scale, 1, LINE_RGB);
+		// Along the line's middle half: the radar's mobs draw over addons' lines, and one can sit on any single spot.
+		boolean lineSeen = false;
+		for (int k = 0; k <= 8 && !lineSeen; k++) {
+			double f = 0.25 + 0.5 * k / 8;
+			lineSeen = near(image, (spot[0] + (mob[0] - spot[0]) * f) * scale, (spot[1] + (mob[1] - spot[1]) * f) * scale, 1, LINE_RGB);
+		}
 		if (!spotSeen || !mobSeen || !lineSeen) {
 			wrong.add(where + ": in " + shot + ".png, the block's marker's colour " + (spotSeen ? "is" : "isn't") + " at (" + Math.round(spot[0] * scale) + ", " + Math.round(spot[1] * scale)
-				+ "), the pig's " + (mobSeen ? "is" : "isn't") + " at (" + Math.round(mob[0] * scale) + ", " + Math.round(mob[1] * scale) + "), the line's " + (lineSeen ? "is" : "isn't") + " half way");
+				+ "), the pig's " + (mobSeen ? "is" : "isn't") + " at (" + Math.round(mob[0] * scale) + ", " + Math.round(mob[1] * scale) + "), the line's " + (lineSeen ? "is" : "isn't") + " along its middle half");
 			return;
 		}
 		Diorama.LOGGER.info("addon-api markers: {}: block marker at {} = waypoint point {}, pig marker at {} = radar {}; the line's quads cover its middle; colours seen in {}",
