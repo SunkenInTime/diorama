@@ -967,6 +967,8 @@ final class AddonMarkersTest {
 			context.runOnClient(mc -> {
 				layer.close();
 				Settings.get().minimapShape = Settings.Shape.SQUARE;
+				// The icons this looked up, the missing one among them, are forgotten: later checks count what they leave.
+				MarkerAtlas.forget();
 			});
 			DioramaClientTest.setGuiScale(context, scale);
 		}
