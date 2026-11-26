@@ -1,0 +1,6 @@
+# E33Chat, which draws chat in a window of its own from its own copy of each line (sections
+# e33chat and e33chat-server). Client mod; it also loads on a server. One line per jar: <node> <url>.
+1.21.1 https://cdn.modrinth.com/data/onBSJreQ/versions/AhsFqWml/e33chat-Fabric-1.21.1-2.4.17.jar
+1.21.1-neoforge https://cdn.modrinth.com/data/onBSJreQ/versions/pQFJf3Q1/e33chat-NeoForge-1.21.1-2.4.17.jar
+1.20.1-forge https://cdn.modrinth.com/data/onBSJreQ/versions/6EehMzPP/e33chat-Forge-1.20.1-2.4.17.jar
+1.21.11 https://cdn.modrinth.com/data/onBSJreQ/versions/vADZd8Sd/e33chat-Fabric-1.21.11-2.4.7.jar
