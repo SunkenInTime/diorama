@@ -13,6 +13,7 @@ import dev.diorama.bake.VoxelReader;
 import dev.diorama.render.Circle;
 import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapViewport;
+import dev.diorama.render.Radar;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.render.gpu.MapTexture;
 import java.util.ArrayList;
@@ -288,7 +289,7 @@ public final class Lights {
 	/** Whether the radar shows {@code player} to {@code self}, watching from {@code viewer}, as it does other players. */
 	private static boolean onRadar(Player player, Player self, Entity viewer, float partialTick) {
 		Settings settings = Settings.get();
-		return settings.radarPlayers && player.isAlive() && !player.isInvisibleTo(self) && (!player.isSpectator() || self.isSpectator())
+		return settings.radarPlayers && player.isAlive() && !Radar.hidden(player, self) && (!player.isSpectator() || self.isSpectator())
 			&& Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= settings.radarRange;
 	}
 

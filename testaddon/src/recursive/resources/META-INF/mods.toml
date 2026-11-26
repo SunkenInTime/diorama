@@ -1,0 +1,17 @@
+modLoader = "lowcodefml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon_recursive"
+version = "${version}"
+displayName = "Diorama Test Addon (recursive)"
+description = "Throws an exception whose getMessage() never returns from onReady on purpose, for Diorama's game tests. Never released."
+displayTest = "IGNORE_ALL_VERSION"
+
+[[dependencies.diorama_test_addon_recursive]]
+modId = "diorama"
+mandatory = false
+versionRange = "*"
+ordering = "NONE"
+side = "CLIENT"

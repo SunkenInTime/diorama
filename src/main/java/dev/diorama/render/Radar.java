@@ -27,9 +27,11 @@ import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.NeutralMob;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Team;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -149,6 +151,23 @@ public final class Radar {
 		return null;
 	}
 
+	/**
+	 * Whether the radar leaves {@code entity} off for {@code self}: invisible to them, or sneaking,
+	 * as Xaero's Minimap and JourneyMap do by default, so crouching keeps a player off other players'
+	 * maps. A sneaking player on the same scoreboard team still shows, as on Xaero's, and so does one
+	 * the server reports wherever they are (a teammate), as Xaero's draws its party members.
+	 */
+	public static boolean hidden(Entity entity, Player self) {
+		if (entity.isInvisibleTo(self)) {
+			return true;
+		}
+		if (!entity.isShiftKeyDown()) {
+			return false;
+		}
+		Team team = entity.getTeam();
+		return (team == null || team != self.getTeam()) && !TrackedPlayers.tracks(entity);
+	}
+
 	/** Everything the radar can show inside the view, players last. */
 	public static List<Blip> collect(MapViewport.View view, float partialTick, boolean fullscreen) {
 		Minecraft mc = Minecraft.getInstance();
@@ -170,7 +189,7 @@ public final class Radar {
 		boolean listing = !fullscreen && mc.options.keyPlayerList.isDown();
 		for (Entity entity : Iterables.concat(level.entitiesForRendering(), TrackedPlayers.unloaded(level))) {
 			// The one the map follows is the arrow in its middle.
-			if (entity == self || entity == viewer || !entity.isAlive() || entity.isInvisibleTo(self)) {
+			if (entity == self || entity == viewer || !entity.isAlive() || hidden(entity, self)) {
 				continue;
 			}
 			Kind kind = kind(entity);

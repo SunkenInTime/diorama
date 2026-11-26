@@ -88,8 +88,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
 		}
-		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
+		if (tests.contains("xaero-real") || tests.contains("xaero-real-server") || tests.contains("waypoint-export-xaero")) {
 			XaeroRealTest.clearXaero(context);
+		}
+		if (tests.contains("addon-api")) {
+			AddonApiTest.titleScreen(context);
 		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
@@ -112,6 +115,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			settle(context, 100);
 			// boat_run.py times the warm-up by this line.
 			Diorama.LOGGER.info("Map warm-up done");
+			if (tests.contains("addon-api")) {
+				AddonApiTest.firstWorld(context, world);
+			}
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
 			save = world.getWorldSave();
@@ -206,6 +212,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("radar")) {
 				radar(context, world);
 			}
+			if (tests.contains("radar-sneaking")) {
+				RadarSneakingTest.run(context, world);
+			}
 			if (tests.contains("xaero-icons")) {
 				xaeroIcons(context, world);
 			}
@@ -265,6 +274,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
+			}
+			if (tests.contains("waypoint-export")) {
+				WaypointExportTest.run(context, world);
+			}
+			if (tests.contains("waypoint-export-xaero")) {
+				WaypointExportTest.forXaero(context, world);
 			}
 			if (tests.contains("xaero-real")) {
 				XaeroRealTest.singleplayer(context, world);
@@ -412,10 +427,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 				world.getServer().runCommand("tp @a 3000 200 3000");
 				context.waitTicks(100);
 				waitUntilGenerated(context, world);
+				seenJustBeforeLeaving(context);
 			}
 		}
-		if ((spawnCell != null || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if (tests.contains("addon-api")) {
+			AddonApiTest.left(context);
+		}
+		if (tests.contains("waypoint-export-xaero")) {
+			WaypointExportTest.intoXaero(context);
+		}
+		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoint-export-xaero") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
+				if (tests.contains("addon-api")) {
+					AddonApiTest.reopened(context, reopened);
+				}
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);
 				}
@@ -435,11 +460,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("xaero-real")) {
 					XaeroRealTest.reopened(context);
 				}
+				if (tests.contains("waypoint-export-xaero")) {
+					WaypointExportTest.readByXaero(context);
+				}
 				if (tests.contains("waystones")) {
 					waystonesAfterRejoin(context, reopened);
 				}
 				if (spawnCell != null) {
 					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
+					seenAfterLeaving(context);
 				}
 			}
 		}
@@ -503,6 +532,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
+		}
+		if (tests.contains("radar-sneaking-server")) {
+			RadarSneakingTest.server(context);
 		}
 		if (tests.contains("aeronautics-server")) {
 			AeronauticsServerTest.run(context);
@@ -1173,6 +1205,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
 			// One waypoint, far enough not to be reached, so the list shows its row and the sort buttons.
 			context.runOnClient(mc -> dev.diorama.waypoint.Waypoints.addTemporary(mc.player.blockPosition().offset(300, 0, 0), "minecraft:overworld"));
+			// And one kept waypoint, so the list's footer has Export waypoints beside Done.
+			context.runOnClient(mc -> dev.diorama.waypoint.WaypointStore.get().add(new dev.diorama.waypoint.Waypoint("Home",
+				mc.player.getBlockX() - 300, mc.player.getBlockY(), mc.player.getBlockZ(), "minecraft:overworld", dev.diorama.waypoint.Waypoint.PALETTE[0])));
 			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
 				switchLanguage(context, language);
 				context.waitTicks(10);
@@ -1230,6 +1265,14 @@ public class DioramaClientTest implements FabricClientGameTest {
 				context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-6-waypoint-list");
+				// Export's tooltip is the longest text in the list: pointed at, so it shows whole.
+				net.minecraft.client.gui.components.Button export = context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(),
+					net.minecraft.network.chat.Component.translatable("diorama.waypoints.export").getString()));
+				double exportScale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+				context.getInput().setCursorPos((export.getX() + export.getWidth() / 2.0) * exportScale, (export.getY() + export.getHeight() / 2.0) * exportScale);
+				context.waitTicks(30);
+				context.takeScreenshot("languages-" + language + "-6-export-tooltip");
+				context.getInput().setCursorPos(2, 2);
 				context.setScreen(() -> new dev.diorama.MinimapPositionScreen(new SettingsScreen(null)));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-7-position");
@@ -2051,6 +2094,42 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 			throw new AssertionError("Waypoint pins cover every place the test looked at around spawn");
+		});
+	}
+
+	/** Blocks seen just before leaving, deep under the far spot the player leaves from, and one beside them that wasn't. */
+	private static final int[][] SEEN_BEFORE_LEAVING = {{3001, -60, 3001}, {3002, -60, 3001}, {3017, -61, 2990}, {2980, -59, 3040}};
+	private static final int[] UNSEEN_BESIDE = {3003, -60, 3001};
+
+	/**
+	 * Sees blocks with the next periodic save still far off, then the world is left at once: only
+	 * the save on leaving can keep them.
+	 */
+	private static void seenJustBeforeLeaving(ClientGameTestContext context) {
+		context.waitFor(mc -> MapSession.get().ticksToNextSeenSave() > 300, 700);
+		context.runOnClient(mc -> {
+			dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+			for (int[] b : SEEN_BEFORE_LEAVING) {
+				if (!seen.markSeen(b[0], b[1], b[2])) {
+					throw new AssertionError("Block " + java.util.Arrays.toString(b) + " was already seen before the test saw it");
+				}
+			}
+			Diorama.LOGGER.info("Saw {} blocks {} ticks before the next periodic save, leaving now", SEEN_BEFORE_LEAVING.length, MapSession.get().ticksToNextSeenSave());
+		});
+	}
+
+	/** After reopening: what {@link #seenJustBeforeLeaving} saw is still seen, and only that. */
+	private static void seenAfterLeaving(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			dev.diorama.data.SeenBlocks seen = MapSession.get().map().seen();
+			for (int[] b : SEEN_BEFORE_LEAVING) {
+				if (!seen.isSeen(b[0], b[1], b[2])) {
+					throw new AssertionError("Fog-of-war progress made just before leaving was lost: " + java.util.Arrays.toString(b) + " isn't seen after reopening");
+				}
+			}
+			if (seen.isSeen(UNSEEN_BESIDE[0], UNSEEN_BESIDE[1], UNSEEN_BESIDE[2])) {
+				throw new AssertionError("A block nobody saw, " + java.util.Arrays.toString(UNSEEN_BESIDE) + ", is seen after reopening");
+			}
 		});
 	}
 
@@ -3199,6 +3278,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.takeScreenshot("diorama-09-fog-of-war-room");
 		context.setScreen(() -> null);
 			world.getServer().runCommand("tellraw @a \"\u00a7r\u00a7e\u00a7s\u00a7e\u00a7t\u00a7x\u00a7a\u00a7e\u00a7r\u00a7o\"");
+		try {
+			SeenSaveTest.run();
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 	}
 
 	/**
@@ -7244,10 +7328,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));

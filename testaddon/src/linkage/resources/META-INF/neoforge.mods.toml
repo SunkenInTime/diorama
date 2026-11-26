@@ -1,0 +1,14 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "MIT"
+
+[[mods]]
+modId = "diorama_test_addon_linkage"
+version = "${version}"
+displayName = "Diorama Test Addon (linkage)"
+description = "Fails with a LinkageError on purpose, for Diorama's game tests. Never released."
+
+[[dependencies.diorama_test_addon_linkage]]
+modId = "diorama"
+type = "optional"
+versionRange = "*"

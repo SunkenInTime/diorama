@@ -3,6 +3,7 @@ package dev.diorama.waypoint;
 import dev.diorama.MapSession;
 import dev.diorama.ServerRules;
 import dev.diorama.Settings;
+import dev.diorama.addon.HudHides;
 import dev.diorama.render.Pins;
 import dev.diorama.render.TextSize;
 import java.util.List;
@@ -41,9 +42,9 @@ public final class WaypointHud implements HudElement {
 		Entity viewer = MapSession.viewer();
 		WaypointStore store = WaypointStore.get();
 		//? if >=26.2 {
-		if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
+		if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || HudHides.worldWaypointsHidden() || mc.gui.hud.isHidden() || !ServerRules.minimapAllowed()) {
 		//?} else {
-		/*if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || mc.options.hideGui || !ServerRules.minimapAllowed()) {
+		/*if (viewer == null || mc.level == null || store == null || !Settings.get().waypointsInWorld || HudHides.worldWaypointsHidden() || mc.options.hideGui || !ServerRules.minimapAllowed()) {
 		*///?}
 			return;
 		}

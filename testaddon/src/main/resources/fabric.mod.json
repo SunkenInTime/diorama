@@ -1,0 +1,17 @@
+{
+	"schemaVersion": 1,
+	"id": "diorama_test_addon",
+	"version": "${version}",
+	"name": "Diorama Test Addon",
+	"description": "The game tests' addon for Diorama's API. Never released.",
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"diorama": [
+			"dev.diorama.testaddon.TestAddon"
+		]
+	},
+	"suggests": {
+		"diorama": "*"
+	}
+}

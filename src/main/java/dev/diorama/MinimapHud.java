@@ -1,5 +1,6 @@
 package dev.diorama;
 
+import dev.diorama.addon.HudHides;
 import dev.diorama.bake.TileKey;
 import dev.diorama.compat.Cobblemon;
 import dev.diorama.render.Circle;
@@ -113,13 +114,13 @@ public final class MinimapHud implements HudElement {
 		/*if (!placing && (!settings.minimap || mc.options.hideGui
 		*///?}
 			|| screen != null && !(screen instanceof ChatScreen) || Cobblemon.inBattle()
-			|| debugScreenOpen(mc)) || !this.canDraw(mc)) {
+			|| debugScreenOpen(mc) || HudHides.minimapHidden()) || !this.canDraw(mc)) {
 			// Not drawn under any screen but chat, the way Xaero's Minimap and JourneyMap do it:
 			// screens fill the middle and other mods put theirs in the corners too, like the item
 			// lists JEI, REI and EMI put beside inventories. The settings screen draws its own copy,
 			// sharp over the blur, as a preview. A Cobblemon battle keeps its tiles in both top
 			// corners even with its screen closed. The F3 screen fills both top corners with text
-			// people open it to read.
+			// people open it to read. An addon can hide it for a while (Hud.hide in Diorama's API).
 			// A hold picks up afresh when it's drawn again, rather than having run out meanwhile.
 			this.holdStart = -1;
 			return;
