@@ -387,6 +387,7 @@ final class AddonWaypointsTest {
 			store.all().stream().filter(w -> w.name.startsWith("Foldered ")).toList().forEach(store::remove);
 			store.deleteFolder("Renamed folder");
 		});
+		told(context);
 		probe.forget(context);
 	}
 
@@ -476,16 +477,32 @@ final class AddonWaypointsTest {
 		told(context);
 	}
 
-	/** all(), get() and edit() from another thread throw, on a Waypoints taken on the client thread. */
+	/**
+	 * all(), get() and edit() from another thread throw, on a Waypoints taken on the client
+	 * thread. From a thread of the test's own: Fabric's game-test thread can't reach the game at
+	 * all, so it would fail on that before Diorama's check.
+	 */
 	private static void threads(ClientGameTestContext context, List<String> wrong) {
 		dev.diorama.api.Waypoints waypoints = context.computeOnClient(mc -> TestAddon.world().waypoints());
-		String all = thrown(waypoints::all);
-		String get = thrown(() -> waypoints.get(fromAddon));
-		String edit = thrown(() -> waypoints.edit(edits -> edits.remove(fromAddon)));
+		String[] calls = new String[3];
+		Thread other = new Thread(() -> {
+			calls[0] = thrown(waypoints::all);
+			calls[1] = thrown(() -> waypoints.get(fromAddon));
+			calls[2] = thrown(() -> waypoints.edit(edits -> edits.remove(fromAddon)));
+		}, "Diorama test, not the client thread");
+		other.start();
+		try {
+			other.join(10_000);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		String all = calls[0];
+		String get = calls[1];
+		String edit = calls[2];
 		boolean kept = context.computeOnClient(mc -> TestAddon.world().waypoints().get(fromAddon).isPresent());
-		String thread = Thread.currentThread().getName();
+		String thread = other.getName();
 		for (String call : List.of(all, get, edit)) {
-			if (!call.startsWith("IllegalStateException: Diorama's API is only for the client thread")) {
+			if (call == null || !call.startsWith("IllegalStateException: Diorama's API is only for the client thread")) {
 				wrong.add("all(), get() and edit() from " + thread + " threw " + all + " / " + get + " / " + edit);
 				break;
 			}
