@@ -62,10 +62,6 @@ public final class MapCoordinates {
 		if (text == null || text.isBlank() || text.length() > MAX_TEXT) {
 			return null;
 		}
-		Optional<WaypointShare.Shared> shared = WaypointShare.parse(text);
-		if (shared.isPresent()) {
-			return new Place(shared.get().x(), shared.get().y(), shared.get().z(), shared.get().dimension());
-		}
 		String lower = text.trim().toLowerCase(Locale.ROOT);
 		Matcher plain = PLAIN.matcher(lower);
 		if (plain.matches()) {
@@ -75,7 +71,13 @@ public final class MapCoordinates {
 		if (teleport.matches()) {
 			return place(teleport.group(2), teleport.group(3), teleport.group(4), teleport.group(1));
 		}
-		return labelled(lower);
+		Place labelled = labelled(lower);
+		if (labelled != null) {
+			return labelled;
+		}
+		// Last, as the one shape looked for inside the text: a name in one of the others can hold anything.
+		Optional<WaypointShare.Shared> shared = WaypointShare.parse(text);
+		return shared.map(s -> new Place(s.x(), s.y(), s.z(), s.dimension())).orElse(null);
 	}
 
 	/** Labelled values and nothing between them but commas, semicolons and spaces, each axis once, X and Z among them. */

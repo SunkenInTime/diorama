@@ -241,6 +241,7 @@ final class GoToCoordinatesTest {
 		read("/execute in the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
 		read("/minecraft:tp 120 64 -340", 120, 64, -340, null);
 		read("x:120 z:-340 dim:the_nether", 120, null, -340, "minecraft:the_nether");
+		read("[name:\"xaero-waypoint:Base:B:120:64:-340:5:false:0:Internal-the-nether-waypoints\", x:1, y:2, z:3, dim:minecraft:overworld]", 1, 2, 3, "minecraft:overworld");
 		read("[name:\"Base \\\" x:200\", x:120, y:80, z:-340]", 120, 80, -340, null);
 		for (String none : new String[] {"", "   ", "my base", "120", "1 2 3 4", "40000000 0", "0 99999 0", "minecraft:overworld", "x: 5",
 			"/tp @s ~ 64 -340", "/tp @s ^1 ^2 ^3", "/tp Alex 12 40", "/teleport ~5 ~ ~-5", "/minecraft:teleport @s ~ 64 -340", "~ 64 -340",
