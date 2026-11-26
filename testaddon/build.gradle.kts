@@ -4,8 +4,10 @@
 // through its diorama entrypoint and on NeoForge and Forge through @DioramaEntrypoint.
 //   diorama-test-addon.jar              works, and lets the test hide and show Diorama's HUD through
 //                                       it and sync waypoints with a pretend map mod by polling; it
-//                                       also has a class marked @DioramaEntrypoint by mistake
-//   diorama-test-addon-broken.jar       hides the minimap, then throws from onReady
+//                                       also has a class marked @DioramaEntrypoint by mistake, and
+//                                       shows markers and lines on the maps (markers/MapMarkers)
+//   diorama-test-addon-broken.jar       hides the minimap and opens a layer of markers, then throws
+//                                       from onReady
 //   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
 //   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError
 //   diorama-test-addon-unprintable.jar  hides the minimap, then throws an exception whose

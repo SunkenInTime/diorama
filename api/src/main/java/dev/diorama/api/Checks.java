@@ -2,7 +2,10 @@ package dev.diorama.api;
 
 import java.util.Objects;
 
-/** The checks {@link DimensionId}, {@link ResourceId}, {@link NewWaypoint} and {@link WaypointUpdate} make on what they're given. */
+/**
+ * The checks {@link DimensionId}, {@link ResourceId}, {@link NewWaypoint}, {@link WaypointUpdate},
+ * {@link Marker} and {@link MapLine} make on what they're given.
+ */
 final class Checks {
 	static final int MAX_NAME = NewWaypoint.MAX_NAME_LENGTH;
 	static final int MAX_INITIALS = NewWaypoint.MAX_INITIALS;
@@ -35,8 +38,13 @@ final class Checks {
 
 	/** 0xRRGGBB: anything in the top byte is a mistake, such as passing ARGB. */
 	static int rgb(int rgb) {
+		return rgb("A waypoint's colour", rgb);
+	}
+
+	/** {@link #rgb(int)}, for something other than a waypoint: {@code what} starts the message, such as "A line's colour". */
+	static int rgb(String what, int rgb) {
 		if (rgb >>> 24 != 0) {
-			throw new IllegalArgumentException("A waypoint's colour is 0xRRGGBB, with nothing above it: " + String.format("0x%08X", rgb) + " looks like ARGB; drop the alpha");
+			throw new IllegalArgumentException(what + " is 0xRRGGBB, with nothing above it: " + String.format("0x%08X", rgb) + " looks like ARGB; drop the alpha");
 		}
 		return rgb;
 	}
@@ -46,6 +54,23 @@ final class Checks {
 		String trimmed = folder.strip();
 		if (trimmed.length() > MAX_NAME) {
 			throw new IllegalArgumentException("A folder's name can be " + MAX_NAME + " UTF-16 units at most, as in Diorama's folder screen; this is " + trimmed.length() + ": \"" + trimmed + "\"");
+		}
+		return trimmed;
+	}
+
+	/** A coordinate of a marker or a line's point: any finite number. */
+	static double coordinate(String axis, double value) {
+		if (!Double.isFinite(value)) {
+			throw new IllegalArgumentException("A place on the map needs finite coordinates; " + axis + " is " + value);
+		}
+		return value;
+	}
+
+	static String label(String label) {
+		Objects.requireNonNull(label, "label");
+		String trimmed = label.strip();
+		if (trimmed.length() > Marker.MAX_LABEL_LENGTH) {
+			throw new IllegalArgumentException("A marker's label can be " + Marker.MAX_LABEL_LENGTH + " UTF-16 units at most; this is " + trimmed.length() + ": \"" + trimmed + "\"");
 		}
 		return trimmed;
 	}

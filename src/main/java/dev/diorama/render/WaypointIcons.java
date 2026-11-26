@@ -52,6 +52,7 @@ public final class WaypointIcons {
 	public static void reload() {
 		IMAGES.clear();
 		Pins.forgetIcons();
+		MarkerAtlas.forget();
 	}
 
 	/** Every icon there is: Diorama's own in order, then any a resource pack adds, by id. */
