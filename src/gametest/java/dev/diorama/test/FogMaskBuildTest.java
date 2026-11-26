@@ -11,6 +11,7 @@ import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapMemory;
 import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
+import dev.diorama.render.SavedChunkImport;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -77,6 +78,8 @@ final class FogMaskBuildTest {
 	 * the first build needs: under it, something new that allocated 100 KB every build would pass.
 	 */
 	private static final long MOST_TILT_MINIMAP_MEDIAN = 8 * 1024;
+	/** Ticks the redraw from the save after the tilt change may take. */
+	private static final int REDRAW_TICKS = 6000;
 	private static final int LARGE_WIDTH = 5120;
 	private static final int LARGE_HEIGHT = 1440;
 	/** The tiles a build read when the lookup table dropped every key: the large view must read more, or it tests nothing. */
@@ -321,11 +324,36 @@ final class FogMaskBuildTest {
 			if (context.computeOnClient(mc -> MapSession.get().savedChunks() == null)) {
 				throw new AssertionError("Nothing draws the map again from the save after its tilt changed (no saved-chunk import running), so \"tilt changed, redrawn\" would measure a map that was never redrawn");
 			}
-			context.waitFor(mc -> MapSession.get().savedChunks() != null && MapSession.get().savedChunks().idle(), 2400);
+			waitForRedraw(context);
 			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - 160 + tick * ELYTRA, FLY_Y, z});
 			context.takeScreenshot("fog-mask-tilt-changed-minimap");
 		} finally {
 			setPitch(context, pitch);
+			context.waitTicks(20);
+		}
+	}
+
+	/**
+	 * Waits for the map to be drawn again from the save after the tilt changed: everything the
+	 * player went over, a few hundred tiles at about 400 ms each on a VM with no GPU, beside the
+	 * baker. Two minutes wasn't always enough on NeoForge.
+	 */
+	private static void waitForRedraw(ClientGameTestContext context) {
+		for (int waited = 0; ; waited += 20) {
+			String left = context.computeOnClient(mc -> {
+				SavedChunkImport chunks = MapSession.get().savedChunks();
+				if (chunks == null) {
+					return "no saved-chunk import running";
+				}
+				return chunks.idle() ? null : chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done";
+			});
+			if (left == null) {
+				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
+				return;
+			}
+			if (waited >= REDRAW_TICKS) {
+				throw new AssertionError("The map wasn't drawn again from the save within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
+			}
 			context.waitTicks(20);
 		}
 	}
