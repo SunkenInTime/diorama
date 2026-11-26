@@ -2,20 +2,19 @@ package dev.diorama.addon;
 
 import dev.diorama.api.EditResult;
 import dev.diorama.api.Waypoint;
-import dev.diorama.api.WaypointEditor;
+import dev.diorama.api.WaypointBatch;
 import dev.diorama.api.Waypoints;
-import dev.diorama.api.WorldId;
+import dev.diorama.api.World;
 import dev.diorama.waypoint.WaypointStore;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Consumer;
 
 /**
  * One addon's way to the waypoints of the world open now ({@link CurrentWorld}), looked up at each
  * call, so it holds nothing that can go stale. What it changes is put down to its addon. Diorama
- * never calls the addon from here but for the batch it hands {@link #edit}.
+ * never calls the addon from here: a batch is a value the addon made.
  */
 final class AddonWaypoints implements Waypoints {
 	private final Addon addon;
@@ -47,28 +46,16 @@ final class AddonWaypoints implements Waypoints {
 	}
 
 	@Override
-	public EditResult edit(WorldId world, Consumer<WaypointEditor> edits) {
+	public EditResult edit(World preparedFor, WaypointBatch batch) {
 		Addon.checkThread();
-		Objects.requireNonNull(world, "world");
-		Objects.requireNonNull(edits, "edits");
-		WaypointStore store = CurrentWorld.storeFor(world);
-		if (this.addon.failed()) {
-			return WaypointStore.nothingEdited();
+		Objects.requireNonNull(preparedFor, "preparedFor");
+		Objects.requireNonNull(batch, "batch");
+		WaypointStore store = CurrentWorld.storeIfStill(preparedFor);
+		if (store == null || this.addon.failed()) {
+			return WaypointStore.notApplied();
 		}
-		return store.edit(this.addon.id(), editor -> {
-			try {
-				edits.accept(editor);
-			} catch (Throwable thrown) {
-				// The addon's own code: it's switched off, and the batch goes nowhere.
-				this.addon.fail("a Waypoints.edit batch", thrown);
-				throw Addon.rethrow(thrown);
-			}
-		}, () -> {
-			// The batch ran addon code, which may have done anything: it lands only where it was meant to.
-			if (CurrentWorld.storeFor(world) != store) {
-				throw new IllegalStateException("World " + world + "'s waypoints were loaded again while the batch was being made (the player joined it again): nothing was changed");
-			}
-		});
+		// No addon code runs from here on: the world can't move under the batch.
+		return store.apply(this.addon.id(), batch);
 	}
 
 	@Override

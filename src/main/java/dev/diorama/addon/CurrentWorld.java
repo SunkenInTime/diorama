@@ -9,8 +9,10 @@ import dev.diorama.waypoint.WaypointStore;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import net.minecraft.client.Minecraft;
@@ -23,7 +25,7 @@ import org.jspecify.annotations.Nullable;
  * state when asked, never from the mod loaders' join and leave events: there is one while the
  * client has a level and Diorama knows which world it is, which is when {@link WaypointStore#get}
  * has a store. The {@link World} handed out is kept, and made again only when the store, the
- * player's dimension or the list of saved maps changed; one equal to the last is not handed out
+ * player's dimension or the list of saved maps (which and in use) changed; one equal to the last is not handed out
  * as a new instance. Client thread only.
  */
 final class CurrentWorld {
@@ -68,20 +70,12 @@ final class CurrentWorld {
 	}
 
 	/**
-	 * The store a batch for {@code worldId} may write to: the one of the world open now.
-	 *
-	 * @throws IllegalStateException if there's no world, or it isn't {@code worldId}
+	 * The store a batch prepared for {@code preparedFor} may be applied to: the one of the world
+	 * open now, if {@link #world} still equals it. Null if not, or there's no world.
 	 */
-	static WaypointStore storeFor(WorldId worldId) {
+	static @Nullable WaypointStore storeIfStill(World preparedFor) {
 		Optional<World> open = world();
-		WaypointStore now = store;
-		if (open.isEmpty() || now == null) {
-			throw new IllegalStateException("No world is open now (or Diorama doesn't know which yet), so world " + worldId + " isn't: nothing was changed");
-		}
-		if (!open.get().worldId().equals(worldId)) {
-			throw new IllegalStateException("World " + worldId + " isn't the world open now, " + open.get().worldId() + ": nothing was changed. Read DioramaApi.world() again");
-		}
-		return now;
+		return open.isPresent() && open.get().equals(preparedFor) ? store : null;
 	}
 
 	private static Optional<World> make(String worldKey, ResourceKey<Level> here, Maps list) {
@@ -99,7 +93,19 @@ final class CurrentWorld {
 				// A dimension addons can't name: they see no waypoints in it either.
 			}
 		}
-		return Optional.of(new World(worldId(worldKey), dimension, inUse));
+		Map<DimensionId, List<MapId>> saved = new HashMap<>();
+		for (Map.Entry<String, List<String>> each : list.saved().entrySet()) {
+			try {
+				List<MapId> ids = new ArrayList<>();
+				for (String id : each.getValue()) {
+					ids.add(WaypointStore.mapId(id));
+				}
+				saved.put(DimensionId.of(each.getKey()), ids);
+			} catch (IllegalArgumentException e) {
+				// As above.
+			}
+		}
+		return Optional.of(new World(worldId(worldKey), dimension, inUse, saved));
 	}
 
 	/**

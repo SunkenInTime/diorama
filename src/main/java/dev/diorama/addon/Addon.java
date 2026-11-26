@@ -19,11 +19,10 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
- * what it holds can be let go when it fails. It fails once: then what it hid shows again, its
- * later calls do nothing, and nothing of it is called again. The player can stop it hiding
- * anything ({@link #allow}): its handles stay open for it, and just aren't counted. That doesn't
- * stop its waypoint edits ({@link AddonWaypoints}): the Addons tab says it stops what the addon
- * hides.
+ * what it holds can be let go when it fails. It fails once: then what it hid shows again, its later
+ * calls do nothing, and nothing of it is called again. The player can stop it hiding anything
+ * ({@link #allow}): its handles stay open for it, and just aren't counted. That doesn't stop its
+ * waypoint edits ({@link AddonWaypoints}): the Addons tab says it stops what the addon hides.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -63,9 +62,9 @@ final class Addon implements DioramaApi, Hud {
 	}
 
 	/**
-	 * Calls into the addon, its constructor included. If it throws, the addon is switched off
-	 * ({@link #fail}); then a {@link #fatal} error goes on up, and anything else goes no further.
-	 * Null if it threw, or was already switched off.
+	 * Calls into the addon, its constructor included. If it throws, the addon is switched off and
+	 * its handles closed first; then a {@link #fatal} error goes on up, and anything else is logged
+	 * once and goes no further. Null if it threw, or was already switched off.
 	 */
 	<T> @Nullable T call(String what, Callable<T> call) {
 		if (this.failed) {
@@ -74,38 +73,19 @@ final class Addon implements DioramaApi, Hud {
 		try {
 			return call.call();
 		} catch (Throwable thrown) {
-			this.fail(what, thrown);
+			this.failed = true;
+			for (HudHides.Hold hold : this.holds) {
+				hold.release();
+			}
+			this.holds.clear();
+			HudHides.changed();
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
 				throw fatal;
 			}
+			log(this.modId, what, thrown);
 			return null;
 		}
-	}
-
-	/**
-	 * Switches the addon off: its handles are closed, what it hid shows again, and unless it was a
-	 * {@link #fatal} error, one line is logged. Once only.
-	 */
-	void fail(String what, Throwable thrown) {
-		if (this.failed) {
-			return;
-		}
-		this.failed = true;
-		for (HudHides.Hold hold : this.holds) {
-			hold.release();
-		}
-		this.holds.clear();
-		HudHides.changed();
-		if (fatal(thrown) == null) {
-			log(this.modId, what, thrown);
-		}
-	}
-
-	/** Throws {@code thrown} as it is, checked or not, for code that has to pass on what an addon threw. */
-	@SuppressWarnings("unchecked")
-	static <E extends Throwable> RuntimeException rethrow(Throwable thrown) throws E {
-		throw (E) thrown;
 	}
 
 	/**

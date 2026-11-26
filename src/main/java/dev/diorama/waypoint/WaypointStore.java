@@ -13,7 +13,7 @@ import dev.diorama.Settings;
 import dev.diorama.WorldKey;
 import dev.diorama.api.EditResult;
 import dev.diorama.api.MapId;
-import dev.diorama.api.WaypointEditor;
+import dev.diorama.api.WaypointBatch;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -24,6 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,7 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
@@ -108,8 +108,11 @@ public final class WaypointStore {
 	 * ({@link Waystones#changes}).
 	 */
 	private int revision;
-	/** An addon's edit batch is being put together. */
-	private boolean editing;
+	/**
+	 * A write of folders.json failed, so it's owed: the next save of waypoints.json writes it too,
+	 * or a waypoint's folder that was made but not saved would be lost on the next start.
+	 */
+	private boolean foldersOwed;
 
 	/** {@code from}'s waypoints shown in {@code in}. */
 	private record ShownIn(String in, String from) {
@@ -696,40 +699,44 @@ public final class WaypointStore {
 		return this.snapshots.revision();
 	}
 
-	/** What an addon's edit that changed nothing did. */
-	public static EditResult nothingEdited() {
-		return WaypointEdits.NOTHING;
+	/** What an addon's edit that wasn't applied did. */
+	public static EditResult notApplied() {
+		return WaypointEdits.NOT_APPLIED;
 	}
 
 	/**
-	 * An addon's edit batch ({@link dev.diorama.api.Waypoints#edit}): {@code edits} says what, then
-	 * {@code stillHere} checks the world is still the one the batch is for (it throws if not), then
-	 * all of it is applied, folders.json written once if it made folders and waypoints.json once.
-	 * If {@code edits} or {@code stillHere} throws, nothing has been applied, and nothing is. A
-	 * batch whose every step leaves things as they were saves nothing and moves no revision.
+	 * An addon's batch ({@link dev.diorama.api.Waypoints#edit}), for the world it was checked to be
+	 * for: every step checked, then all of it applied, then folders.json written once if it made
+	 * folders and waypoints.json once. A batch that ends up changing nothing saves nothing and
+	 * moves no revision.
+	 *
+	 * @throws IllegalArgumentException if a step names a waypoint addons can't change; nothing changed
 	 */
-	public EditResult edit(String by, Consumer<WaypointEditor> edits, Runnable stillHere) {
-		if (this.editing) {
-			throw new IllegalStateException("edit() was called from inside another edit()'s batch; make the changes on the editor it was handed");
+	public EditResult apply(String by, WaypointBatch batch) {
+		WaypointEdits.Applied applied = WaypointEdits.apply(this, by, batch);
+		if (!applied.changed()) {
+			return applied.result(true);
 		}
-		// Checked against what addons read now.
-		this.snapshots.refresh();
-		WaypointEdits batch = new WaypointEdits(this, by);
-		this.editing = true;
-		try {
-			edits.accept(batch);
-		} finally {
-			batch.close();
-			this.editing = false;
-		}
-		stillHere.run();
-		if (!batch.apply()) {
-			return WaypointEdits.NOTHING;
-		}
-		boolean saved = !batch.madeFolders() || this.saveFolders();
-		saved &= this.save();
+		// The new folders go to disk with the waypoints: folders.json first, as any owed write of it does.
+		this.foldersOwed |= applied.madeFolders();
+		boolean saved = this.save();
 		this.committed();
-		return batch.result(saved);
+		return applied.result(saved);
+	}
+
+	/** Every waypoint ID in use here: the store's, on any map, and the waystones'. */
+	Set<UUID> ids() {
+		Set<UUID> ids = new HashSet<>();
+		for (Waypoint waypoint : this.waypoints) {
+			ids.add(waypoint.id);
+		}
+		for (Waypoint waypoint : this.elsewhere) {
+			ids.add(waypoint.id);
+		}
+		for (Waypoint waypoint : Waystones.all()) {
+			ids.add(waypoint.id);
+		}
+		return ids;
 	}
 
 	/** Adds an addon's waypoint to the map in use in its dimension, unsaved: part of {@link #edit}. */
@@ -875,15 +882,26 @@ public final class WaypointStore {
 			}
 			Files.move(temp, this.foldersFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 			folderSaves++;
+			this.foldersOwed = false;
 			return true;
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.error("Couldn't save waypoint folders to {}", this.foldersFile, e);
+			this.foldersOwed = true;
 			return false;
 		}
 	}
 
-	/** Writes to a temporary file and moves it over the old one, so a crash can't leave half a file. False if the disk refused, which is logged. */
+	/**
+	 * Writes to a temporary file and moves it over the old one, so a crash can't leave half a file.
+	 * Writes folders.json first if an earlier write of it failed. False if the disk refused either,
+	 * which is logged.
+	 */
 	private boolean save() {
+		boolean folders = !this.foldersOwed || this.saveFolders();
+		return this.saveWaypoints() && folders;
+	}
+
+	private boolean saveWaypoints() {
 		try {
 			Files.createDirectories(this.file.getParent());
 			Path temp = this.file.resolveSibling("waypoints.json.tmp");

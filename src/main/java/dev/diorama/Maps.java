@@ -163,6 +163,25 @@ public final class Maps {
 		return out;
 	}
 
+	/**
+	 * The IDs of every dimension's maps, as {@link #list} orders them, for the dimensions this
+	 * list has a record of; one it hasn't has only its main map.
+	 */
+	public Map<String, List<String>> saved() {
+		Map<String, List<String>> out = new LinkedHashMap<>();
+		for (Map.Entry<String, Dimension> dimension : this.saved.dimensions.entrySet()) {
+			List<String> ids = new ArrayList<>();
+			if (!dimension.getValue().mainDeleted) {
+				ids.add(MAIN);
+			}
+			for (Entry entry : dimension.getValue().maps) {
+				ids.add(entry.id);
+			}
+			out.put(dimension.getKey(), ids);
+		}
+		return out;
+	}
+
 	/** The ID of the map in use in a dimension. */
 	public String active(String dimension) {
 		Dimension saved = this.saved.dimensions.get(dimension);

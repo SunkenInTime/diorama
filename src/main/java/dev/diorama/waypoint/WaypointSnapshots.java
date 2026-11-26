@@ -102,7 +102,7 @@ final class WaypointSnapshots {
 		this.revision = this.store.revision();
 		this.portalPins = Settings.get().portalMarkers;
 		List<Waypoint> listed = this.store.listed();
-		// After listing, which can count a change itself (a waystone placed again).
+		// After listing, which can count a change itself (Waystones' own list checked).
 		this.waystoneChanges = Waystones.changes();
 		List<Snapshot> next = new ArrayList<>(listed.size());
 		Map<UUID, Snapshot> nextById = new HashMap<>(listed.size() * 4 / 3 + 1);

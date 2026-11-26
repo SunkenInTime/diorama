@@ -5,15 +5,15 @@ import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A waypoint for {@link WaypointEditor#add} to add, made with {@link #builder}. Every value is
- * checked as it is set, so a bad one throws where it was given.
+ * A waypoint for a {@link WaypointBatch} to add ({@link WaypointBatch.Builder#add}), made with
+ * {@link #builder}. Every value is checked as it is set, so a bad one throws where it was given.
  *
  * <pre>{@code
- * api.waypoints().edit(world.worldId(), edits -> edits.add(
+ * WaypointBatch batch = WaypointBatch.builder().add(
  *     NewWaypoint.builder("Village", DimensionId.OVERWORLD, BlockCoord.of(120, 70, -340))
  *         .rgb(0x46A758)
  *         .folder("Villages")
- *         .build()));
+ *         .build()).build();
  * }</pre>
  */
 public final class NewWaypoint {

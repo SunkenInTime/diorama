@@ -22,6 +22,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.Waystones;
 import dev.diorama.waypoint.Waypoints;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -1062,7 +1063,15 @@ public final class MapScreen extends Screen {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
 		})));
-		items.add(this.copyItem(shown.x + " " + shown.y + " " + shown.z));
+		// Copying stays open to say it copied, so a waypoint gone since closes the menu instead.
+		String coordinates = shown.x + " " + shown.y + " " + shown.z;
+		items.add(MapMenu.Item.stays(Component.translatable("diorama.menu.copy_coordinates"), Component.translatable("diorama.menu.copied"), () -> {
+			if (held(waypoint)) {
+				this.minecraft.keyboardHandler.setClipboard(coordinates);
+			} else {
+				this.menu = null;
+			}
+		}));
 		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), ifHeld(waypoint, () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
@@ -1093,12 +1102,12 @@ public final class MapScreen extends Screen {
 
 	/**
 	 * Whether a waypoint is still one the store has: false for one deleted since a pin or a menu
-	 * was made for it, by an addon say. A waystone is the Waystones mod's, never the store's, and
-	 * goes by what that mod sends.
+	 * was made for it, by an addon say. A waystone is the Waystones mod's, never the store's: it's
+	 * held while Waystones still has it, and it isn't picked up.
 	 */
 	private static boolean held(Waypoint waypoint) {
 		WaypointStore store = WaypointStore.get();
-		return store != null && (waypoint.kind == Waypoint.Kind.WAYSTONE || store.holds(waypoint));
+		return store != null && (waypoint.kind == Waypoint.Kind.WAYSTONE ? Waystones.has(waypoint.id) : store.holds(waypoint));
 	}
 
 	/** A menu item's action that does nothing once its waypoint is gone ({@link #held}). */

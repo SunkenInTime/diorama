@@ -13,6 +13,7 @@ import dev.diorama.api.EditResult;
 import dev.diorama.api.Hud;
 import dev.diorama.api.MapId;
 import dev.diorama.api.NewWaypoint;
+import dev.diorama.api.WaypointBatch;
 import dev.diorama.api.WaypointUpdate;
 import dev.diorama.api.World;
 import dev.diorama.api.WorldId;
@@ -37,7 +38,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -58,15 +61,19 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * {@code all()} reads what the waypoint list shows; an addon's waypoint is in the list, on the
  * map, in the world and in waypoints.json after one save, three new folders write folders.json
  * once; {@code revision()} moves for each change made in Diorama's own screens and for a
- * Waystones change, and not for a batch that changes nothing; {@code world()} moves with the
- * dimension and the saved map; a batch for another world, or whose world or store changed while it
- * was being made, throws and writes nothing; one that throws switches its addon off; a disk that
- * refuses the write reports {@code saved() == false}; automatic pins are read-only; a file with
- * two waypoints of one ID shows only the first; every call from another thread throws; Diorama's
- * list drops a row an addon deleted, even after the player clicked another row first, and the
- * map's menu and the editor refuse a waypoint that's gone; and the test addon's polling sync
- * keeps a pretend map mod in step both ways without echoes. Everything the section adds it takes
- * away again, as the waypoints section runs in this world next. After leaving ({@link #left}) and
+ * Waystones change, not for a Waystones list sent again as it was, and not for a batch that
+ * changes nothing; a waystone placed again shows through the API with nothing drawn;
+ * {@code world()} moves with the dimension and the saved maps, and lists them; a batch prepared
+ * for another world or saved map applies nothing; bad values throw while the batch is built; a
+ * disk that refuses the write reports {@code saved() == false}, and a refused folders.json is
+ * written by the next save; automatic pins are read-only; a file with two waypoints of one ID
+ * shows only the first; every call from another thread throws; Diorama's list drops a row an
+ * addon deleted, even after the player clicked another row first, the map's menu refuses a
+ * waypoint or waystone that's gone, and the editor saves only what the player changed in it; and
+ * the test addon's polling sync keeps a pretend map mod in step both ways without echoes, through
+ * a failed save, a waypoint ID on two saved maps, a saved map deleted and names too long for
+ * Diorama. Everything the section adds it takes away again, as the waypoints section runs in this
+ * world next. After leaving ({@link #left}) and
  * in the world opened again ({@link #reopened}) the ID is the same. {@link #measure} and
  * {@link #frames} measure what it costs.
  */
@@ -91,13 +98,29 @@ final class AddonWaypointsTest {
 		return context.computeOnClient(mc -> waypoints().revision());
 	}
 
-	/** At the title screen: no world, no waypoints, revision 0, and an edit for any world throws. */
+	/** Applies a batch for the world open now, as an addon that read it and built the batch in one tick does. Client thread. */
+	private static EditResult apply(WaypointBatch.Builder batch) {
+		return waypoints().edit(api().world().orElseThrow(), batch.build());
+	}
+
+	private static WaypointBatch.Builder batch() {
+		return WaypointBatch.builder();
+	}
+
+	/** A world no player is in. */
+	private static World nowhere() {
+		return new World(WorldId.of("0123456789abcdef0123456789abcdef"), DimensionId.OVERWORLD, Map.of(), Map.of());
+	}
+
+	/** At the title screen: no world, no waypoints, revision 0, and a batch for any world applies nothing. */
 	static void titleScreen(ClientGameTestContext context) {
-		String read = context.computeOnClient(mc -> api().world() + " " + waypoints().all() + " " + waypoints().revision() + " "
-			+ thrown(() -> waypoints().edit(WorldId.of("0123456789abcdef0123456789abcdef"), edits -> {
-			})));
-		if (!read.startsWith("Optional.empty [] 0 IllegalStateException: No world is open")) {
-			throw new AssertionError("At the title screen: world, all(), revision() and an edit read " + read);
+		String read = context.computeOnClient(mc -> {
+			EditResult result = waypoints().edit(nowhere(), batch().add(NewWaypoint.builder("Nowhere", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
+			return api().world() + " " + waypoints().all() + " " + waypoints().revision() + " applied " + result.applied() + " changed " + result.changed() + " added "
+				+ result.added();
+		});
+		if (!read.equals("Optional.empty [] 0 applied false changed false added []")) {
+			throw new AssertionError("At the title screen: world, all(), revision() and a batch read " + read);
 		}
 	}
 
@@ -114,8 +137,9 @@ final class AddonWaypointsTest {
 		otherChanges(context, wrong);
 		sameList(context, wrong);
 		staleWorlds(context, wrong);
-		throwing(context, wrong);
+		badValues(context, wrong);
 		diskFull(context, wrong);
+		foldersOwed(context, wrong);
 		readOnly(context, wrong);
 		duplicates(context, wrong);
 		threads(context, wrong);
@@ -123,6 +147,9 @@ final class AddonWaypointsTest {
 		mapMenu(context, wrong);
 		editor(context, wrong);
 		sync(context, wrong);
+		syncFailedSave(context, wrong);
+		syncSavedMaps(context, wrong);
+		syncTooLong(context, wrong);
 		cleanUp(context, wrong);
 		if (!wrong.isEmpty()) {
 			throw new AssertionError("Addon waypoints in the first world:\n  " + String.join("\n  ", wrong));
@@ -143,6 +170,15 @@ final class AddonWaypointsTest {
 		worldId = context.computeOnClient(mc -> api().world().orElseThrow().worldId());
 		if (!here.equals("minecraft:overworld main main true") || !worldId.toString().matches("[0-9a-f]{32}")) {
 			wrong.add("world() in the Overworld: " + here + ", ID " + worldId);
+		}
+		// World's own checks: a null dimension is refused even paired with MAIN, which it doesn't keep.
+		String nullKey = context.computeOnClient(mc -> {
+			Map<DimensionId, MapId> maps = new HashMap<>();
+			maps.put(null, MapId.MAIN);
+			return thrown(() -> new World(worldId, DimensionId.OVERWORLD, maps, Map.of()));
+		});
+		if (!nullKey.startsWith("NullPointerException")) {
+			wrong.add("new World with a null dimension paired with MAIN: " + nullKey + " (expected NullPointerException)");
 		}
 		World before = context.computeOnClient(mc -> api().world().orElseThrow());
 		long revision = revision(context);
@@ -212,8 +248,7 @@ final class AddonWaypointsTest {
 		int savesBefore = context.computeOnClient(mc -> WaypointStore.saves());
 		long revisionBefore = revision(context);
 		String added = context.computeOnClient(mc -> {
-			EditResult result = waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder(FROM_ADDON, DimensionId.OVERWORLD, BlockCoord.of(hx, hy, hz))
-				.rgb(PIN).initials("TA").build()));
+			EditResult result = apply(batch().add(NewWaypoint.builder(FROM_ADDON, DimensionId.OVERWORLD, BlockCoord.of(hx, hy, hz)).rgb(PIN).initials("TA").build()));
 			UUID id = result.added().get(0);
 			return id + " " + result.changed() + " " + result.saved() + " " + (waypoints().revision() != revisionBefore) + " "
 				+ waypoints().get(id).flatMap(dev.diorama.api.Waypoint::addedBy).orElse("none") + " " + waypoints().get(id).map(w -> Integer.toHexString(w.rgb())).orElse("none");
@@ -237,11 +272,13 @@ final class AddonWaypointsTest {
 
 		int folderSavesBefore = context.computeOnClient(mc -> WaypointStore.folderSaves());
 		int threeBefore = context.computeOnClient(mc -> WaypointStore.saves());
-		List<UUID> three = context.computeOnClient(mc -> waypoints().edit(worldId, edits -> {
+		List<UUID> three = context.computeOnClient(mc -> {
+			WaypointBatch.Builder batch = batch();
 			for (String folder : List.of("Batch folder A", "Batch folder B", "Batch folder C")) {
-				edits.add(NewWaypoint.builder("In " + folder, DimensionId.OVERWORLD, BlockCoord.of(hx + 6, hy, hz)).folder(folder).build());
+				batch.add(NewWaypoint.builder("In " + folder, DimensionId.OVERWORLD, BlockCoord.of(hx + 6, hy, hz)).folder(folder).build());
 			}
-		}).added());
+			return apply(batch).added();
+		});
 		int folderSaves = context.computeOnClient(mc -> WaypointStore.folderSaves()) - folderSavesBefore;
 		int threeSaves = context.computeOnClient(mc -> WaypointStore.saves()) - threeBefore;
 		String inFolders = context.computeOnClient(mc -> {
@@ -256,7 +293,9 @@ final class AddonWaypointsTest {
 		}
 		Diorama.LOGGER.info("addon-api waypoints: three new folders in one batch wrote folders.json {} time(s), waypoints.json {}", folderSaves, threeSaves);
 		context.runOnClient(mc -> {
-			waypoints().edit(worldId, edits -> three.forEach(edits::remove));
+			WaypointBatch.Builder batch = batch();
+			three.forEach(batch::remove);
+			apply(batch);
 			for (String folder : List.of("Batch folder A", "Batch folder B", "Batch folder C")) {
 				WaypointStore.get().deleteFolder(folder);
 			}
@@ -382,28 +421,60 @@ final class AddonWaypointsTest {
 			Waystones.knownForTests(w);
 		});
 		check(context, results, "a waystone picked up", true, mc -> Waystones.pickedUpForTests(stone[0], false));
-		// Placed again where it stood, which no event says: found when the HUD next lists the waystones.
+		// Placed again where it stood, which no event says. Read through the API alone, with nothing drawing the waystones: no screen, and the minimap
+		// and world waypoints hidden.
+		dev.diorama.api.Handle hud = context.computeOnClient(mc -> TestAddon.hide(Hud.Part.MINIMAP, Hud.Part.WORLD_WAYPOINTS));
 		long beforePlaced = revision(context);
 		context.runOnClient(mc -> Waystones.pickedUpForTests(stone[0], true));
-		context.waitTicks(5);
-		boolean placedAgain = context.computeOnClient(mc -> waypoints().revision() != beforePlaced && waypoints().get(stone[0]).isPresent());
-		results.add("a waystone placed again " + (placedAgain ? "ok" : "WRONG (revision or all() didn't follow)"));
+		context.waitTicks(3);
+		String placedAgain = context.computeOnClient(mc -> "revision moved " + (waypoints().revision() != beforePlaced) + ", in all() " + waypoints().get(stone[0]).isPresent());
+		context.runOnClient(mc -> hud.close());
+		results.add("a waystone placed again, read through the API with nothing drawn: " + placedAgain + (placedAgain.equals("revision moved true, in all() true") ? " ok" : " WRONG"));
+		context.runOnClient(mc -> Waystones.clear());
+		// Waystones sends a kind's whole list again, as on every join: the same list moves nothing; one waystone renamed does.
+		UUID[] listed = new UUID[2];
+		context.runOnClient(mc -> {
+			List<Waypoint> sent = new ArrayList<>();
+			for (int i = 0; i < 2; i++) {
+				Waypoint w = new Waypoint("Listed stone " + i, at.getX() - 7 - i, at.getY(), at.getZ() + 9, "minecraft:overworld", 0xFF8E4EC6);
+				listed[i] = w.id;
+				sent.add(w);
+			}
+			Waystones.listForTests("waystones:waystone", sent);
+		});
+		check(context, results, "a Waystones list sent again as it was", false, mc -> Waystones.listForTests("waystones:waystone", List.of(
+			stoneLike(listed[0], "Listed stone 0", at.getX() - 7, at.getY(), at.getZ() + 9), stoneLike(listed[1], "Listed stone 1", at.getX() - 8, at.getY(), at.getZ() + 9))));
+		check(context, results, "a Waystones list sent again with one renamed", true, mc -> Waystones.listForTests("waystones:waystone", List.of(
+			stoneLike(listed[0], "Listed stone renamed", at.getX() - 7, at.getY(), at.getZ() + 9), stoneLike(listed[1], "Listed stone 1", at.getX() - 8, at.getY(), at.getZ() + 9))));
 		context.runOnClient(mc -> Waystones.clear());
 
 		// A batch that changes nothing: the name it has, folder in other capitals, the colour it has.
-		UUID own = context.computeOnClient(mc -> waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder("Same as ever", DimensionId.OVERWORLD,
+		UUID own = context.computeOnClient(mc -> apply(batch().add(NewWaypoint.builder("Same as ever", DimensionId.OVERWORLD,
 			BlockCoord.of(at.getX(), at.getY(), at.getZ() + 4)).folder("Kept folder").build())).added().get(0));
 		String noop = context.computeOnClient(mc -> {
 			long before = waypoints().revision();
 			int saves = WaypointStore.saves();
 			int folderSaves = WaypointStore.folderSaves();
-			EditResult result = waypoints().edit(worldId, edits -> edits.update(own, WaypointUpdate.builder().name("Same as ever").folder("kept FOLDER")
+			EditResult result = apply(batch().update(own, WaypointUpdate.builder().name("Same as ever").folder("kept FOLDER")
 				.rgb(waypoints().get(own).orElseThrow().rgb()).visible(true).build()));
 			return "changed " + result.changed() + ", saved " + result.saved() + ", added " + result.added() + ", revision moved " + (waypoints().revision() != before)
 				+ ", saves " + (WaypointStore.saves() - saves) + ", folder saves " + (WaypointStore.folderSaves() - folderSaves);
 		});
 		if (!noop.equals("changed false, saved true, added [], revision moved false, saves 0, folder saves 0")) {
 			wrong.add("A batch that changes nothing: " + noop);
+		}
+		// Renamed and back, and moved through a new folder and back, in one batch: nothing changed, so no save, no folder made, the revision put, and it says so.
+		String there = context.computeOnClient(mc -> {
+			long before = waypoints().revision();
+			int saves = WaypointStore.saves();
+			int folderSaves = WaypointStore.folderSaves();
+			EditResult result = apply(batch().update(own, WaypointUpdate.builder().name("Renamed for a moment").folder("Passing folder").build())
+				.update(own, WaypointUpdate.builder().name("Same as ever").folder("Kept folder").build()));
+			return "changed " + result.changed() + ", revision moved " + (waypoints().revision() != before) + ", saves " + (WaypointStore.saves() - saves) + ", folder saves "
+				+ (WaypointStore.folderSaves() - folderSaves) + ", passing folder made " + (WaypointStore.get().folderName("Passing folder") != null);
+		});
+		if (!there.equals("changed false, revision moved false, saves 0, folder saves 0, passing folder made false")) {
+			wrong.add("A batch that renames a waypoint and back: " + there + " (expected changed false, revision moved false, saves 0, folder saves 0, passing folder made false)");
 		}
 
 		// A switch of saved map: world() names the new map, all() lists its waypoints, revision moves; and back.
@@ -413,19 +484,25 @@ final class AddonWaypointsTest {
 		String second = context.computeOnClient(mc -> Maps.of(key).create("minecraft:overworld", "Second"));
 		context.waitFor(mc -> MapSession.get() != null, 2400);
 		context.waitTicks(2);
-		String there = context.computeOnClient(mc -> api().world().orElseThrow().mapId() + " " + (waypoints().revision() != beforeSwitch) + " "
+		String onSecond = context.computeOnClient(mc -> api().world().orElseThrow().mapId() + " " + (waypoints().revision() != beforeSwitch) + " "
 			+ waypoints().get(own).isPresent());
+		String listedMaps = context.computeOnClient(mc -> api().world().orElseThrow().mapIds(DimensionId.OVERWORLD).toString());
 		context.runOnClient(mc -> Maps.of(key).use("minecraft:overworld", Maps.MAIN));
 		context.waitFor(mc -> MapSession.get() != null, 2400);
 		context.waitTicks(2);
 		String backHome = context.computeOnClient(mc -> api().world().orElseThrow().equals(mainWorld) + " " + waypoints().get(own).isPresent());
-		if (second == null || !there.equals(second + " true false") || !backHome.equals("true true")) {
-			wrong.add("A switch of saved map: on the second, map ID, revision moved, the main map's waypoint listed: " + there + " (expected " + second
-				+ " true false); back on the main, world() as before and the waypoint listed: " + backHome);
+		if (second == null || !onSecond.equals(second + " true false") || !backHome.equals("false true") || !listedMaps.equals("[main, " + second + "]")) {
+			wrong.add("A switch of saved map: on the second, map ID, revision moved, the main map's waypoint listed: " + onSecond + " (expected " + second
+				+ " true false); the saved maps listed " + listedMaps + "; back on the main, world() as before (no: it lists the second map now) and the waypoint listed: "
+				+ backHome);
 		}
 		context.runOnClient(mc -> Maps.of(key).delete("minecraft:overworld", second));
 		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 		DioramaClientTest.settle(context, 40);
+		String afterDelete = context.computeOnClient(mc -> api().world().orElseThrow().mapIds(DimensionId.OVERWORLD) + " " + api().world().orElseThrow().equals(mainWorld));
+		if (!afterDelete.equals("[main] true")) {
+			wrong.add("After the second saved map was deleted, world() lists " + afterDelete + " (expected [main] true: the same as before it was made)");
+		}
 
 		for (String result : results) {
 			if (!result.endsWith(" ok")) {
@@ -434,10 +511,17 @@ final class AddonWaypointsTest {
 		}
 		Diorama.LOGGER.info("addon-api waypoints: revision() {}; a batch that changes nothing: {}", results, noop);
 		context.runOnClient(mc -> {
-			waypoints().edit(worldId, edits -> edits.remove(own));
+			apply(batch().remove(own));
 			WaypointStore.get().deleteFolder("Kept folder");
 			WaypointStore.get().remove(mine);
 		});
+	}
+
+	/** A waystone as Waystones would send it again: a new waypoint with these values. */
+	private static Waypoint stoneLike(UUID id, String name, int x, int y, int z) {
+		Waypoint w = new Waypoint(name, x, y, z, "minecraft:overworld", 0xFF8E4EC6);
+		w.id = id;
+		return w;
 	}
 
 	/** Runs one change and notes whether revision() moved as expected. */
@@ -458,7 +542,7 @@ final class AddonWaypointsTest {
 			List<dev.diorama.api.Waypoint> second = waypoints().all();
 			WaypointStore.get().changed();
 			List<dev.diorama.api.Waypoint> afterNothing = waypoints().all();
-			waypoints().edit(worldId, edits -> edits.update(id, WaypointUpdate.builder().initials("SL").build()));
+			apply(batch().update(id, WaypointUpdate.builder().initials("SL").build()));
 			List<dev.diorama.api.Waypoint> afterChange = waypoints().all();
 			String unmodifiable = thrown(afterChange::clear);
 			return (first == second) + " " + (second == afterNothing) + " " + (afterNothing != afterChange) + " " + unmodifiable.startsWith("UnsupportedOperationException");
@@ -470,108 +554,85 @@ final class AddonWaypointsTest {
 	}
 
 	/**
-	 * world() is empty while Diorama doesn't know which world it is, and equal again after. An edit
-	 * for another world throws before running the batch; one whose world goes unknown, or whose
-	 * store is replaced, while its batch runs throws after it and writes nothing. Neither switches
-	 * the addon off. A store replaced keeps world() equal and moves revision().
+	 * world() is empty while Diorama doesn't know which world it is, and equal again after. A batch
+	 * prepared for another world, for no world, or on one saved map and handed over after the
+	 * player switched to another applies nothing, says so, and saves nothing: the removal it holds
+	 * finds nothing on either map and the waypoint it adds lands on neither.
 	 */
 	private static void staleWorlds(ClientGameTestContext context, List<String> wrong) {
 		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		String unknown = context.computeOnClient(mc -> {
+			World before = api().world().orElseThrow();
 			WorldKey.unknownForTests = true;
 			try {
-				return api().world().isPresent() + " " + waypoints().all().size() + " " + waypoints().revision() + " " + waypoints().get(UUID.randomUUID()).isPresent();
+				EditResult result = waypoints().edit(before, batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
+				return api().world().isPresent() + " " + waypoints().all().size() + " " + waypoints().revision() + " " + waypoints().get(UUID.randomUUID()).isPresent() + " "
+					+ result.applied();
 			} finally {
 				WorldKey.unknownForTests = false;
 			}
 		});
 		boolean again = context.computeOnClient(mc -> api().world().map(w -> w.worldId().equals(worldId)).orElse(false));
-		if (!unknown.equals("false 0 0 false") || !again) {
-			wrong.add("While the world isn't known: world() present, all() size, revision(), get() present: " + unknown + " (expected false 0 0 false); known again " + again);
+		if (!unknown.equals("false 0 0 false false") || !again) {
+			wrong.add("While the world isn't known: world() present, all() size, revision(), get() present, a batch applied: " + unknown + " (expected false 0 0 false false); known again "
+				+ again);
 		}
 
-		List<String> refused = new ArrayList<>();
-		int savesBefore = context.computeOnClient(mc -> WaypointStore.saves());
-		boolean[] ran = new boolean[1];
-		refused.add(context.computeOnClient(mc -> thrown(() -> waypoints().edit(WorldId.of("0123456789abcdef0123456789abcdef"), edits -> {
-			ran[0] = true;
-			edits.add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build());
-		}))));
-		refused.add(context.computeOnClient(mc -> thrown(() -> waypoints().edit(worldId, edits -> {
-			edits.add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build());
-			WorldKey.unknownForTests = true;
-		}))));
-		context.runOnClient(mc -> WorldKey.unknownForTests = false);
-		String replacedRevisions = context.computeOnClient(mc -> {
-			long before = waypoints().revision();
-			World world = api().world().orElseThrow();
-			String thrown = thrown(() -> waypoints().edit(worldId, edits -> {
-				edits.add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build());
-				// The player joining the world again, as a server network does without leaving.
-				WaypointStore.onLeave();
-				WaypointStore.get();
-			}));
-			refused.add(thrown);
-			return (waypoints().revision() != before) + " " + api().world().orElseThrow().equals(world);
+		String elsewhere = context.computeOnClient(mc -> {
+			EditResult result = waypoints().edit(nowhere(), batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
+			return result.applied() + " " + result.changed() + " " + result.added();
 		});
-		int saves = context.computeOnClient(mc -> WaypointStore.saves()) - savesBefore;
-		boolean ghost = text(file).contains("Ghost") || context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.name.equals("Ghost")));
-		boolean on = context.computeOnClient(mc -> running("diorama_test_addon"));
-		if (ran[0] || !refused.get(0).startsWith("IllegalStateException: World 0123456789abcdef0123456789abcdef isn't the world open now")
-			|| !refused.get(1).startsWith("IllegalStateException: No world is open") || !refused.get(2).startsWith("IllegalStateException: World " + worldId + "'s waypoints were loaded again")
-			|| saves != 0 || ghost || !on || !replacedRevisions.equals("true true")) {
-			wrong.add("Batches for a world not open: the batch ran for another world " + ran[0] + "; threw " + refused + "; " + saves + " saves, a ghost written " + ghost
-				+ ", the addon still on " + on + "; after the store was replaced, revision moved and world() equal: " + replacedRevisions);
+
+		// Prepared on the main map: a removal and a replacement. Then the player switches to another saved map, and the batch arrives.
+		UUID onMain = addOne(context, "On the main map", 1, 9);
+		String key = context.computeOnClient(mc -> WorldKey.current());
+		World prepared = context.computeOnClient(mc -> api().world().orElseThrow());
+		WaypointBatch batch = batch().remove(onMain).add(NewWaypoint.builder("Replacement", DimensionId.OVERWORLD, BlockCoord.of(at.getX() + 1, at.getY(), at.getZ() + 9)).build()).build();
+		String other = context.computeOnClient(mc -> Maps.of(key).create("minecraft:overworld", "Stale batch map"));
+		context.waitFor(mc -> MapSession.get() != null, 2400);
+		context.waitTicks(2);
+		int savesSwitch = context.computeOnClient(mc -> WaypointStore.saves());
+		String late = context.computeOnClient(mc -> {
+			EditResult result = waypoints().edit(prepared, batch);
+			return "applied " + result.applied() + ", changed " + result.changed() + ", added " + result.added() + ", saved " + result.saved();
+		});
+		int lateSaves = context.computeOnClient(mc -> WaypointStore.saves()) - savesSwitch;
+		boolean replacementOnOther = context.computeOnClient(mc -> waypoints().all().stream().anyMatch(w -> w.name().equals("Replacement")));
+		context.runOnClient(mc -> Maps.of(key).use("minecraft:overworld", Maps.MAIN));
+		context.waitFor(mc -> MapSession.get() != null, 2400);
+		context.waitTicks(2);
+		String onMainAfter = context.computeOnClient(mc -> waypoints().get(onMain).isPresent() + " " + waypoints().all().stream().anyMatch(w -> w.name().equals("Replacement")));
+		context.runOnClient(mc -> Maps.of(key).delete("minecraft:overworld", other));
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		DioramaClientTest.settle(context, 40);
+		boolean ghost = text(file).contains("Ghost") || text(file).contains("Replacement");
+		if (!elsewhere.equals("false false []") || !late.equals("applied false, changed false, added [], saved true") || lateSaves != 0 || replacementOnOther
+			|| !onMainAfter.equals("true false") || ghost) {
+			wrong.add("Batches for a world not open: for another world applied, changed, added " + elsewhere + " (expected false false []); prepared on the main map and handed over"
+				+ " on another: " + late + " (expected applied false, changed false, added [], saved true), " + lateSaves + " saves, the replacement on the other map "
+				+ replacementOnOther + "; back on the main, its waypoint still there and no replacement: " + onMainAfter + " (expected true false); in the file " + ghost);
 		}
-		Diorama.LOGGER.info("addon-api waypoints: batches for a world not open threw {}", refused);
+		Diorama.LOGGER.info("addon-api waypoints: a batch for another world {}; prepared on one saved map and handed over on another: {}", elsewhere, late);
+		removeIds(context, List.of(onMain));
 	}
 
 	/**
-	 * A batch that throws, an ordinary exception and then ThreadDeath: nothing of it is applied or
-	 * saved, the folder it named isn't made, the exception reaches the caller, and the addon is
-	 * switched off, its HUD handle closed; the exception with one log line, ThreadDeath with none.
+	 * A value Diorama would refuse throws where the addon gives it, before any batch: a name too
+	 * long or blank, an ARGB colour, a null. Nothing reaches Diorama, and the addon stays on.
 	 */
-	@SuppressWarnings("removal")
-	private static void throwing(ClientGameTestContext context, List<String> wrong) {
-		UUID existing = addOne(context, "Never renamed?", 2, 6);
-		for (boolean death : new boolean[] {false, true}) {
-			Probe probe = Probe.make(context, death ? "batch_death" : "batch_exception");
-			dev.diorama.api.Handle hid = context.computeOnClient(mc -> probe.api.hud().hide(EnumSet.of(Hud.Part.WORLD_WAYPOINTS)));
-			String before = context.computeOnClient(mc -> WaypointStore.saves() + " " + WaypointStore.folderSaves() + " " + WaypointStore.get().customFolders() + " "
-				+ WaypointStore.get().all().size() + " " + waypoints().revision());
-			String threw = context.computeOnClient(mc -> {
-				try {
-					probe.api.waypoints().edit(worldId, edits -> {
-						edits.add(NewWaypoint.builder("Never kept", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).folder("Rollback folder").build());
-						edits.update(existing, WaypointUpdate.builder().name("Never renamed").folder("Rollback folder").build());
-						if (death) {
-							throw new ThreadDeath();
-						}
-						throw new IllegalStateException("A batch that throws on purpose");
-					});
-					return "nothing";
-				} catch (Throwable thrown) {
-					return thrown.getClass().getSimpleName() + ": " + thrown.getMessage();
-				}
-			});
-			String after = context.computeOnClient(mc -> WaypointStore.saves() + " " + WaypointStore.folderSaves() + " " + WaypointStore.get().customFolders() + " "
-				+ WaypointStore.get().all().size() + " " + waypoints().revision());
-			boolean off = context.computeOnClient(mc -> !running(probe.modId) && !hid.isOpen());
-			String later = context.computeOnClient(mc -> {
-				EditResult result = probe.api.waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder("After off", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()));
-				return result.changed() + " " + result.added();
-			});
-			long lines = log(context).lines().filter(line -> line.contains("Diorama addon " + probe.modId + " failed in a Waypoints.edit batch")).count();
-			String expected = death ? "ThreadDeath: null" : "IllegalStateException: A batch that throws on purpose";
-			if (!threw.equals(expected) || !before.equals(after) || !off || lines != (death ? 0 : 1) || !later.equals("false []")) {
-				wrong.add("A batch that throws " + (death ? "ThreadDeath" : "an exception") + ": the caller got " + threw + ", expected " + expected + "; saves, folder saves, folders, count, revision "
-					+ before + " > " + after + "; switched off with its handle closed " + off + "; " + lines + " log lines; a later batch changed, added " + later);
-			}
-			Diorama.LOGGER.info("addon-api waypoints: a batch that threw {} changed nothing, switched off {}", threw, off);
-			probe.forget(context);
+	private static void badValues(ClientGameTestContext context, List<String> wrong) {
+		String thrown = context.computeOnClient(mc -> String.join("; ", List.of(
+			thrown(() -> NewWaypoint.builder("x".repeat(NewWaypoint.MAX_NAME_LENGTH + 1), DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0))).split(":")[0],
+			thrown(() -> NewWaypoint.builder("  ", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0))).split(":")[0],
+			thrown(() -> WaypointUpdate.builder().rgb(0xFF46A758)).split(":")[0],
+			thrown(() -> batch().remove(null)).split(":")[0],
+			thrown(() -> waypoints().edit(api().world().orElseThrow(), null)).split(":")[0])));
+		boolean on = context.computeOnClient(mc -> running("diorama_test_addon"));
+		String expected = "IllegalArgumentException; IllegalArgumentException; IllegalArgumentException; NullPointerException; NullPointerException";
+		if (!thrown.equals(expected) || !on) {
+			wrong.add("Bad values: threw " + thrown + ", expected " + expected + "; the addon still on " + on);
 		}
-		removeIds(context, List.of(existing));
 	}
 
 	/**
@@ -581,25 +642,13 @@ final class AddonWaypointsTest {
 	 */
 	private static void diskFull(ClientGameTestContext context, List<String> wrong) {
 		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
-		Path blocker = file.resolveSibling("waypoints.json.tmp");
-		try {
-			Files.createDirectories(blocker);
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		String result;
-		try {
+		try (Blocked blocked = Blocked.file(file)) {
 			result = context.computeOnClient(mc -> {
-				EditResult edit = waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder("Unsaved", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ() + 7)).build()));
+				EditResult edit = apply(batch().add(NewWaypoint.builder("Unsaved", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ() + 7)).build()));
 				return edit.changed() + " " + edit.saved() + " " + waypoints().get(edit.added().get(0)).isPresent();
 			});
-		} finally {
-			try {
-				Files.delete(blocker);
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
 		}
 		boolean inFileBefore = text(file).contains("\"Unsaved\"");
 		context.runOnClient(mc -> WaypointStore.get().changed());
@@ -611,7 +660,68 @@ final class AddonWaypointsTest {
 		removeNamed(context, "Unsaved");
 	}
 
-	/** Automatic pins are read but not written: a temporary pin and a waystone; the addon catches the refusals and carries on. */
+	/**
+	 * A disk that refuses only folders.json while a batch makes a folder: waypoints.json is written,
+	 * the batch reports saved() false, and the next ordinary save, which changes no folder, writes
+	 * folders.json too, so the waypoint is still in its folder when the store is read again from
+	 * disk, as on the next start.
+	 */
+	private static void foldersOwed(ClientGameTestContext context, List<String> wrong) {
+		Path folders = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("folders.json"));
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		String result;
+		UUID id;
+		try (Blocked blocked = Blocked.file(folders)) {
+			EditResult edit = context.computeOnClient(mc -> apply(batch().add(NewWaypoint.builder("Owed folder pin", DimensionId.OVERWORLD,
+				BlockCoord.of(at.getX(), at.getY(), at.getZ() + 8)).folder("Owed folder").build())));
+			id = edit.added().get(0);
+			result = edit.changed() + " " + edit.saved();
+		}
+		boolean before = Files.exists(folders) && text(folders).contains("Owed folder");
+		// An ordinary save of something else: Diorama's own, for a waypoint renamed in the list, say.
+		context.runOnClient(mc -> WaypointStore.get().changed());
+		boolean after = Files.exists(folders) && text(folders).contains("Owed folder");
+		String reread = context.computeOnClient(mc -> {
+			WaypointStore.onLeave();
+			return waypoints().get(id).flatMap(dev.diorama.api.Waypoint::folder).orElse("no folder");
+		});
+		if (!result.equals("true false") || before || !after || !reread.equals("Owed folder")) {
+			wrong.add("A batch whose folders.json the disk refused: changed, saved " + result + " (expected true false); in folders.json before " + before
+				+ ", after the next ordinary save " + after + " (expected true); its folder read again from disk: " + reread + " (expected Owed folder)");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: folders.json refused, then written by the next save {}; read again: {}", after, reread);
+		context.runOnClient(mc -> {
+			apply(batch().remove(id));
+			WaypointStore.get().deleteFolder("Owed folder");
+		});
+	}
+
+	/** A file the disk refuses to replace while this is open: its temporary file's name is taken by a folder. */
+	private record Blocked(Path blocker) implements AutoCloseable {
+		static Blocked file(Path file) {
+			Path blocker = file.resolveSibling(file.getFileName() + ".tmp");
+			try {
+				Files.createDirectories(blocker);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+			return new Blocked(blocker);
+		}
+
+		@Override
+		public void close() {
+			try {
+				Files.delete(this.blocker);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		}
+	}
+
+	/**
+	 * Automatic pins are read but not written: a batch that names a temporary pin or a waystone
+	 * throws and applies nothing, not even its other steps; the addon stays on.
+	 */
 	private static void readOnly(ClientGameTestContext context, List<String> wrong) {
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		context.runOnClient(mc -> Waypoints.addTemporary(at.east(3), "minecraft:overworld"));
@@ -626,18 +736,17 @@ final class AddonWaypointsTest {
 			List<String> out = new ArrayList<>();
 			out.add(waypoints().get(temporary).map(w -> w.kind().name()).orElse("none"));
 			out.add(waypoints().get(stone).map(w -> w.kind().name()).orElse("none"));
-			EditResult result = waypoints().edit(worldId, edits -> {
-				out.add(thrown(() -> edits.update(temporary, WaypointUpdate.builder().name("Mine now").build())).split(":")[0]);
-				out.add(thrown(() -> edits.remove(temporary)).split(":")[0]);
-				out.add(thrown(() -> edits.update(stone, WaypointUpdate.builder().name("Mine now").build())).split(":")[0]);
-			});
-			out.add(Boolean.toString(result.changed()));
+			NewWaypoint first = NewWaypoint.builder("Never added", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ() + 3)).build();
+			out.add(thrown(() -> apply(batch().add(first).update(temporary, WaypointUpdate.builder().name("Mine now").build()))).split(":")[0]);
+			out.add(thrown(() -> apply(batch().add(first).remove(temporary))).split(":")[0]);
+			out.add(thrown(() -> apply(batch().add(first).update(stone, WaypointUpdate.builder().name("Mine now").build()))).split(":")[0]);
 			return String.join(" ", out);
 		});
-		boolean unchanged = context.computeOnClient(mc -> WaypointStore.saves() == saves && WaypointStore.get().all().stream().noneMatch(w -> w.name.equals("Mine now")));
+		boolean unchanged = context.computeOnClient(mc -> WaypointStore.saves() == saves && WaypointStore.get().all().stream().noneMatch(w -> w.name.equals("Mine now")
+			|| w.name.equals("Never added")));
 		boolean on = context.computeOnClient(mc -> running("diorama_test_addon"));
-		if (!refused.equals("TEMPORARY WAYSTONE IllegalArgumentException IllegalArgumentException IllegalArgumentException false") || !unchanged || !on) {
-			wrong.add("Automatic pins: read and refused " + refused + "; store unchanged " + unchanged + ", the addon still on " + on);
+		if (!refused.equals("TEMPORARY WAYSTONE IllegalArgumentException IllegalArgumentException IllegalArgumentException") || !unchanged || !on) {
+			wrong.add("Automatic pins: read and refused " + refused + "; store unchanged, the batches' adds included, " + unchanged + "; the addon still on " + on);
 		}
 		context.runOnClient(mc -> {
 			WaypointStore store = WaypointStore.get();
@@ -664,10 +773,10 @@ final class AddonWaypointsTest {
 		String read = context.computeOnClient(mc -> {
 			long listed = waypoints().all().stream().filter(w -> w.id().equals(id)).count();
 			int x = waypoints().get(id).map(w -> w.pos().x()).orElse(0) - at.getX();
-			waypoints().edit(worldId, edits -> edits.update(id, WaypointUpdate.builder().name("Twin renamed").build()));
+			apply(batch().update(id, WaypointUpdate.builder().name("Twin renamed").build()));
 			String stored = WaypointStore.get().all().stream().filter(w -> w.id.equals(id)).map(w -> w.name).toList().toString();
 			boolean[] removed = new boolean[1];
-			waypoints().edit(worldId, edits -> removed[0] = edits.remove(id));
+			removed[0] = apply(batch().remove(id)).missing().isEmpty();
 			String left = WaypointStore.get().all().stream().filter(w -> w.id.equals(id)).map(w -> w.name + "@" + (w.x - at.getX())).toList().toString();
 			String shownNow = waypoints().get(id).map(w -> w.name() + "@" + (w.pos().x() - at.getX())).orElse("gone");
 			return "listed " + listed + ", get() at +" + x + ", stored after a rename " + stored + ", removed " + removed[0] + ", left " + left + ", get() then " + shownNow;
@@ -690,14 +799,14 @@ final class AddonWaypointsTest {
 	private static void threads(ClientGameTestContext context, List<String> wrong) {
 		DioramaApi api = context.computeOnClient(mc -> api());
 		dev.diorama.api.Waypoints waypoints = context.computeOnClient(mc -> api.waypoints());
+		World world = context.computeOnClient(mc -> api.world().orElseThrow());
 		String[] calls = new String[5];
 		Thread other = new Thread(() -> {
 			calls[0] = thrown(api::world);
 			calls[1] = thrown(waypoints::all);
 			calls[2] = thrown(() -> waypoints.get(UUID.randomUUID()));
 			calls[3] = thrown(waypoints::revision);
-			calls[4] = thrown(() -> waypoints.edit(worldId, edits -> {
-			}));
+			calls[4] = thrown(() -> waypoints.edit(world, WaypointBatch.empty()));
 		}, "Diorama test, not the client thread");
 		other.start();
 		try {
@@ -732,7 +841,7 @@ final class AddonWaypointsTest {
 		int[] row = select(context, otherWaypoint);
 		// In one go on the client, so no tick comes between, whichever loader: the addon deletes, then the player clicks Hide on the other row.
 		context.runOnClient(mc -> {
-			waypoints().edit(worldId, edits -> edits.remove(doomed));
+			apply(batch().remove(doomed));
 			DioramaClientTest.press(rowButton(mc.gui.screen(), "diorama.waypoints.hide", row[1]));
 		});
 		context.waitTicks(3);
@@ -751,7 +860,7 @@ final class AddonWaypointsTest {
 		context.getInput().typeChars("row");
 		context.waitTicks(2);
 		context.runOnClient(mc -> DioramaClientTest.editBoxes(mc.gui.screen()).get(0).setCursorPosition(1));
-		context.runOnClient(mc -> waypoints().edit(worldId, edits -> edits.update(other, WaypointUpdate.builder().name("Other row renamed").build())));
+		context.runOnClient(mc -> apply(batch().update(other, WaypointUpdate.builder().name("Other row renamed").build())));
 		context.waitTicks(3);
 		String search = context.computeOnClient(mc -> {
 			var box = DioramaClientTest.editBoxes(mc.gui.screen()).get(0);
@@ -768,14 +877,15 @@ final class AddonWaypointsTest {
 
 	/**
 	 * The map's right-click menu refuses a waypoint an addon deleted: a pin drawn before the delete
-	 * gets no menu, and a menu opened before it does nothing when clicked.
+	 * gets no menu, and a menu opened before it does nothing when Hide or Copy coordinates is
+	 * clicked (copying closes it). A waystone's menu does the same once Waystones no longer has it.
 	 */
 	private static void mapMenu(ClientGameTestContext context, List<String> wrong) {
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		int x = at.getX() + 4;
 		int z = at.getZ() - 4;
 		int y = context.computeOnClient(mc -> mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z));
-		UUID first = context.computeOnClient(mc -> waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder("Menu pin", DimensionId.OVERWORLD, BlockCoord.of(x, y, z)).build())).added().get(0));
+		UUID first = context.computeOnClient(mc -> apply(batch().add(NewWaypoint.builder("Menu pin", DimensionId.OVERWORLD, BlockCoord.of(x, y, z)).build())).added().get(0));
 		context.setScreen(MapScreen::new);
 		DioramaClientTest.lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		DioramaClientTest.settle(context, 20);
@@ -786,42 +896,75 @@ final class AddonWaypointsTest {
 			if (pin == null) {
 				return "no pin drawn";
 			}
-			waypoints().edit(worldId, edits -> edits.remove(first));
+			apply(batch().remove(first));
 			map.openMenuForTests(pin.x(), pin.y());
 			return map.menu() == null ? "no menu" : map.menu().labels().toString();
 		});
 		context.setScreen(() -> null);
 
-		UUID second = context.computeOnClient(mc -> waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder("Menu pin two", DimensionId.OVERWORLD, BlockCoord.of(x, y, z)).build())).added().get(0));
+		UUID second = context.computeOnClient(mc -> apply(batch().add(NewWaypoint.builder("Menu pin two", DimensionId.OVERWORLD, BlockCoord.of(x, y, z)).build())).added().get(0));
 		context.setScreen(MapScreen::new);
 		DioramaClientTest.lookAtPlayer(context, 4.0, TileKey.SURFACE);
 		DioramaClientTest.settle(context, 20);
 		DioramaClientTest.rightClickPin(context, new int[] {x, y, z});
 		List<String> labels = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).menu() == null ? List.of() : ((MapScreen) mc.gui.screen()).menu().labels());
 		String hide = net.minecraft.network.chat.Component.translatable("diorama.waypoints.hide").getString();
+		String copy = net.minecraft.network.chat.Component.translatable("diorama.menu.copy_coordinates").getString();
 		int saves = context.computeOnClient(mc -> WaypointStore.saves());
 		String clicked = context.computeOnClient(mc -> {
 			MapScreen map = (MapScreen) mc.gui.screen();
-			if (map.menu() == null || map.menu().centreOf(hide) == null) {
-				return "no Hide in the menu";
+			if (map.menu() == null || map.menu().centreOf(hide) == null || map.menu().centreOf(copy) == null) {
+				return "no Hide or Copy coordinates in the menu";
 			}
-			float[] centre = map.menu().centreOf(hide);
-			waypoints().edit(worldId, edits -> edits.remove(second));
-			map.menu().click(centre[0], centre[1]);
-			return "clicked";
+			float[] hideAt = map.menu().centreOf(hide);
+			float[] copyAt = map.menu().centreOf(copy);
+			mc.keyboardHandler.setClipboard("untouched");
+			apply(batch().remove(second));
+			map.menu().click(hideAt[0], hideAt[1]);
+			map.menu().click(copyAt[0], copyAt[1]);
+			return "clipboard " + mc.keyboardHandler.getClipboard() + ", menu open " + (map.menu() != null);
 		});
 		boolean nothing = context.computeOnClient(mc -> WaypointStore.saves() == saves + 1 && WaypointStore.get().all().stream().noneMatch(w -> w.id.equals(second)));
 		context.setScreen(() -> null);
-		if (stale.equals("no pin drawn") || stale.contains("Menu pin") || !labels.contains("Menu pin two") || !clicked.equals("clicked") || !nothing) {
+		if (stale.equals("no pin drawn") || stale.contains("Menu pin") || !labels.contains("Menu pin two") || !clicked.equals("clipboard untouched, menu open false") || !nothing) {
 			wrong.add("The map's menu and a pin an addon deleted: right-clicking the pin drawn before gave " + stale + " (expected no waypoint menu); the menu opened before "
-				+ labels + ", Hide after the delete " + clicked + ", nothing saved but the delete and the waypoint still gone " + nothing);
+				+ labels + ", Hide and Copy coordinates after the delete: " + clicked + " (expected clipboard untouched, menu open false), nothing saved but the delete and the"
+				+ " waypoint still gone " + nothing);
 		}
+
+		// A waystone's menu, opened while Waystones has it, then Waystones forgets it (the player left the server, say).
+		Waypoint stone = context.computeOnClient(mc -> {
+			Waypoint w = new Waypoint("Menu stone", x, y, z, "minecraft:overworld", 0xFF8E4EC6);
+			Waystones.knownForTests(w);
+			return w;
+		});
+		context.setScreen(MapScreen::new);
+		DioramaClientTest.lookAtPlayer(context, 4.0, TileKey.SURFACE);
+		DioramaClientTest.settle(context, 20);
+		DioramaClientTest.rightClickPin(context, new int[] {x, y, z});
+		String stoneClicked = context.computeOnClient(mc -> {
+			MapScreen map = (MapScreen) mc.gui.screen();
+			if (map.menu() == null || !map.menu().labels().contains("Menu stone") || map.menu().centreOf(copy) == null) {
+				return "no waystone menu: " + (map.menu() == null ? "none" : map.menu().labels());
+			}
+			float[] copyAt = map.menu().centreOf(copy);
+			mc.keyboardHandler.setClipboard("untouched");
+			Waystones.clear();
+			map.menu().click(copyAt[0], copyAt[1]);
+			return "clipboard " + mc.keyboardHandler.getClipboard() + ", menu open " + (map.menu() != null);
+		});
+		context.setScreen(() -> null);
+		if (!stoneClicked.equals("clipboard untouched, menu open false")) {
+			wrong.add("The map's menu for a waystone Waystones forgot after it opened: Copy coordinates gave " + stoneClicked + " (expected clipboard untouched, menu open false)");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: map menus for a pin deleted after they opened: {}; for a waystone forgotten: {} ({})", clicked, stoneClicked, stone.name);
 	}
 
 	/**
 	 * The editor refuses a waypoint an addon deleted while it was open: its Save closes it without
-	 * saving, rather than change a waypoint that's gone or bring it back. (The list's Edit and the
-	 * map's pin and menu don't open it for one that's gone.)
+	 * saving, rather than change a waypoint that's gone or bring it back. And it saves only what the
+	 * player changed in it: the player opens a waypoint and renames it while an addon moves and
+	 * hides it, and Save keeps the addon's place and hiding with the player's name.
 	 */
 	private static void editor(ClientGameTestContext context, List<String> wrong) {
 		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
@@ -843,6 +986,27 @@ final class AddonWaypointsTest {
 				+ " saves (expected 0), closed " + closed + ", back in the store " + back + ", in the file " + inFile);
 		}
 		context.setScreen(() -> null);
+
+		UUID shared = addOne(context, "Edited by two", 4, -4);
+		Waypoint sharedWaypoint = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.id.equals(shared)).findFirst().orElseThrow());
+		BlockPos moved = context.computeOnClient(mc -> mc.player.blockPosition().offset(40, 0, 40));
+		context.setScreen(() -> new WaypointEditScreen(null, sharedWaypoint, false));
+		context.waitTicks(3);
+		DioramaClientTest.typeInto(context, 0, "Renamed by the player");
+		// Meanwhile the sync addon moves and hides it.
+		context.runOnClient(mc -> apply(batch().update(shared, WaypointUpdate.builder().pos(BlockCoord.of(moved.getX(), moved.getY(), moved.getZ())).visible(false).build())));
+		context.takeScreenshot("addon-api-16-editor-while-addon-moves");
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		String after = context.computeOnClient(mc -> waypoints().get(shared).map(w -> w.name() + " at " + (w.pos().x() - moved.getX()) + "," + (w.pos().z() - moved.getZ())
+			+ " visible " + w.visible()).orElse("gone"));
+		if (!after.equals("Renamed by the player at 0,0 visible false")) {
+			wrong.add("The editor's Save after an addon moved and hid the waypoint while it was open: " + after
+				+ " (expected Renamed by the player at 0,0 visible false: the player's name, the addon's place and hiding)");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: editor saved over an addon's move: {}", after);
+		context.setScreen(() -> null);
+		removeIds(context, List.of(shared));
 	}
 
 	/**
@@ -929,6 +1093,132 @@ final class AddonWaypointsTest {
 		tick(context, sync, 3);
 	}
 
+	/**
+	 * After a save that failed, the sync keeps the links to the waypoints it added: a pin from the
+	 * other mod is imported while the disk refuses waypoints.json, then both sides change again,
+	 * and each side still has one copy of it, not two.
+	 */
+	private static void syncFailedSave(ClientGameTestContext context, List<String> wrong) {
+		PollingSync sync = context.computeOnClient(mc -> new PollingSync(TestAddon.api()));
+		OtherMod other = sync.other();
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+		tick(context, sync, 3);
+		String problem;
+		try (Blocked blocked = Blocked.file(file)) {
+			context.runOnClient(mc -> other.add(new OtherMod.Pin("Imported unsaved", at.getX() - 3, at.getY(), at.getZ() - 9, "minecraft:overworld", 0x3E63DD, true, "")));
+			tick(context, sync, 3);
+			problem = sync.lastProblem();
+		}
+		// The next changes on both sides, after the disk works again.
+		context.runOnClient(mc -> other.add(new OtherMod.Pin("Later other", at.getX() - 4, at.getY(), at.getZ() - 9, "minecraft:overworld", 0x3E63DD, true, "")));
+		context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Later Diorama", at.getX() - 5, at.getY(), at.getZ() - 9, "minecraft:overworld", Waypoint.PALETTE[2])));
+		tick(context, sync, 5);
+		String copies = context.computeOnClient(mc -> "Diorama " + waypoints().all().stream().filter(w -> w.name().equals("Imported unsaved")).count() + ", the other mod "
+			+ other.pins().values().stream().filter(p -> p.name().equals("Imported unsaved")).count());
+		if (!copies.equals("Diorama 1, the other mod 1") || !problem.startsWith("Diorama couldn't save")) {
+			wrong.add("The polling sync after a save that failed: copies of the imported pin: " + copies + " (expected Diorama 1, the other mod 1); its problem then: " + problem);
+		}
+		Diorama.LOGGER.info("addon-api waypoints: sync through a failed save: {}; problem {}", copies, problem);
+		removeNamed(context, "Imported unsaved");
+		removeNamed(context, "Later ");
+	}
+
+	/**
+	 * The sync and saved maps. A waypoint with a linked waypoint's ID on another saved map is
+	 * another waypoint: switching to that map neither changes nor deletes the linked one's copy,
+	 * and the other map's waypoint gets a copy of its own. A batch worked out on one saved map and
+	 * handed over after a switch to another applies nothing, and the sync keeps its links and
+	 * tries again. Deleting a saved map removes the copies of its waypoints.
+	 */
+	private static void syncSavedMaps(ClientGameTestContext context, List<String> wrong) {
+		PollingSync sync = context.computeOnClient(mc -> new PollingSync(TestAddon.api()));
+		OtherMod other = sync.other();
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		String key = context.computeOnClient(mc -> WorldKey.current());
+		tick(context, sync, 3);
+		Waypoint linked = context.computeOnClient(mc -> {
+			Waypoint w = new Waypoint("Linked on main", at.getX() + 7, at.getY(), at.getZ() - 9, "minecraft:overworld", Waypoint.PALETTE[1]);
+			WaypointStore.get().add(w);
+			return w;
+		});
+		tick(context, sync, 3);
+		String copy = other.named("Linked on main");
+		String second = context.computeOnClient(mc -> Maps.of(key).create("minecraft:overworld", "Sync map"));
+		context.waitFor(mc -> MapSession.get() != null, 2400);
+		context.waitTicks(2);
+		// On the second map, a waypoint with the same ID, as a waypoints file copied by hand gives.
+		context.runOnClient(mc -> {
+			Waypoint twin = new Waypoint("Same ID elsewhere", at.getX() + 8, at.getY(), at.getZ() - 9, "minecraft:overworld", Waypoint.PALETTE[3]);
+			twin.id = linked.id;
+			WaypointStore.get().add(twin);
+		});
+		tick(context, sync, 3);
+		String sameId = (copy == null ? "no copy" : other.pins().containsKey(copy) ? other.pins().get(copy).name() : "copy deleted") + ", the other map's own copy "
+			+ (other.named("Same ID elsewhere") != null);
+
+		// Worked out on the second map, handed over after the player switched back to the main one.
+		context.runOnClient(mc -> other.add(new OtherMod.Pin("Raced", at.getX() + 9, at.getY(), at.getZ() - 9, "minecraft:overworld", 0x3E63DD, true, "")));
+		context.runOnClient(mc -> sync.beforeEdit(() -> Maps.of(key).use("minecraft:overworld", Maps.MAIN)));
+		context.runOnClient(mc -> sync.tick());
+		context.runOnClient(mc -> sync.beforeEdit(() -> {
+		}));
+		String raced = context.computeOnClient(mc -> sync.lastProblem() + "; links " + sync.linkCount() + "; Raced in Diorama "
+			+ waypoints().all().stream().filter(w -> w.name().equals("Raced")).count());
+		context.waitFor(mc -> MapSession.get() != null, 2400);
+		tick(context, sync, 3);
+		String retried = context.computeOnClient(mc -> "Raced in Diorama " + waypoints().all().stream().filter(w -> w.name().equals("Raced")).count()
+			+ ", in the other mod " + other.pins().values().stream().filter(p -> p.name().equals("Raced")).count());
+
+		// Back on the main map, the second is deleted: its waypoint's copy goes.
+		context.runOnClient(mc -> Maps.of(key).delete("minecraft:overworld", second));
+		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
+		tick(context, sync, 3);
+		String deleted = "the other map's copy " + (other.named("Same ID elsewhere") != null) + ", the main map's " + (copy != null && other.pins().containsKey(copy));
+		if (!sameId.equals("Linked on main, the other map's own copy true") || !raced.startsWith("Diorama's world moved before the batch was applied")
+			|| !raced.endsWith("Raced in Diorama 0") || !retried.equals("Raced in Diorama 1, in the other mod 1") || !deleted.equals("the other map's copy false, the main map's true")) {
+			wrong.add("The polling sync and saved maps: a waypoint with a linked one's ID on another map: the linked copy " + sameId
+				+ " (expected Linked on main, the other map's own copy true); a batch handed over after a switch: " + raced + " (expected the world moved, nothing applied);"
+				+ " on the next ticks " + retried + " (expected 1 and 1); after the second map was deleted, " + deleted + " (expected the other map's copy false, the main map's true)");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: sync and saved maps: {}; {}; {}; {}", sameId, raced, retried, deleted);
+		removeNamed(context, "Linked on main");
+		removeNamed(context, "Raced");
+		tick(context, sync, 3);
+	}
+
+	/**
+	 * The other mod's pins Diorama would refuse don't stop the rest: a 33-character name comes
+	 * across cut to 32, a blank one is left out, and the pin beside them comes across as it is.
+	 */
+	private static void syncTooLong(ClientGameTestContext context, List<String> wrong) {
+		PollingSync sync = context.computeOnClient(mc -> new PollingSync(TestAddon.api()));
+		OtherMod other = sync.other();
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		String longName = "A name one letter longer than 32";
+		String tooLong = longName + "!";
+		context.runOnClient(mc -> {
+			other.add(new OtherMod.Pin(tooLong, at.getX() + 2, at.getY(), at.getZ() - 11, "minecraft:overworld", 0x3E63DD, true, ""));
+			other.add(new OtherMod.Pin("   ", at.getX() + 3, at.getY(), at.getZ() - 11, "minecraft:overworld", 0x3E63DD, true, ""));
+			other.add(new OtherMod.Pin("Beside the long one", at.getX() + 4, at.getY(), at.getZ() - 11, "minecraft:overworld", 0x3E63DD, true, ""));
+		});
+		String thrown = "nothing";
+		try {
+			tick(context, sync, 3);
+		} catch (RuntimeException e) {
+			thrown = e.toString();
+		}
+		String came = context.computeOnClient(mc -> waypoints().all().stream().filter(w -> w.pos().z() == at.getZ() - 11).map(dev.diorama.api.Waypoint::name).sorted().toList()
+			.toString());
+		String expected = "[" + longName + ", Beside the long one]";
+		if (!came.equals(expected) || !thrown.equals("nothing")) {
+			wrong.add("The polling sync with a name too long and a blank one: came across " + came + " (expected " + expected + "); the tick threw " + thrown);
+		}
+		Diorama.LOGGER.info("addon-api waypoints: sync with names Diorama refuses: {}; {}", came, sync.lastProblem());
+		removeNamed(context, longName);
+		removeNamed(context, "Beside the long one");
+	}
+
 	/** Ticks the sync from its own tick, as an addon's client tick would, once a game tick. */
 	private static void tick(ClientGameTestContext context, PollingSync sync, int ticks) {
 		for (int i = 0; i < ticks; i++) {
@@ -946,13 +1236,15 @@ final class AddonWaypointsTest {
 		}
 	}
 
-	/** At the title screen after leaving: no world, so nothing to read, and an edit for the world left throws. */
+	/** At the title screen after leaving: no world, so nothing to read, and a batch for the world left applies nothing. */
 	static void left(ClientGameTestContext context) {
-		String read = context.computeOnClient(mc -> api().world() + " " + waypoints().all().size() + " " + waypoints().revision() + " "
-			+ thrown(() -> waypoints().edit(worldId, edits -> {
-			})));
-		if (!read.startsWith("Optional.empty 0 0 IllegalStateException: No world is open")) {
-			throw new AssertionError("After leaving: world(), all() size, revision(), an edit for the world left: " + read);
+		String read = context.computeOnClient(mc -> {
+			World gone = new World(worldId, DimensionId.OVERWORLD, Map.of(), Map.of());
+			EditResult result = waypoints().edit(gone, batch().add(NewWaypoint.builder("After leaving", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
+			return api().world() + " " + waypoints().all().size() + " " + waypoints().revision() + " applied " + result.applied();
+		});
+		if (!read.equals("Optional.empty 0 0 applied false")) {
+			throw new AssertionError("After leaving: world(), all() size, revision(), a batch for the world left: " + read);
 		}
 		Diorama.LOGGER.info("addon-api waypoints: after leaving, {}", read);
 	}
@@ -1044,14 +1336,15 @@ final class AddonWaypointsTest {
 	 */
 	static void measure(ClientGameTestContext context) {
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
-		WorldId id = context.computeOnClient(mc -> api().world().orElseThrow().worldId());
-		List<UUID> ids = context.computeOnClient(mc -> waypoints().edit(id, edits -> {
+		List<UUID> ids = context.computeOnClient(mc -> {
+			WaypointBatch.Builder batch = batch();
 			for (int i = 0; i < 1000; i++) {
-				edits.add(NewWaypoint.builder("Many " + i, DimensionId.OVERWORLD, BlockCoord.of(at.getX() + 2000 + i, 70, at.getZ() + 2000)).build());
+				batch.add(NewWaypoint.builder("Many " + i, DimensionId.OVERWORLD, BlockCoord.of(at.getX() + 2000 + i, 70, at.getZ() + 2000)).build());
 			}
-		}).added());
+			return apply(batch).added();
+		});
 		Diorama.LOGGER.info("addon-api measure: {}", readCost(context, ids));
-		Diorama.LOGGER.info("addon-api measure: one batch of 10 renames with 1,000 waypoints: {}", editCost(context, id, ids));
+		Diorama.LOGGER.info("addon-api measure: one batch of 10 renames with 1,000 waypoints: {}", editCost(context, ids));
 		String save = context.computeOnClient(mc -> {
 			long[] nanos = new long[50];
 			for (int round = 0; round < 50; round++) {
@@ -1064,7 +1357,7 @@ final class AddonWaypointsTest {
 			return String.format(Locale.ROOT, "median %.2f ms (%.2f to %.2f)", n[n.length / 2] / 1e6, n[0] / 1e6, n[n.length - 1] / 1e6);
 		});
 		Diorama.LOGGER.info("addon-api measure: Diorama's own changed() with 1,000 waypoints (one save): {}", save);
-		context.runOnClient(mc -> waypoints().edit(id, edits -> ids.forEach(edits::remove)));
+		removeIds(context, ids);
 	}
 
 	/** Bytes a call of world(), all(), get() and revision() with nothing changed, over 100,000 calls each after 20,000 to warm up. */
@@ -1107,7 +1400,7 @@ final class AddonWaypointsTest {
 	}
 
 	/** Median time and bytes of one batch of 10 renames, over 40 batches after 10 to warm up. */
-	private static String editCost(ClientGameTestContext context, WorldId id, List<UUID> ids) {
+	private static String editCost(ClientGameTestContext context, List<UUID> ids) {
 		return context.computeOnClient(mc -> {
 			dev.diorama.api.Waypoints waypoints = waypoints();
 			com.sun.management.ThreadMXBean threads = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
@@ -1117,11 +1410,12 @@ final class AddonWaypointsTest {
 				int r = round;
 				long startBytes = threads.getCurrentThreadAllocatedBytes();
 				long start = System.nanoTime();
-				waypoints.edit(id, edits -> {
-					for (int i = 0; i < 10; i++) {
-						edits.update(ids.get(r * 10 + i), WaypointUpdate.builder().name("Renamed " + r + " " + i).build());
-					}
-				});
+				// What a sync does: reads the world, builds the batch, hands both over.
+				WaypointBatch.Builder batch = batch();
+				for (int i = 0; i < 10; i++) {
+					batch.update(ids.get(r * 10 + i), WaypointUpdate.builder().name("Renamed " + r + " " + i).build());
+				}
+				waypoints.edit(api().world().orElseThrow(), batch.build());
 				// What a sync does next: reads the list again.
 				waypoints.all();
 				nanos[round] = System.nanoTime() - start;
@@ -1140,13 +1434,16 @@ final class AddonWaypointsTest {
 	private static UUID addOne(ClientGameTestContext context, String name, int east, int south) {
 		return context.computeOnClient(mc -> {
 			BlockPos at = mc.player.blockPosition();
-			return waypoints().edit(worldId, edits -> edits.add(NewWaypoint.builder(name, DimensionId.OVERWORLD, BlockCoord.of(at.getX() + east, at.getY(), at.getZ() + south)).build()))
-				.added().get(0);
+			return apply(batch().add(NewWaypoint.builder(name, DimensionId.OVERWORLD, BlockCoord.of(at.getX() + east, at.getY(), at.getZ() + south)).build())).added().get(0);
 		});
 	}
 
 	private static void removeIds(ClientGameTestContext context, List<UUID> ids) {
-		context.runOnClient(mc -> waypoints().edit(worldId, edits -> ids.forEach(edits::remove)));
+		context.runOnClient(mc -> {
+			WaypointBatch.Builder batch = batch();
+			ids.forEach(batch::remove);
+			apply(batch);
+		});
 	}
 
 	/** Removes every one of the store's waypoints whose name starts so. */

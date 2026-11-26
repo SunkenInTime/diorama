@@ -78,7 +78,7 @@ public final class Waypoint {
 	public boolean deleted;
 	/** A portal pin the player renamed or moved: it's theirs now, and stays when the portal goes. */
 	public boolean edited;
-	/** The mod ID of the addon that added it ({@link dev.diorama.api.WaypointEditor#add}); null for Diorama's and the player's. */
+	/** The mod ID of the addon that added it ({@link dev.diorama.api.WaypointBatch.Builder#add}); null for Diorama's and the player's. */
 	public @org.jspecify.annotations.Nullable String addedBy;
 	/**
 	 * Set on a copy standing in for this waypoint in another dimension, at that dimension's

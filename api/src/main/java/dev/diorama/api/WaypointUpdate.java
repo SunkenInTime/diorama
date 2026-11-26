@@ -6,11 +6,12 @@ import java.util.OptionalInt;
 import org.jspecify.annotations.Nullable;
 
 /**
- * What {@link WaypointEditor#update} changes on a waypoint, made with {@link #builder}: only what
- * is set changes. Every value is checked as {@link NewWaypoint}'s are.
+ * What a {@link WaypointBatch} changes on a waypoint ({@link WaypointBatch.Builder#update}), made
+ * with {@link #builder}: only what is set changes. Every value is checked as {@link NewWaypoint}'s
+ * are.
  *
  * <pre>{@code
- * api.waypoints().edit(world.worldId(), edits -> edits.update(id, WaypointUpdate.builder().name("Old mine").visible(false).build()));
+ * WaypointBatch batch = WaypointBatch.builder().update(id, WaypointUpdate.builder().name("Old mine").visible(false).build()).build();
  * }</pre>
  */
 public final class WaypointUpdate {
