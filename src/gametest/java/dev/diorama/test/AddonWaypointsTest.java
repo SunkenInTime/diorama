@@ -819,18 +819,12 @@ final class AddonWaypointsTest {
 	}
 
 	/**
-	 * The editor refuses a waypoint an addon deleted: opened on one that's gone it closes at once,
-	 * and its Save on one deleted while it's open closes it without saving.
+	 * The editor refuses a waypoint an addon deleted while it was open: its Save closes it without
+	 * saving, rather than change a waypoint that's gone or bring it back. (The list's Edit and the
+	 * map's pin and menu don't open it for one that's gone.)
 	 */
 	private static void editor(ClientGameTestContext context, List<String> wrong) {
 		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
-		UUID gone = addOne(context, "Gone before", 3, -5);
-		Waypoint goneWaypoint = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.id.equals(gone)).findFirst().orElseThrow());
-		removeIds(context, List.of(gone));
-		context.setScreen(() -> new WaypointEditScreen(null, goneWaypoint, false));
-		context.waitTicks(3);
-		boolean closedAtOnce = context.computeOnClient(mc -> !(mc.gui.screen() instanceof WaypointEditScreen));
-
 		UUID editing = addOne(context, "Edited away", 3, -3);
 		Waypoint editingWaypoint = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.id.equals(editing)).findFirst().orElseThrow());
 		context.setScreen(() -> new WaypointEditScreen(null, editingWaypoint, false));
@@ -844,8 +838,8 @@ final class AddonWaypointsTest {
 		boolean closed = context.computeOnClient(mc -> mc.gui.screen() == null);
 		boolean back = context.computeOnClient(mc -> WaypointStore.get().all().stream().anyMatch(w -> w.id.equals(editing) || w.name.equals("Brought back")));
 		boolean inFile = text(file).contains("Brought back");
-		if (!closedAtOnce || saved != 0 || !closed || back || inFile) {
-			wrong.add("The editor and a waypoint an addon deleted: opened on one gone, closed at once " + closedAtOnce + "; Save on one deleted while open: " + saved
+		if (saved != 0 || !closed || back || inFile) {
+			wrong.add("The editor's Save on a waypoint an addon deleted while it was open: " + saved
 				+ " saves (expected 0), closed " + closed + ", back in the store " + back + ", in the file " + inFile);
 		}
 		context.setScreen(() -> null);

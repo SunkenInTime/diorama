@@ -895,7 +895,10 @@ public final class MapScreen extends Screen {
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
 			if (pin != null && pin.waypoint().editable()) {
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
+				// A pin drawn last frame for a waypoint deleted since (by an addon, say) opens nothing.
+				if (held(pin.waypoint().source())) {
+					this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
+				}
 			} else if (pin != null) {
 				// A waystone can't be edited here: its menu instead.
 				this.openMenu(x, y);
