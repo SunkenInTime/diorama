@@ -3448,6 +3448,16 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (!dots.isEmpty()) {
 				wrong.append("\n  no picture, only a dot:").append(dots);
 			}
+			// The two that were dots on every version are there, with a picture that can be drawn.
+			for (String name : new String[] {"snow_golem", "warden"}) {
+				boolean drawn = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					drawn |= entity.getType().toShortString().equals(name) && dev.diorama.render.MobFaces.canDraw(entity);
+				}
+				if (!drawn) {
+					wrong.append("\n  ").append(name).append(": not in the world, or no picture to draw");
+				}
+			}
 			// Mobs with hand-made faces whose models give the same face on every version.
 			for (String name : new String[] {"creeper", "spider", "cave_spider", "blaze", "allay", "pig", "sheep"}) {
 				boolean found = false;
