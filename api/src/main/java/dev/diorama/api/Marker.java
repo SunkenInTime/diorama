@@ -188,8 +188,10 @@ public final class Marker {
 
 		/**
 		 * Sets the text the full map shows under it, white on a dark plate, as it shows a
-		 * waypoint's name. The minimap shows no labels. Labels aren't moved apart where markers
-		 * crowd, so keep them for markers the player looks for by name.
+		 * waypoint's name. The minimap shows no labels. Where two labels would overlap, only the
+		 * first is drawn, in the order the markers are drawn (layer by layer, then each layer's
+		 * markers in order), and the others show once the player zooms in far enough to part
+		 * them: put the labels that matter most first.
 		 *
 		 * @param label {@link #MAX_LABEL_LENGTH} UTF-16 units at most once spaces at the ends are
 		 *     taken off, or empty for none

@@ -35,6 +35,8 @@ public final class AddonOverlay {
 	/** A marker's dark outline, a pixel each side of its dot, as the radar's mob dots have. */
 	private static final int OUTLINE = 0xE0101418;
 	private static final int PLATE = 0x90000000;
+	/** The grid labels are kept apart on, in GUI pixels: coarse enough to be cheap, fine enough that near labels both show. */
+	private static final int LABEL_CELL = 4;
 	/** The rim either side of a line's colour, in GUI pixels, as the player's drawings have. */
 	private static final float RIM = 1;
 	/** The corners of a line's joint: an octagon round each point. */
@@ -77,6 +79,13 @@ public final class AddonOverlay {
 	private float[] sx = new float[64];
 	private float[] sy = new float[64];
 	private final float[] polygon = new float[16];
+	/** Where this frame's labels are, in cells of {@link #LABEL_CELL} GUI pixels over the view: a cell holds the frame's stamp once taken. */
+	private int[] taken = new int[0];
+	private int takenX;
+	private int takenY;
+	private int takenColumns;
+	private int takenRows;
+	private int stamp;
 	private @Nullable Circle circle;
 	private float z;
 	// The view being drawn: what screen(u, v) needs, worked out once a draw.
@@ -223,6 +232,7 @@ public final class AddonOverlay {
 		MapCanvas.of(graphics).rectsKept(MarkerAtlas.texture(), Sampling.CLAMP_CRISP, quads.xyz, quads.uvs, quads.colors, quads.count);
 		if (labelCount > 0) {
 			Font font = Minecraft.getInstance().font;
+			this.clearTaken(view);
 			for (int k = 0; k < labelCount; k++) {
 				this.label(graphics, font, this.labels[k], this.labelAt[k * 2], this.labelAt[k * 2 + 1]);
 				this.labels[k] = null;
@@ -290,15 +300,65 @@ public final class AddonOverlay {
 		quads.colors[q] = argb;
 	}
 
-	/** A marker's label under it, white on the dark plate waypoint names have on the map. */
+	/**
+	 * A marker's label under it, white on the dark plate waypoint names have on the map, unless
+	 * its plate would overlap one already drawn this frame: where markers crowd, the first label
+	 * shows and the others wait for the player to zoom in. That also keeps a crowd from costing a
+	 * label each, as the game's text drawing allocates for every one.
+	 */
 	private void label(GuiGraphicsExtractor graphics, Font font, Marker marker, float x, float y) {
 		String text = marker.label();
 		int w = font.width(text);
+		int left = Math.round(x - w / 2.0F);
+		int top = Math.round(y + marker.size() / 2.0F + 3);
+		if (!this.take(left - 2, top - 1, left + w + 2, top + 9)) {
+			return;
+		}
 		graphics.pose().pushMatrix();
-		graphics.pose().translate(Math.round(x - w / 2.0F), Math.round(y + marker.size() / 2.0F + 3));
+		graphics.pose().translate(left, top);
 		graphics.fill(-2, -1, w + 2, 9, PLATE);
 		graphics.text(font, text, 0, 0, 0xFFFFFFFF, false);
 		graphics.pose().popMatrix();
+	}
+
+	/** Forgets every label's place, for a new frame: the grid is kept, and only its stamp moves on. */
+	private void clearTaken(MapViewport.View view) {
+		this.takenX = view.x();
+		this.takenY = view.y();
+		this.takenColumns = view.width() / LABEL_CELL + 2;
+		int rows = view.height() / LABEL_CELL + 2;
+		if (this.taken.length < this.takenColumns * rows) {
+			this.taken = new int[this.takenColumns * rows];
+		}
+		this.takenRows = rows;
+		this.stamp++;
+		if (this.stamp == 0) {
+			java.util.Arrays.fill(this.taken, 0);
+			this.stamp = 1;
+		}
+	}
+
+	/** Whether the box x0..x1, y0..y1 is clear of the labels drawn so far this frame, and if so takes it. */
+	private boolean take(int x0, int y0, int x1, int y1) {
+		int c0 = Math.max(0, Math.floorDiv(x0 - this.takenX, LABEL_CELL));
+		int c1 = Math.min(this.takenColumns - 1, Math.floorDiv(x1 - 1 - this.takenX, LABEL_CELL));
+		int r0 = Math.max(0, Math.floorDiv(y0 - this.takenY, LABEL_CELL));
+		int r1 = Math.min(this.takenRows - 1, Math.floorDiv(y1 - 1 - this.takenY, LABEL_CELL));
+		if (c0 > c1 || r0 > r1) {
+			// Wholly outside the view: the scissor would cut it all anyway.
+			return false;
+		}
+		for (int r = r0; r <= r1; r++) {
+			for (int c = c0; c <= c1; c++) {
+				if (this.taken[r * this.takenColumns + c] == this.stamp) {
+					return false;
+				}
+			}
+		}
+		for (int r = r0; r <= r1; r++) {
+			java.util.Arrays.fill(this.taken, r * this.takenColumns + c0, r * this.takenColumns + c1 + 1, this.stamp);
+		}
+		return true;
 	}
 
 	/**

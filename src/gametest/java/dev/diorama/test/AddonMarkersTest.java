@@ -116,7 +116,7 @@ final class AddonMarkersTest {
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		//? if >=26.1 && fabric {
 		// First, where master measures the same: the frames with no addon layer.
-		long[] none = MapAllocProbe.none(context);
+		long[] none = MapAllocProbe.none(context, world);
 		//?}
 		List<String> wrong = new ArrayList<>();
 		Recorder recorder = new Recorder();
@@ -663,11 +663,15 @@ final class AddonMarkersTest {
 				});
 			}
 		});
-		MapLayer layer = context.computeOnClient(mc -> api().openLayer("alloc"));
 		List<String> table = new ArrayList<>();
 		table.add(String.format(java.util.Locale.ROOT, "%-34s %10s %10s", "layer", "minimap", "full map"));
-		table.add(String.format(java.util.Locale.ROOT, "%-34s %10d %10d", "none", none[0], none[1]));
+		table.add(String.format(java.util.Locale.ROOT, "%-34s %10d %10d", "none, no mobs (as on master)", none[0], none[1]));
+		MapLayer[] layers = new MapLayer[1];
 		try (WorldPause paused = WorldPause.pause(context)) {
+			// The same scene as the rows under it: the probe pig and the mobs about.
+			table.add(row(context, "none"));
+			MapLayer layer = context.computeOnClient(mc -> api().openLayer("alloc"));
+			layers[0] = layer;
 			for (int count : new int[] {100, 1000}) {
 				long[] step = {0};
 				context.runOnClient(mc -> feed = () -> layer.replace(rings(scene, count, step[0]++, false)));
@@ -683,7 +687,9 @@ final class AddonMarkersTest {
 		} finally {
 			context.runOnClient(mc -> {
 				feed = null;
-				layer.close();
+				if (layers[0] != null) {
+					layers[0].close();
+				}
 				AddonOverlay.probe = recorder;
 			});
 		}
@@ -720,7 +726,7 @@ final class AddonMarkersTest {
 		});
 		table.add(String.format(java.util.Locale.ROOT, "one replace of 1000 dots: the addon builds them in %d bytes, %.1f µs; replace() takes them in %d bytes, %.2f µs",
 			replace[0], replace[1] / 1000.0, replace[2], replace[3] / 1000.0));
-		Diorama.LOGGER.info("addon-api alloc: bytes a frame (medians of 300 frames, world paused):\n{}", String.join("\n", table));
+		Diorama.LOGGER.info("addon-api alloc: bytes a frame (medians of 200 frames, world paused):\n{}", String.join("\n", table));
 		if (replace[2] != 0) {
 			wrong.add("replace() allocated " + replace[2] + " bytes taking 1,000 markers");
 		}
@@ -731,11 +737,11 @@ final class AddonMarkersTest {
 		context.setScreen(() -> null);
 		context.waitTicks(10);
 		AllocProbe.measure(context, "warm-up, " + what, 100);
-		long minimap = AllocProbe.measure(context, what, 300);
+		long minimap = AllocProbe.measure(context, what, 200);
 		openMap(context);
 		context.waitTicks(10);
 		MapAllocProbe.measure(context, "warm-up, " + what, 100);
-		long map = MapAllocProbe.measure(context, what, 300);
+		long map = MapAllocProbe.measure(context, what, 200);
 		context.setScreen(() -> null);
 		return String.format(java.util.Locale.ROOT, "%-34s %10d %10d", what, minimap, map);
 	}

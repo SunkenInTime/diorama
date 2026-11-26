@@ -5,6 +5,7 @@ import dev.diorama.Diorama;
 import dev.diorama.MapScreen;
 import java.lang.management.ManagementFactory;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
+import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 
 /**
@@ -82,9 +83,12 @@ final class MapAllocProbe {
 
 	/**
 	 * The minimap and the full map with no addon layer open: bytes a frame, medians, minimap
-	 * first. The map is settled and the world paused while it counts.
+	 * first. The map is settled and the world paused while it counts, with every mob and dropped
+	 * item gone first, so that a run on master and one on a branch draw the same frames: the
+	 * radar's icons are most of what changes from one run to the next.
 	 */
-	static long[] none(ClientGameTestContext context) {
+	static long[] none(ClientGameTestContext context, TestSingleplayerContext world) {
+		world.getServer().runCommand("kill @e[type=!player]");
 		context.runOnClient(mc -> {
 			AllocProbe.register();
 			register();
@@ -92,6 +96,8 @@ final class MapAllocProbe {
 		context.setScreen(() -> null);
 		DioramaClientTest.settle(context, 20);
 		try (WorldPause paused = WorldPause.pause(context)) {
+			world.getServer().runCommand("kill @e[type=!player]");
+			context.waitTicks(5);
 			AllocProbe.measure(context, "warm-up, no layer", 150);
 			long minimap = AllocProbe.measure(context, "no layer", 300);
 			context.setScreen(MapScreen::new);
