@@ -47,9 +47,24 @@ public final class Circle {
 		}
 	}
 
+	/**
+	 * The last circle {@link #in} made. A round minimap asks for its circle about eight times a
+	 * frame, the same one frame after frame until the minimap moves or changes size, so it and its
+	 * disc are made once.
+	 */
+	private static @Nullable Circle last;
+
 	/** The circle filling a square view. */
 	public static Circle in(MapViewport.View view) {
-		return new Circle(view.x() + view.width() / 2.0F, view.y() + view.height() / 2.0F, Math.min(view.width(), view.height()) / 2.0F);
+		float cx = view.x() + view.width() / 2.0F;
+		float cy = view.y() + view.height() / 2.0F;
+		float r = Math.min(view.width(), view.height()) / 2.0F;
+		Circle circle = last;
+		if (circle == null || circle.cx != cx || circle.cy != cy || circle.r != r) {
+			circle = new Circle(cx, cy, r);
+			last = circle;
+		}
+		return circle;
 	}
 
 	public boolean contains(float x, float y) {
