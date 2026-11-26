@@ -85,12 +85,14 @@ final class FogMaskBuildTest {
 	 * the first build needs: under it, something new that allocated 100 KB every build would pass.
 	 */
 	private static final long MOST_TILT_MINIMAP_MEDIAN = 8 * 1024;
-	/** Blocks "tilt changed, redrawn, minimap, flying" flies, centred on the spawn. */
-	private static final int REDRAWN_FLIGHT = 320;
-	/** Blocks past the player the minimap shows, and more: what the redraw must have reached around the flight. */
-	private static final int MINIMAP_REACH = 64;
-	/** Ticks the redraw from the save after the tilt change may take under the flight. */
-	private static final int REDRAW_TICKS = 6000;
+	/**
+	 * Ticks the redraw from the save after the tilt change may go without drawing a chunk. It draws
+	 * hundreds a minute; the time it takes in all is up to the VM: 2900 to more than 6000 ticks on
+	 * NeoForge on a default boat VM.
+	 */
+	private static final int REDRAW_STALLED_TICKS = 2400;
+	/** Ticks the redraw may take in all, however steadily it goes. */
+	private static final int REDRAW_TICKS = 18000;
 	private static final int LARGE_WIDTH = 5120;
 	private static final int LARGE_HEIGHT = 1440;
 	/** The tiles a build read when the lookup table dropped every key: the large view must read more, or it tests nothing. */
@@ -357,8 +359,8 @@ final class FogMaskBuildTest {
 			if (context.computeOnClient(mc -> MapSession.get().savedChunks() == null)) {
 				throw new AssertionError("Nothing draws the map again from the save after its tilt changed (no saved-chunk import running), so \"tilt changed, redrawn\" would measure a map that was never redrawn");
 			}
-			waitForRedraw(context, world, x - REDRAWN_FLIGHT / 2, x + REDRAWN_FLIGHT / 2, z);
-			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - REDRAWN_FLIGHT / 2 + tick * ELYTRA, FLY_Y, z});
+			waitForRedraw(context);
+			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - 160 + tick * ELYTRA, FLY_Y, z});
 			context.takeScreenshot("fog-mask-tilt-changed-minimap");
 		} finally {
 			setPitch(context, pitch);
@@ -367,53 +369,38 @@ final class FogMaskBuildTest {
 	}
 
 	/**
-	 * Waits for the map to be drawn again after the tilt changed under the ground the part after
-	 * flies over, from {@code fromX} to {@code toX} along {@code z} and the minimap's view around it:
-	 * each chunk there drawn from the save, or loaded on the client, which bakes it itself and never
-	 * draws it from the save. The save is drawn nearest the player first, so that's done long before
-	 * the far land the flights east made, the last of which took more than 6000 ticks on a slow VM
-	 * with NeoForge. Saved first, so every chunk there is in the save to be drawn.
+	 * Waits for the map to be drawn again from the save after the tilt changed: everything the
+	 * player went over, thousands of chunks, nearest first, beside the baker. How long that takes is
+	 * up to the VM, so the wait goes on as long as chunks are being drawn, and fails if none is for
+	 * {@link #REDRAW_STALLED_TICKS}, or after {@link #REDRAW_TICKS} in all.
 	 */
-	private static void waitForRedraw(ClientGameTestContext context, TestSingleplayerContext world, int fromX, int toX, int z) {
-		world.getServer().runOnServer(server -> server.saveEverything(true, true, true));
-		context.runOnClient(mc -> {
-			SavedChunkImport chunks = MapSession.get().savedChunks();
-			if (chunks != null) {
-				chunks.rescanSoon();
-			}
-		});
-		int cx0 = fromX - MINIMAP_REACH >> 4;
-		int cx1 = toX + MINIMAP_REACH >> 4;
-		int cz0 = z - MINIMAP_REACH >> 4;
-		int cz1 = z + MINIMAP_REACH >> 4;
+	private static void waitForRedraw(ClientGameTestContext context) {
+		int last = Integer.MIN_VALUE;
+		int drawnAt = 0;
 		for (int waited = 0; ; waited += 20) {
-			// {chunks under the flight not drawn yet, or -1 with no import; the import's progress}
+			// {chunks left, or -1 with no import running; what to say about it}
 			Object[] state = context.computeOnClient(mc -> {
 				SavedChunkImport chunks = MapSession.get().savedChunks();
 				if (chunks == null) {
 					return new Object[] {-1, "no saved-chunk import running"};
 				}
-				int undrawn = 0;
-				for (int cx = cx0; cx <= cx1; cx++) {
-					for (int cz = cz0; cz <= cz1; cz++) {
-						if (!chunks.drewChunk(cx, cz) && !mc.level.getChunkSource().hasChunk(cx, cz)) {
-							undrawn++;
-						}
-					}
-				}
-				return new Object[] {undrawn, chunks.chunksLeft() + " chunks of the save left, " + chunks.percentDone() + "% done"};
+				return new Object[] {chunks.idle() ? 0 : Math.max(1, chunks.chunksLeft()), chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done"};
 			});
-			int undrawn = (int) state[0];
-			if (undrawn == 0) {
-				Diorama.LOGGER.info("fog-mask | drawn again under the flight {} ticks after the full map closed ({})", waited, state[1]);
+			int left = (int) state[0];
+			if (left == 0) {
+				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
 				return;
 			}
-			String left = undrawn < 0 ? (String) state[1] : undrawn + " chunks under the flight not drawn yet, " + state[1];
-			if (waited % 400 == 0) {
-				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, left, MemoryLog.line());
+			if (left != last) {
+				last = left;
+				drawnAt = waited;
 			}
-			if (waited >= REDRAW_TICKS) {
-				throw new AssertionError("The map wasn't drawn again from the save under the flight within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
+			if (waited % 400 == 0) {
+				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, state[1], MemoryLog.line());
+			}
+			if (left < 0 || waited - drawnAt >= REDRAW_STALLED_TICKS || waited >= REDRAW_TICKS) {
+				throw new AssertionError("The map wasn't drawn again from the save after the tilt changed (" + state[1] + ", " + waited + " ticks waited, the last "
+					+ (waited - drawnAt) + " with no chunk drawn), so \"tilt changed, redrawn\" can't run");
 			}
 			context.waitTicks(20);
 		}
