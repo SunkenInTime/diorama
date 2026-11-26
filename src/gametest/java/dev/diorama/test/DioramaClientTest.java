@@ -466,6 +466,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
+		if (tests.contains("addons-settings")) {
+			// After addon-api's checks, which need the test addon ticked.
+			AddonsSettingsTest.switchedOffForRestart(context);
+		}
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
 		}

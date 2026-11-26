@@ -236,6 +236,7 @@ public final class Settings {
 	 * minimap (the Addons tab). Every other addon may. What an addon hides is never saved; only
 	 * this choice is.
 	 */
+	@JsonAdapter(ModIdsAdapter.class)
 	public java.util.Set<String> addonHidesOff = new java.util.TreeSet<>();
 	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
@@ -684,6 +685,40 @@ public final class Settings {
 				case "LARGE" -> 176;
 				default -> 128;
 			};
+		}
+	}
+
+	/**
+	 * Reads the mod IDs of the addons switched off, leaving out anything in the list that isn't a
+	 * string: a hand-edited entry gone wrong costs that entry, not the rest of the file.
+	 */
+	public static final class ModIdsAdapter extends TypeAdapter<java.util.Set<String>> {
+		@Override
+		public void write(JsonWriter out, java.util.Set<String> value) throws IOException {
+			out.beginArray();
+			for (String modId : value) {
+				out.value(modId);
+			}
+			out.endArray();
+		}
+
+		@Override
+		public java.util.Set<String> read(JsonReader in) throws IOException {
+			java.util.Set<String> modIds = new java.util.TreeSet<>();
+			if (in.peek() != JsonToken.BEGIN_ARRAY) {
+				in.skipValue();
+				return modIds;
+			}
+			in.beginArray();
+			while (in.hasNext()) {
+				if (in.peek() == JsonToken.STRING) {
+					modIds.add(in.nextString());
+				} else {
+					in.skipValue();
+				}
+			}
+			in.endArray();
+			return modIds;
 		}
 	}
 

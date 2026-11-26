@@ -68,8 +68,12 @@ public final class SettingsScreen extends Screen {
 	/** GPU baking's button, which says so if the check turns it off while the screen is open. */
 	private @Nullable Button gpuBaking;
 	private boolean gpuFailedShown;
-	/** What addons hid, or whether one ran, when the Addons tab and the minimap's note were made. */
+	/** What addons hid, or whether one ran, when the Addons tab and the minimap's note last said so. */
 	private int addonChanges;
+	/** The mods the Addons tab has a row for, by mod ID. */
+	private List<String> addonIds = List.of();
+	private @Nullable SettingsTab minimapTab;
+	private @Nullable AddonsTab addonsTab;
 	/** The Addons tab's page, kept when the screen is made again. */
 	private int addonPage;
 
@@ -125,7 +129,9 @@ public final class SettingsScreen extends Screen {
 		minimap.lastThreeSideBySide();
 		this.addonChanges = HudHides.changes();
 		List<Addons.Listed> addons = Addons.listed();
+		this.addonIds = addons.stream().map(Addons.Listed::modId).toList();
 		minimap.addonNote(addons);
+		this.minimapTab = minimap;
 
 		SettingsTab radar = new SettingsTab("diorama.settings.radar");
 		Boolean radarSet = ServerRules.radarAllowed() ? null : false;
@@ -239,8 +245,9 @@ public final class SettingsScreen extends Screen {
 
 		// Only with an addon installed, so the screen is as it was without one.
 		List<Tab> tabs = new ArrayList<>(List.of(minimap, radar, overlays, waypoints, look));
-		if (!addons.isEmpty()) {
-			tabs.add(new AddonsTab(addons));
+		this.addonsTab = addons.isEmpty() ? null : new AddonsTab(addons);
+		if (this.addonsTab != null) {
+			tabs.add(this.addonsTab);
 		}
 		Tab[] all = tabs.toArray(new Tab[0]);
 
@@ -277,15 +284,39 @@ public final class SettingsScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
-		// An addon hid or showed something, failed, or the player switched one: the Addons tab and
-		// the minimap's note say so. Not in the middle of dragging a slider.
-		if (HudHides.changes() != this.addonChanges && !this.isDragging()) {
-			this.rebuildWidgets();
+		// An addon hid or showed something, failed, or the player switched one: the Addons tab's
+		// lines and the minimap's note say so, changed where they are, so the widget the player is
+		// on keeps the focus.
+		if (HudHides.changes() != this.addonChanges) {
+			List<Addons.Listed> addons = Addons.listed();
+			if (addons.stream().map(Addons.Listed::modId).toList().equals(this.addonIds)) {
+				this.addonChanges = HudHides.changes();
+				if (this.minimapTab != null) {
+					this.minimapTab.showAddonNote(addons);
+					this.layOutIfShown(this.minimapTab);
+				}
+				if (this.addonsTab != null) {
+					this.addonsTab.update(addons);
+					this.layOutIfShown(this.addonsTab);
+				}
+			} else if (!this.isDragging()) {
+				// Other rows: only when the addons started after the screen was made, which is the
+				// first tick at the title screen.
+				this.rebuildWidgets();
+			}
 		}
 		boolean failed = dev.diorama.render.gpu.GpuBakeCheck.failed();
 		if (this.gpuBaking != null && failed != this.gpuFailedShown) {
 			this.gpuFailedShown = failed;
 			this.gpuBaking.setMessage(label(Component.translatable("diorama.settings.gpu_baking"), gpuBakingValue(Settings.get().gpuBaking ? 1 : 0)));
+		}
+	}
+
+	/** Lays the tab out again where it is, if it's the one showing; the others are laid out when picked. */
+	private void layOutIfShown(GridLayoutTab tab) {
+		ScreenRectangle area = tab instanceof SettingsTab settings ? settings.area : tab instanceof AddonsTab addons ? addons.area : null;
+		if (this.tabManager.getCurrentTab() == tab && area != null) {
+			tab.doLayout(area);
 		}
 	}
 
@@ -312,6 +343,9 @@ public final class SettingsScreen extends Screen {
 		private final java.util.Set<AbstractWidget> headings = new java.util.HashSet<>();
 		/** Whether the tab says which of its settings the server sets. */
 		private boolean serverNoted;
+		/** The line saying which addon hides the minimap: there with an addon installed, shown while one does. */
+		private @Nullable StringWidget addonNote;
+		private @Nullable ScreenRectangle area;
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
@@ -399,10 +433,24 @@ public final class SettingsScreen extends Screen {
 
 		/**
 		 * While an addon hides the minimap, the line under the checkboxes says which, and where to
-		 * switch it off, as the server's note does for what a server sets.
+		 * switch it off, as the server's note does for what a server sets. It takes the server's
+		 * slot, and the server's note wins it: a tab has room for one line there, the greyed-out
+		 * checkbox has nothing else saying why, and the Addons tab says which addon hides what.
 		 */
 		void addonNote(List<Addons.Listed> addons) {
-			if (!HudHides.minimapHidden()) {
+			if (addons.isEmpty() || this.serverNoted) {
+				return;
+			}
+			this.addonNote = new StringWidget(Component.empty(), SettingsScreen.this.font);
+			this.headings.add(this.addonNote);
+			// First of the wide ones, so it's the line under the checkboxes.
+			this.wide.add(0, this.addonNote);
+			this.showAddonNote(addons);
+		}
+
+		/** Shows the addon line while an addon hides the minimap, naming it, and hides it otherwise. */
+		void showAddonNote(List<Addons.Listed> addons) {
+			if (this.addonNote == null) {
 				return;
 			}
 			List<String> hiding = addons.stream().filter(one -> one.running() && one.allowed() && one.minimap()).map(Addons.Listed::name).toList();
@@ -410,10 +458,8 @@ public final class SettingsScreen extends Screen {
 			if (hiding.size() != 1 || SettingsScreen.this.font.width(note) > CONTENT) {
 				note = Component.translatable("diorama.settings.addons.minimap_hidden_any");
 			}
-			StringWidget line = new StringWidget(note.copy().withStyle(net.minecraft.ChatFormatting.GRAY), SettingsScreen.this.font);
-			this.headings.add(line);
-			// First of the wide ones, so it's the line under the checkboxes.
-			this.wide.add(0, line);
+			this.addonNote.setMessage(note.copy().withStyle(net.minecraft.ChatFormatting.GRAY));
+			this.addonNote.visible = HudHides.minimapHidden();
 		}
 
 		@Override
@@ -424,13 +470,16 @@ public final class SettingsScreen extends Screen {
 
 		@Override
 		public void doLayout(ScreenRectangle area) {
+			this.area = area;
 			int content = Math.min(CONTENT, area.width() - 10);
 			int column = (content - COLUMN_GAP) / 2;
 			int left = area.left() + (area.width() - content) / 2;
 			int rows = this.wide.size() - this.pairedWithNext.size() - this.tripled.size() * 2 - this.headings.size();
 			int checkRows = (this.checkboxes.size() + 1) / 2;
+			// The addon line takes no room while it isn't shown.
+			int headings = this.headings.size() - (this.addonNote != null && !this.addonNote.visible ? 1 : 0);
 			// On a small window, closer together rather than into the buttons below.
-			boolean tight = 22 + checkRows * 22 + rows * 24 + this.headings.size() * HEADING > area.height();
+			boolean tight = 22 + checkRows * 22 + rows * 24 + headings * HEADING > area.height();
 			int rowStep = tight ? 22 : 24;
 			int y = area.top() + (tight ? 6 : 12);
 			for (int i = 0; i < this.checkboxes.size(); i++) {
@@ -442,6 +491,9 @@ public final class SettingsScreen extends Screen {
 			for (int i = 0; i < this.wide.size(); i++) {
 				AbstractWidget widget = this.wide.get(i);
 				if (this.headings.contains(widget)) {
+					if (!widget.visible) {
+						continue;
+					}
 					widget.setPosition(left, y);
 					widget.setWidth(content);
 					y += HEADING;
@@ -477,7 +529,8 @@ public final class SettingsScreen extends Screen {
 	 * The mods using Diorama's API, one to a row: a tick by the mod's name for whether it may hide
 	 * parts of Diorama, and what it's doing on the line under it, as vanilla's pack list puts a
 	 * description under each name. Only there with one installed. A page at a time when there are
-	 * more than fit.
+	 * more than fit. The lines change in place as addons do things ({@link #update}), so the row
+	 * the player is on keeps the focus.
 	 */
 	private final class AddonsTab extends GridLayoutTab {
 		/** Between the checkbox and the line under it, and under that line. */
@@ -514,6 +567,13 @@ public final class SettingsScreen extends Screen {
 		}
 
 		/** What the addon is doing, in a few words: stopped, hiding something (or kept from it), or just running. */
+		/** The same mods as the rows, in the same order, as they are now: each row's line says what its mod does now. */
+		void update(List<Addons.Listed> addons) {
+			for (int i = 0; i < this.states.size(); i++) {
+				this.states.get(i).setMessage(Component.translatable(state(addons.get(i))).withStyle(net.minecraft.ChatFormatting.GRAY));
+			}
+		}
+
 		private static String state(Addons.Listed addon) {
 			if (!addon.running()) {
 				return "diorama.settings.addons.stopped";

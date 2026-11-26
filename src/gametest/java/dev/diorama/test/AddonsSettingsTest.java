@@ -41,11 +41,14 @@ import org.jspecify.annotations.Nullable;
  * tab says which addon hides the minimap; unticking it with a real click brings the minimap back
  * with the handle still open, writes the mod ID to config.json, and ticking it hides the minimap
  * again. The rows follow what addons hide while the screen is open, and a small window turns the
- * list into pages. It ends with the good addon switched off, for {@code addons-restart}: run that
- * next on the same warm VM with DIORAMA_KEEP_CONFIG=1, and the game starts again with that file.
+ * list into pages. It leaves the good addon ticked; at the end of the run
+ * ({@link #switchedOffForRestart}) the good and broken addons are unticked, for
+ * {@code addons-restart}: run that next on the same warm VM with DIORAMA_KEEP_CONFIG=1, and the
+ * game starts again with that file.
  */
 final class AddonsSettingsTest {
 	private static final String GOOD = "diorama_test_addon";
+	private static final String BROKEN = GOOD + "_broken";
 	/** Each test mod's name, as its fabric.mod.json, mods.toml and neoforge.mods.toml all give it. */
 	private static final Map<String, String> NAMES = new LinkedHashMap<>();
 
@@ -66,6 +69,7 @@ final class AddonsSettingsTest {
 		// Long enough for the commands' chat lines to fade.
 		context.waitTicks(220);
 		Path config = config(context);
+		badEntries(context, config);
 		if (!context.computeOnClient(mc -> TestAddon.fromReady() != null && TestAddon.fromReady().isOpen() && HudHides.minimapHidden()
 			&& Settings.get().addonHidesOff.isEmpty())) {
 			throw new AssertionError("Before the Addons tab: the test addon's handle from onReady isn't hiding the minimap, or an addon is switched off already");
@@ -129,6 +133,7 @@ final class AddonsSettingsTest {
 			throw new AssertionError("Ticking the test addon again didn't hide the minimap with its handle");
 		}
 		savedOff(config, Set.of(), "after ticking the test addon again");
+		keyboardTwice(context);
 		context.setScreen(() -> null);
 		context.waitTicks(3);
 		context.takeScreenshot("addons-settings-07-hidden-again");
@@ -151,29 +156,115 @@ final class AddonsSettingsTest {
 
 		smallWindow(context);
 
-		// Left switched off, for addons-restart to find in config.json.
-		openSettings(context, 5);
-		clickTick(context, NAMES.get(GOOD));
-		context.setScreen(() -> null);
-		savedOff(config, Set.of(GOOD), "at the end, for addons-restart");
-		Diorama.LOGGER.info("addons-settings: listed, switched off and on with real clicks, saved; left off for addons-restart");
+		// Left as it was found, ticked, for the scenarios after it (addon-api's after leaving the
+		// world); switchedOffForRestart unticks it at the end of the run.
+		if (!context.computeOnClient(mc -> Settings.get().addonHidesOff.isEmpty() && HudHides.minimapHidden())) {
+			throw new AssertionError("addons-settings didn't leave the test addon ticked and hiding the minimap");
+		}
+		savedOff(config, Set.of(), "at the end of addons-settings");
+		Diorama.LOGGER.info("addons-settings: listed, switched off and on with real clicks and keys, saved; left ticked");
 	}
 
 	/**
-	 * The game started again with config.json from the end of {@link #run}, the test addon
-	 * switched off: at the title screen its handle from onReady is open and hides nothing; in the
-	 * world the minimap is drawn and the tab shows it unticked; ticking it hides the minimap.
+	 * Last in a run with {@code addons-settings}, after every other scenario: unticks the test
+	 * addon and the broken one with real clicks, for {@code addons-restart} to find in
+	 * config.json. The broken one fails in onReady after taking a handle, so the restart has an
+	 * addon fail while switched off.
+	 */
+	static void switchedOffForRestart(ClientGameTestContext context) {
+		openSettings(context, 5);
+		clickTick(context, NAMES.get(GOOD));
+		clickTick(context, NAMES.get(BROKEN));
+		context.setScreen(() -> null);
+		savedOff(config(context), Set.of(GOOD, BROKEN), "at the end of the run, for addons-restart");
+		Diorama.LOGGER.info("addons-settings: left {} and {} switched off for addons-restart", GOOD, BROKEN);
+	}
+
+	/**
+	 * config.json with entries in addonHidesOff that aren't mod IDs (an object, a list, a number):
+	 * they're dropped, and the rest of the file, the good entry and the other settings, is kept.
+	 */
+	private static void badEntries(ClientGameTestContext context, Path config) {
+		String before = context.computeOnClient(mc -> {
+			if (!Files.exists(config)) {
+				Settings.get().save();
+			}
+			try {
+				return Files.readString(config, StandardCharsets.UTF_8);
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			}
+		});
+		com.google.gson.JsonObject edited = JsonParser.parseString(before).getAsJsonObject();
+		JsonArray off = new JsonArray();
+		off.add(GOOD);
+		off.add(new com.google.gson.JsonObject());
+		JsonArray nested = new JsonArray();
+		nested.add("diorama_test_addon_broken");
+		off.add(nested);
+		off.add(5);
+		edited.add("addonHidesOff", off);
+		edited.addProperty("teleportCommand", "tp diorama-kept");
+		try {
+			Files.writeString(config, edited.toString(), StandardCharsets.UTF_8);
+			String read = context.computeOnClient(mc -> {
+				Settings s = Settings.reload();
+				return s.addonHidesOff + " " + s.teleportCommand;
+			});
+			if (!read.equals("[" + GOOD + "] tp diorama-kept")) {
+				throw new AssertionError("config.json with bad entries in addonHidesOff read as switched off and teleport command: " + read
+					+ " (expected [" + GOOD + "] tp diorama-kept)");
+			}
+			Files.writeString(config, before, StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
+		context.runOnClient(mc -> Settings.reload());
+		Diorama.LOGGER.info("addons-settings: bad entries in addonHidesOff dropped, the rest of config.json kept");
+	}
+
+	/**
+	 * The test addon's checkbox toggled twice in a row from the keyboard: Space unticks it and the
+	 * row's line changes, and the checkbox keeps the focus, so Space again ticks it.
+	 */
+	private static void keyboardTwice(ClientGameTestContext context) {
+		openSettings(context, 5);
+		context.runOnClient(mc -> mc.gui.screen().setFocused(tick(mc, NAMES.get(GOOD))));
+		context.getInput().pressKey(InputConstants.KEY_SPACE);
+		context.waitTicks(5);
+		String first = context.computeOnClient(mc -> "switched off " + Settings.get().addonHidesOff + ", focus on the checkbox " + (mc.gui.screen().getFocused() == tick(mc, NAMES.get(GOOD))));
+		expectStates(context, "after Space on the test addon's checkbox", "diorama.settings.addons.wants.minimap");
+		context.getInput().pressKey(InputConstants.KEY_SPACE);
+		context.waitTicks(5);
+		String second = context.computeOnClient(mc -> "switched off " + Settings.get().addonHidesOff + ", minimap hidden " + HudHides.minimapHidden());
+		if (!first.equals("switched off [" + GOOD + "], focus on the checkbox true") || !second.equals("switched off [], minimap hidden true")) {
+			throw new AssertionError("Space twice on the test addon's checkbox: after the first, " + first + "; after the second, " + second);
+		}
+		expectStates(context, "after Space twice", "diorama.settings.addons.hiding.minimap");
+	}
+
+	/**
+	 * The game started again with config.json from the end of a run with {@code addons-settings}
+	 * ({@link #switchedOffForRestart}), the test addon and the broken one switched off: at the title
+	 * screen the test addon's handle from onReady is open and hides nothing, and the broken one,
+	 * which took a handle in onReady and then failed, is stopped and left nothing counted. In the
+	 * world the minimap is drawn and the tab shows them unticked; ticking the test addon hides the
+	 * minimap, and closing its handle shows it again.
 	 */
 	static void restartTitleScreen(ClientGameTestContext context) {
 		context.waitFor(mc -> TestAddon.api() != null, 200);
 		Set<String> off = context.computeOnClient(mc -> new TreeSet<>(Settings.get().addonHidesOff));
-		if (!off.equals(Set.of(GOOD))) {
-			throw new AssertionError("The game started with addons switched off " + off + ", not [" + GOOD + "]: run addons-restart right after addons-settings, on the same warm VM, with DIORAMA_KEEP_CONFIG=1");
+		if (!off.equals(new TreeSet<>(Set.of(GOOD, BROKEN)))) {
+			throw new AssertionError("The game started with addons switched off " + off + ", not [" + GOOD + ", " + BROKEN + "]: run addons-restart right after addons-settings, on the same warm VM, with DIORAMA_KEEP_CONFIG=1");
 		}
 		if (!context.computeOnClient(mc -> TestAddon.fromReady().isOpen() && !HudHides.minimapHidden())) {
 			throw new AssertionError("After a restart with the test addon switched off, its handle from onReady hides the minimap, or is closed");
 		}
-		Diorama.LOGGER.info("addons-restart: started with {} switched off; its handle from onReady is open and hides nothing", GOOD);
+		String broken = context.computeOnClient(mc -> Addons.listed().stream().filter(one -> one.modId().equals(BROKEN)).findFirst().map(Object::toString).orElse("not listed"));
+		if (!broken.equals(new Addons.Listed(BROKEN, NAMES.get(BROKEN), false, false, false, false).toString())) {
+			throw new AssertionError("After a restart with the broken addon switched off, it's listed as " + broken + ", not stopped and switched off with nothing asked");
+		}
+		Diorama.LOGGER.info("addons-restart: started with {} and {} switched off; the handle from onReady is open and hides nothing, the broken one stopped", GOOD, BROKEN);
 	}
 
 	static void restartWorld(ClientGameTestContext context, TestSingleplayerContext world) {
@@ -201,8 +292,19 @@ final class AddonsSettingsTest {
 		if (context.computeOnClient(mc -> MinimapHud.shown() != null || !HudHides.minimapHidden())) {
 			throw new AssertionError("Ticking the test addon after a restart didn't hide the minimap");
 		}
-		savedOff(config(context), Set.of(), "after ticking it after the restart");
-		Diorama.LOGGER.info("addons-restart: the minimap showed, the tab had it unticked, ticking it hid the minimap");
+		// Ticking the broken one too counts nothing: it holds no handle since it failed.
+		openSettings(context, 5);
+		clickTick(context, NAMES.get(BROKEN));
+		context.setScreen(() -> null);
+		savedOff(config(context), Set.of(), "after ticking both after the restart");
+		// The test addon's handle was the only one counted: closed, the minimap is back.
+		context.runOnClient(mc -> TestAddon.fromReady().close());
+		context.waitTicks(3);
+		context.takeScreenshot("addons-restart-04-handle-closed");
+		if (context.computeOnClient(mc -> HudHides.minimapHidden() || MinimapHud.shown() == null)) {
+			throw new AssertionError("After a restart, with the broken addon failed while switched off, closing the test addon's only handle left the minimap hidden");
+		}
+		Diorama.LOGGER.info("addons-restart: the minimap showed, the tab had them unticked, ticking the test addon hid the minimap, closing its handle showed it");
 	}
 
 	/** The listing: all seven test mods by name, the good one running and hiding the minimap, the six failed ones stopped. */
@@ -265,13 +367,35 @@ final class AddonsSettingsTest {
 	private static void smallWindow(ClientGameTestContext context) {
 		context.getInput().resizeWindow(1280, 720);
 		context.waitTicks(10);
+		// The Minimap tab with the server's note too (a server sending cave-maps-allowed=false): one
+		// line for both, the server's, so no row runs into Done.
+		context.runOnClient(mc -> dev.diorama.ServerRules.onLocks(new dev.diorama.share.ServerLocks(false, false, true, Set.of())));
+		openSettings(context, 0);
+		context.getInput().setCursorPos(2, 2);
+		context.waitTicks(3);
+		context.takeScreenshot("addons-settings-09-small-minimap-server-note");
+		// Singleplayer: the lock is said to come from the modpack's file.
+		String serverNote = Component.translatable("diorama.settings.server_note_file").getString();
+		String addonNote = Component.translatable("diorama.settings.addons.minimap_hidden", NAMES.get(GOOD)).getString();
+		String notes = context.computeOnClient(mc -> "the server's note " + (shown(mc, serverNote) != null) + ", the addon's " + (shown(mc, addonNote) != null)
+			+ ", minimap hidden by addons " + HudHides.minimapHidden() + ", GUI " + mc.gui.screen().width + "x" + mc.gui.screen().height);
+		noOverlaps(context, "on the Minimap tab with " + notes);
+		if (!notes.equals("the server's note true, the addon's false, minimap hidden by addons true, GUI 427x240")) {
+			throw new AssertionError("The Minimap tab with cave maps locked and the minimap hidden by an addon: " + notes);
+		}
+		context.runOnClient(mc -> dev.diorama.ServerRules.onLocks(dev.diorama.share.ServerLocks.NONE));
+		context.setScreen(() -> null);
+
 		openSettings(context, 5);
 		List<Integer> pages = new ArrayList<>();
+		Map<String, Integer> seen = new LinkedHashMap<>();
 		for (int page = 1; page <= NAMES.size(); page++) {
 			context.getInput().setCursorPos(2, 2);
 			context.waitTicks(3);
-			context.takeScreenshot("addons-settings-09-small-page-" + page);
+			context.takeScreenshot("addons-settings-10-small-page-" + page);
 			pages.add(context.computeOnClient(mc -> rows(mc)));
+			context.computeOnClient(mc -> visible(mc).stream().filter(w -> w instanceof Checkbox).map(w -> w.getMessage().getString()).toList())
+				.forEach(name -> seen.merge(name, 1, Integer::sum));
 			noOverlaps(context, "on page " + page);
 			if (!context.computeOnClient(mc -> {
 				AbstractWidget next = shown(mc, ">");
@@ -281,8 +405,11 @@ final class AddonsSettingsTest {
 			}
 			DioramaClientTest.click(context, ">");
 		}
-		if (pages.size() < 2 || pages.stream().mapToInt(Integer::intValue).sum() != NAMES.size() || pages.contains(0)) {
-			throw new AssertionError("A small window's pages showed " + pages + " rows, of " + NAMES.size());
+		// Each addon on exactly one page.
+		Map<String, Integer> once = new LinkedHashMap<>();
+		NAMES.values().forEach(name -> once.put(name, 1));
+		if (pages.size() < 2 || pages.contains(0) || !new java.util.TreeMap<>(seen).equals(new java.util.TreeMap<>(once))) {
+			throw new AssertionError("A small window's pages showed " + pages + " rows, of " + NAMES.size() + "; times each was shown: " + seen);
 		}
 		context.setScreen(() -> null);
 		context.getInput().resizeWindow(1600, 900);
