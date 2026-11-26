@@ -244,7 +244,7 @@ public final class Pins {
 		int x = PinArt.centred(x0, x1, ink(font, text));
 		// Capitals and digits are 7 pixels tall from the top of the line.
 		int y = PinArt.centred(y0, y1, 7);
-		graphics.text(font, text, x, y, alpha(opacity) << 24 | (light ? PinArt.INK : 0xFFFFFF), !light);
+		ShownText.draw(graphics, font, text, x, y, alpha(opacity) << 24 | (light ? PinArt.INK : 0xFFFFFF), !light);
 	}
 
 	/**

@@ -4,13 +4,19 @@ import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
 
 /**
- * What addons hide of the HUD ({@link Hud#hide}), as one count of open handles per part. The HUD
- * reads a count each frame: one field read, nothing allocated. Only the client thread changes or
- * reads them.
+ * What addons hide of the HUD ({@link Hud#hide}), as one count of open handles per part, of the
+ * addons the player lets hide parts of Diorama. The HUD reads a count each frame: one field read,
+ * nothing allocated. The player's choice is folded in when it changes ({@link Addon#allow}), never
+ * per frame. Only the client thread changes or reads them.
  */
 public final class HudHides {
 	private static int minimap;
 	private static int worldWaypoints;
+	/**
+	 * Goes up whenever an addon is found, a handle opens or closes, the player switches an addon, or
+	 * one fails, so the settings screen knows to redraw its list.
+	 */
+	private static int changes;
 
 	private HudHides() {
 	}
@@ -25,11 +31,21 @@ public final class HudHides {
 		return worldWaypoints > 0;
 	}
 
+	/** A number that changes whenever the addons listed, what they hide or whether one runs does. */
+	public static int changes() {
+		return changes;
+	}
+
+	static void changed() {
+		changes++;
+	}
+
 	static int bit(Hud.Part part) {
 		return 1 << part.ordinal();
 	}
 
-	private static void count(int parts, int by) {
+	static void count(int parts, int by) {
+		changes++;
 		if ((parts & bit(Hud.Part.MINIMAP)) != 0) {
 			minimap += by;
 		}
@@ -44,12 +60,20 @@ public final class HudHides {
 		private final int parts;
 		private boolean open;
 
-		/** Open, counted, and kept by its owner, which closes it if it fails. */
+		/**
+		 * Open and kept by its owner, which closes it if it fails; counted while the player lets the
+		 * owner hide parts of Diorama.
+		 */
 		Hold(Addon owner, int parts) {
 			this.owner = owner;
 			this.parts = parts;
 			this.open = true;
-			count(parts, 1);
+			if (owner.allowed()) {
+				count(parts, 1);
+			} else {
+				// Hides nothing, but the settings screen says what it asks for.
+				changed();
+			}
 		}
 
 		/** One that never held anything, for an addon that was switched off. */
@@ -73,13 +97,21 @@ public final class HudHides {
 			return this.open;
 		}
 
+		int parts() {
+			return this.parts;
+		}
+
 		/** Stops counting it. True if it was still open. */
 		boolean release() {
 			if (!this.open) {
 				return false;
 			}
 			this.open = false;
-			count(this.parts, -1);
+			if (this.owner.allowed()) {
+				count(this.parts, -1);
+			} else {
+				changed();
+			}
 			return true;
 		}
 	}

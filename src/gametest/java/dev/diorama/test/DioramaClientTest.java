@@ -88,12 +88,15 @@ public class DioramaClientTest implements FabricClientGameTest {
 			// The showcase leaves the player in the Nether, spectating, on peaceful, with radar off.
 			throw new AssertionError("Run the showcase on its own: DIORAMA_TESTS=showcase");
 		}
-		if (tests.contains("xaero-real") || tests.contains("xaero-real-server")) {
+		if (tests.contains("xaero-real") || tests.contains("xaero-real-server") || tests.contains("waypoint-export-xaero")) {
 			XaeroRealTest.clearXaero(context);
 		}
 		if (tests.contains("addon-api")) {
 			AddonApiTest.titleScreen(context);
 			AddonWaypointsTest.titleScreen(context);
+		}
+		if (tests.contains("addons-restart")) {
+			AddonsSettingsTest.restartTitleScreen(context);
 		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
@@ -119,6 +122,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("addon-api")) {
 				AddonApiTest.firstWorld(context, world);
 				AddonWaypointsTest.firstWorld(context, world);
+			}
+			if (tests.contains("addons-settings")) {
+				AddonsSettingsTest.run(context, world);
+			}
+			if (tests.contains("addons-restart")) {
+				AddonsSettingsTest.restartWorld(context, world);
 			}
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
@@ -208,6 +217,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
+			if (tests.contains("minimap-alloc")) {
+				MinimapAllocTest.run(context, world);
+			}
 			if (tests.contains("radar")) {
 				radar(context, world);
 			}
@@ -273,6 +285,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			}
 			if (tests.contains("xaero-import")) {
 				xaeroImport(context, world);
+			}
+			if (tests.contains("waypoint-export")) {
+				WaypointExportTest.run(context, world);
+			}
+			if (tests.contains("waypoint-export-xaero")) {
+				WaypointExportTest.forXaero(context, world);
 			}
 			if (tests.contains("xaero-real")) {
 				XaeroRealTest.singleplayer(context, world);
@@ -427,7 +445,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			AddonApiTest.left(context);
 			AddonWaypointsTest.left(context);
 		}
-		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
+		if (tests.contains("waypoint-export-xaero")) {
+			WaypointExportTest.intoXaero(context);
+		}
+		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoint-export-xaero") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
 				if (tests.contains("addon-api")) {
 					AddonWaypointsTest.reopened(context);
@@ -455,6 +476,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (tests.contains("xaero-real")) {
 					XaeroRealTest.reopened(context);
+				}
+				if (tests.contains("waypoint-export-xaero")) {
+					WaypointExportTest.readByXaero(context);
 				}
 				if (tests.contains("waystones")) {
 					waystonesAfterRejoin(context, reopened);
@@ -598,6 +622,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			realms(context);
 		}
 		//?}
+		if (tests.contains("addons-settings")) {
+			// Last of all, so every section before it sees the test addons ticked.
+			AddonsSettingsTest.switchedOffForRestart(context);
+		}
 	}
 
 	/**
@@ -1198,6 +1226,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			context.runOnClient(mc -> Settings.get().gameTime = Settings.GameTime.DAY_12H);
 			// One waypoint, far enough not to be reached, so the list shows its row and the sort buttons.
 			context.runOnClient(mc -> dev.diorama.waypoint.Waypoints.addTemporary(mc.player.blockPosition().offset(300, 0, 0), "minecraft:overworld"));
+			// And one kept waypoint, so the list's footer has Export waypoints beside Done.
+			context.runOnClient(mc -> dev.diorama.waypoint.WaypointStore.get().add(new dev.diorama.waypoint.Waypoint("Home",
+				mc.player.getBlockX() - 300, mc.player.getBlockY(), mc.player.getBlockZ(), "minecraft:overworld", dev.diorama.waypoint.Waypoint.PALETTE[0])));
 			for (String language : List.of("ru_ru", "be_by", "ja_jp", "zh_cn", "zh_tw")) {
 				switchLanguage(context, language);
 				context.waitTicks(10);
@@ -1249,12 +1280,42 @@ public class DioramaClientTest implements FabricClientGameTest {
 					context.waitTicks(14);
 					context.takeScreenshot("languages-" + language + "-5-tooltip-" + tooltips[tab][0]);
 				}
+				if (context.computeOnClient(mc -> !dev.diorama.addon.Addons.listed().isEmpty())) {
+					// With addons installed (--mods testaddon/build/libs), their tab and one row's tooltip.
+					context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(5));
+					context.getInput().setCursorPos(2, 2);
+					context.waitTicks(3);
+					context.takeScreenshot("languages-" + language + "-4-settings-tab-6");
+					String name = context.computeOnClient(mc -> dev.diorama.addon.Addons.listed().get(0).name());
+					double[] at = context.computeOnClient(mc -> {
+						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+						collectWidgets(mc.gui.screen(), widgets);
+						double scale = mc.getWindow().getGuiScale();
+						for (var widget : widgets) {
+							if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(name)) {
+								return new double[] {(widget.getX() + 8) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+							}
+						}
+						throw new AssertionError("No row for " + name + " in " + language);
+					});
+					context.getInput().setCursorPos(at[0], at[1]);
+					context.waitTicks(14);
+					context.takeScreenshot("languages-" + language + "-5-tooltip-addons");
+				}
 				context.setScreen(() -> null);
 				context.getInput().setCursorPos(2, 2);
 
 				context.setScreen(() -> new dev.diorama.waypoint.WaypointListScreen(null));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-6-waypoint-list");
+				// Export's tooltip is the longest text in the list: pointed at, so it shows whole.
+				net.minecraft.client.gui.components.Button export = context.computeOnClient(mc -> buttonLabelled(mc.gui.screen(),
+					net.minecraft.network.chat.Component.translatable("diorama.waypoints.export").getString()));
+				double exportScale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+				context.getInput().setCursorPos((export.getX() + export.getWidth() / 2.0) * exportScale, (export.getY() + export.getHeight() / 2.0) * exportScale);
+				context.waitTicks(30);
+				context.takeScreenshot("languages-" + language + "-6-export-tooltip");
+				context.getInput().setCursorPos(2, 2);
 				context.setScreen(() -> new dev.diorama.MinimapPositionScreen(new SettingsScreen(null)));
 				context.waitTicks(5);
 				context.takeScreenshot("languages-" + language + "-7-position");

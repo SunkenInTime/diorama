@@ -135,6 +135,13 @@ rm -rf "$dev/screenshots" "$dev/crash-reports" "$dev/logs" "$run/screenshots" "$
 # The game starts from the folder the snapshot left (its settings, options and map folders), on a
 # warm VM an earlier run left too: otherwise a test that stopped partway leaves the settings it
 # changed, and the next run's tests start from them. The first run on a VM keeps a copy to go back to.
+# DIORAMA_KEEP_CONFIG=1 keeps the last run's diorama/config.json through it, so a test can see the
+# game start again with what the last run saved (addons-restart after addons-settings).
+kept=
+if [ -n "${DIORAMA_KEEP_CONFIG:-}" ] && [ -e "$run/diorama/config.json" ]; then
+	kept=~/kept-config.json
+	cp "$run/diorama/config.json" "$kept" || exit 1
+fi
 pristine=~/run-pristine/$node
 if [ -d "$pristine" ]; then
 	rsync -a --delete "$pristine/" "$dev/" || exit 1
@@ -149,6 +156,13 @@ if [ "$run" != "$dev" ]; then
 elif [ -e ~/mods.tgz ] && [ ${#with_mods[@]} = 0 ]; then
 	# NeoForge. The reset above takes them out again before the next run.
 	mkdir -p "$run/mods" && cp "$mods"/*.jar "$run/mods/" || exit 1
+fi
+if [ -n "$kept" ]; then
+	mkdir -p "$run/diorama" && cp "$kept" "$run/diorama/config.json" || exit 1
+	# Fabric API's game tests empty the game folder before the game starts: the test mod copies it
+	# back in from here first thing (KeptConfig).
+	export DIORAMA_KEPT_CONFIG=$kept
+	mark "diorama/config.json kept from the last run"
 fi
 start=$(date +%s)
 # A game that stops writing its log for HANG_DUMP_SECONDS (default 180) is probably stuck: its

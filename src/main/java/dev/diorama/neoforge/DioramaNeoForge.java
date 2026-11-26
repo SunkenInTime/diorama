@@ -69,10 +69,12 @@ public final class DioramaNeoForge {
 			org.objectweb.asm.Type marker = org.objectweb.asm.Type.getType(DioramaEntrypoint.class);
 			java.util.List<Addons.Found> found = new java.util.ArrayList<>();
 			for (ModFileScanData scan : ModList.get().getAllScanData()) {
-				java.util.List<String> mods = scan.getIModInfoData().stream().flatMap(file -> file.getMods().stream()).map(IModInfo::getModId).toList();
+				java.util.List<IModInfo> infos = scan.getIModInfoData().stream().flatMap(file -> file.getMods().stream()).toList();
+				java.util.List<String> mods = infos.stream().map(IModInfo::getModId).toList();
+				java.util.List<String> names = infos.stream().map(IModInfo::getDisplayName).toList();
 				for (ModFileScanData.AnnotationData annotation : scan.getAnnotations()) {
 					if (marker.equals(annotation.annotationType())) {
-						Addons.Found one = Addons.scanned(mods, annotation.clazz().getClassName());
+						Addons.Found one = Addons.scanned(mods, names, annotation.clazz().getClassName());
 						if (one != null) {
 							found.add(one);
 						}

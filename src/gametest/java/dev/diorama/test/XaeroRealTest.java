@@ -275,7 +275,8 @@ final class XaeroRealTest {
 		return module.getClass().getMethod("getCurrentSession").invoke(module);
 	}
 
-	private static Object xaeroWorld() {
+	/** Xaero's Minimap's world for where the player is, or null before it has one. */
+	static Object xaeroWorld() {
 		try {
 			Object session = session();
 			if (session == null) {

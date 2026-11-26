@@ -54,17 +54,31 @@ public final class MinimapFrames {
 		if (picture == null) {
 			return;
 		}
-		Circle.Quads quads = round
-			? new Circle(x + size / 2.0F, y + size / 2.0F, size / 2.0F + OUTSIDE).ring(BAND, BAND / PICTURE)
-			: square(x - OUTSIDE, y - OUTSIDE, size + 2 * OUTSIDE);
-		float[] uvs = quads.uvs();
-		for (int i = 0; i < uvs.length; i += 2) {
-			uvs[i] *= picture.u;
-			uvs[i + 1] *= picture.v;
+		Shape shape = last;
+		if (shape == null || shape.picture != picture || shape.round != round || shape.x != x || shape.y != y || shape.size != size) {
+			Circle.Quads quads = round
+				? new Circle(x + size / 2.0F, y + size / 2.0F, size / 2.0F + OUTSIDE).ring(BAND, BAND / PICTURE)
+				: square(x - OUTSIDE, y - OUTSIDE, size + 2 * OUTSIDE);
+			float[] uvs = quads.uvs();
+			for (int i = 0; i < uvs.length; i += 2) {
+				uvs[i] *= picture.u;
+				uvs[i + 1] *= picture.v;
+			}
+			shape = new Shape(picture, round, x, y, size, quads);
+			last = shape;
 		}
 		// A square's pixels land on the GUI's; a ring's never do, and its curve only stays clean smoothed.
-		MapCanvas.of(graphics).quad(picture.texture, round ? Sampling.CLAMP_LINEAR : Sampling.CLAMP_CRISP, quads.corners(), uvs, 0xFFFFFFFF);
+		MapCanvas.of(graphics).quad(picture.texture, round ? Sampling.CLAMP_LINEAR : Sampling.CLAMP_CRISP, shape.quads.corners(), shape.quads.uvs(), 0xFFFFFFFF);
 	}
+
+	/**
+	 * The frame last drawn, kept for the next frame: the same until the minimap moves, changes size
+	 * or shape, or a reload brings new pictures. Its arrays are drawn from, never changed.
+	 */
+	private record Shape(Picture picture, boolean round, int x, int y, int size, Circle.Quads quads) {
+	}
+
+	private static @Nullable Shape last;
 
 	/** Forgets the pictures: a resource reload may have changed them. */
 	public static void reload() {

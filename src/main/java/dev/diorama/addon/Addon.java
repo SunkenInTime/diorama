@@ -18,7 +18,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
  * what it holds can be let go when it fails. It fails once: then what it hid shows again, its
- * listeners are closed, its later calls do nothing, and nothing of it is called again.
+ * listeners are closed, its later calls do nothing, and nothing of it is called again. The player
+ * can stop it hiding anything ({@link #allow}): its handles stay open for it, and just aren't
+ * counted.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -36,11 +38,14 @@ final class Addon implements DioramaApi, Hud {
 		"net.fabricmc.loader.api.LanguageAdapterException");
 
 	private final String modId;
-	/** Its open handles, so they can be closed for it. */
+	/** The mod's name, as its loader's metadata gives it. */
+	private final String name;
+	/** Its open handles, so they can be closed for it, and counted or not as the player picks. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
 	/** Its other open handles: world listeners and waypoint listeners. */
 	private final List<Held> held = new ArrayList<>();
 	private boolean failed;
+	private boolean allowed;
 
 	/** Something an addon holds besides a part of the HUD, let go of when it fails. */
 	interface Held {
@@ -48,8 +53,10 @@ final class Addon implements DioramaApi, Hud {
 		boolean release();
 	}
 
-	Addon(String modId) {
+	Addon(String modId, String name, boolean allowed) {
 		this.modId = modId;
+		this.name = name;
+		this.allowed = allowed;
 	}
 
 	/** Throws unless this is the client thread, where everything addons can reach lives. */
@@ -80,6 +87,7 @@ final class Addon implements DioramaApi, Hud {
 				each.release();
 			}
 			this.held.clear();
+			HudHides.changed();
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
 				throw fatal;
@@ -132,6 +140,38 @@ final class Addon implements DioramaApi, Hud {
 
 	boolean failed() {
 		return this.failed;
+	}
+
+	boolean allowed() {
+		return this.allowed;
+	}
+
+	/**
+	 * Whether the player lets it hide parts of Diorama. Its open handles are counted in or out at
+	 * once, and stay open for it either way.
+	 */
+	void allow(boolean allowed) {
+		if (allowed == this.allowed) {
+			return;
+		}
+		this.allowed = allowed;
+		for (HudHides.Hold hold : this.holds) {
+			HudHides.count(hold.parts(), allowed ? 1 : -1);
+		}
+		HudHides.changed();
+	}
+
+	/** The parts its open handles ask to hide, as {@link HudHides#bit} bits, counted or not. */
+	int asked() {
+		int parts = 0;
+		for (HudHides.Hold hold : this.holds) {
+			parts |= hold.parts();
+		}
+		return parts;
+	}
+
+	String name() {
+		return this.name;
 	}
 
 	void forget(HudHides.Hold hold) {

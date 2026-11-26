@@ -232,6 +232,13 @@ public final class Settings {
 	 */
 	public java.util.Set<String> mapOffDimensions = new java.util.TreeSet<>();
 	/**
+	 * The mod IDs of the addons the player has stopped from hiding parts of Diorama, such as the
+	 * minimap (the Addons tab). Every other addon may. What an addon hides is never saved; only
+	 * this choice is.
+	 */
+	@JsonAdapter(ModIdsAdapter.class)
+	public java.util.Set<String> addonHidesOff = new java.util.TreeSet<>();
+	/**
 	 * Fast is for slower computers: the map takes one sample per pixel instead of four, so it
 	 * fills in about four times sooner, and the fog draws two layers instead of eight, without
 	 * lighting them from the sun.
@@ -473,7 +480,7 @@ public final class Settings {
 		this.apply();
 	}
 
-	/** Pushes the settings that live elsewhere: the map look and fog of war. */
+	/** Pushes the settings that live elsewhere: the map look, fog of war, and which addons may hide parts of Diorama. */
 	public void apply() {
 		// The map session re-bakes only if the tiles would look different.
 		MapStyle.set(this.style());
@@ -487,6 +494,7 @@ public final class Settings {
 			}
 		}
 		ServerRules.setAlwaysFogOfWar(this.alwaysFogOfWar);
+		dev.diorama.addon.Addons.hidesOff(this.addonHidesOff);
 	}
 
 	private static Settings load() {
@@ -574,6 +582,15 @@ public final class Settings {
 			}
 		}
 		settings.mapOffDimensions = off;
+		java.util.Set<String> addonsOff = new java.util.TreeSet<>();
+		if (settings.addonHidesOff != null) {
+			for (String modId : settings.addonHidesOff) {
+				if (modId != null && !modId.isBlank()) {
+					addonsOff.add(modId.strip());
+				}
+			}
+		}
+		settings.addonHidesOff = addonsOff;
 		settings.arrowColor = Math.floorMod(settings.arrowColor, ARROW_COLORS.length);
 		settings.arrowSize = snapArrowSize(settings.arrowSize);
 		// Hand-edited numbers: snap to a value the settings screen can show.
@@ -668,6 +685,40 @@ public final class Settings {
 				case "LARGE" -> 176;
 				default -> 128;
 			};
+		}
+	}
+
+	/**
+	 * Reads the mod IDs of the addons switched off, leaving out anything in the list that isn't a
+	 * string: a hand-edited entry gone wrong costs that entry, not the rest of the file.
+	 */
+	public static final class ModIdsAdapter extends TypeAdapter<java.util.Set<String>> {
+		@Override
+		public void write(JsonWriter out, java.util.Set<String> value) throws IOException {
+			out.beginArray();
+			for (String modId : value) {
+				out.value(modId);
+			}
+			out.endArray();
+		}
+
+		@Override
+		public java.util.Set<String> read(JsonReader in) throws IOException {
+			java.util.Set<String> modIds = new java.util.TreeSet<>();
+			if (in.peek() != JsonToken.BEGIN_ARRAY) {
+				in.skipValue();
+				return modIds;
+			}
+			in.beginArray();
+			while (in.hasNext()) {
+				if (in.peek() == JsonToken.STRING) {
+					modIds.add(in.nextString());
+				} else {
+					in.skipValue();
+				}
+			}
+			in.endArray();
+			return modIds;
 		}
 	}
 

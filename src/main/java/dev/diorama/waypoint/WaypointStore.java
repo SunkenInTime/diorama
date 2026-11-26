@@ -240,6 +240,14 @@ public final class WaypointStore {
 		return this.waypoints.stream().filter(w -> !hidden(w)).toList();
 	}
 
+	/**
+	 * Every waypoint the player keeps, on every map of every dimension: what the file saves, less
+	 * portal pins kept out of sight. For {@link WaypointExport}.
+	 */
+	public List<Waypoint> kept() {
+		return this.everyWaypoint().stream().filter(w -> w.kind != Waypoint.Kind.TEMPORARY && !hidden(w)).toList();
+	}
+
 	/** The waypoints in a dimension on the map in use, hidden portal pins included. For {@link Portals}. */
 	List<Waypoint> withHidden(String dimension) {
 		return this.waypoints.stream().filter(w -> w.dimension.equals(dimension)).toList();

@@ -388,12 +388,22 @@ final class AddonApiTest {
 			context.runOnClient(mc -> waypoints.close());
 			Handle minimap = context.computeOnClient(mc -> TestAddon.hide(Hud.Part.MINIMAP));
 			long hidden = AllocProbe.measure(context, "one handle on MINIMAP", 200);
+			// The player switched the addon off in the Addons tab: its handle stays open and hides nothing.
+			context.runOnClient(mc -> {
+				Settings.get().addonHidesOff.add("diorama_test_addon");
+				Settings.get().apply();
+			});
+			long switchedOff = AllocProbe.measure(context, "one handle on MINIMAP, its addon switched off", 200);
+			context.runOnClient(mc -> {
+				Settings.get().addonHidesOff.remove("diorama_test_addon");
+				Settings.get().apply();
+			});
 			context.runOnClient(mc -> minimap.close());
 			long again = AllocProbe.measure(context, "no handle again", 200);
 			if (hidden != 0) {
 				throw new AssertionError("The minimap's draw allocated a median " + hidden + " bytes a frame while hidden");
 			}
-			Diorama.LOGGER.info("addon-api alloc: medians a frame: none {}, other part {}, hidden {}, none again {}", none, other, hidden, again);
+			Diorama.LOGGER.info("addon-api alloc: medians a frame: none {}, other part {}, hidden {}, switched off {}, none again {}", none, other, hidden, switchedOff, again);
 		}
 	}
 	//?}
