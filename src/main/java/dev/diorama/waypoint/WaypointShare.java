@@ -168,9 +168,12 @@ public final class WaypointShare {
 		return XaeroInstalled.YES ? message : withAddLink(message);
 	}
 
-	/** Looked up at the first chat line, when the loader knows its mods. */
+	/**
+	 * Looked up at the first chat line, when the loader knows its mods: Xaero's Minimap, its
+	 * Fair-Play edition, and Better PVP in both editions, which has the minimap in it.
+	 */
 	private static final class XaeroInstalled {
-		static final boolean YES = modLoaded("xaerominimap") || modLoaded("xaerobetterpvp");
+		static final boolean YES = modLoaded("xaerominimap") || modLoaded("xaerominimapfair") || modLoaded("xaerobetterpvp") || modLoaded("xaerobetterpvpfair");
 
 		private static boolean modLoaded(String mod) {
 			//? if fabric {

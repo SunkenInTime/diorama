@@ -50,9 +50,15 @@ final class E33ChatTest {
 
 	/**
 	 * On a real server (opt-in: {@code e33chat-server}): another player, with the same mods, shares
-	 * a waypoint in chat, with the line Diorama's "Share in chat" sends.
+	 * a waypoint in chat, with the line Diorama's "Share in chat" sends. On Fabric, where the second
+	 * player can be told what to say.
 	 */
 	static void server(ClientGameTestContext context) {
+		//? if !fabric {
+		/*if (true) {
+			throw new AssertionError("e33chat-server runs on Fabric nodes: the second player only takes lines to say there");
+		}
+		*///?}
 		if (System.getenv("DIORAMA_REAL_SERVER") == null) {
 			throw new AssertionError("e33chat-server needs a real server: run it with --env DIORAMA_REAL_SERVER=1");
 		}
