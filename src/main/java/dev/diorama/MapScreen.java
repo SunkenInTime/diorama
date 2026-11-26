@@ -1514,8 +1514,10 @@ public final class MapScreen extends Screen {
 	 */
 	private void findGround(GoMark mark, int y, int tries, int other) {
 		this.spotAtMap(Projection.u(mark.x + 0.5, mark.z + 0.5), Projection.v(mark.x + 0.5, y, mark.z + 0.5), false).thenAcceptAsync(spot -> {
-			// Another place since, or the view the look-up was for is gone ({@link GoMark#looking}).
-			if (this.goMark != mark || !mark.looking) {
+			// Another place since, or the view the look-up was for is gone ({@link GoMark#looking}): the
+			// slice and facing are checked here too, for an answer that comes before the next frame is drawn.
+			if (this.goMark != mark || !mark.looking || this.layer != mark.layer || Projection.facing() != mark.facing) {
+				mark.looking = false;
 				return;
 			}
 			BlockPos ground = spot.pos();

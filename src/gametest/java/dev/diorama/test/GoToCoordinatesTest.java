@@ -239,13 +239,16 @@ final class GoToCoordinatesTest {
 		read("[name:\"Y64 Base 7\", x:120, y:80, z:-340]", 120, 80, -340, null);
 		// The game reads a dimension without a namespace as its own.
 		read("/execute in the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
-		read("/execute as @s in minecraft:the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
 		read("/minecraft:tp 120 64 -340", 120, 64, -340, null);
-		read("/tp @e[name=\"Base 5\"] 120 64 -340", 120, 64, -340, null);
+		read("x:120 z:-340 dim:the_nether", 120, null, -340, "minecraft:the_nether");
 		read("[name:\"Base \\\" x:200\", x:120, y:80, z:-340]", 120, 80, -340, null);
 		for (String none : new String[] {"", "   ", "my base", "120", "1 2 3 4", "40000000 0", "0 99999 0", "minecraft:overworld", "x: 5",
 			"/tp @s ~ 64 -340", "/tp @s ^1 ^2 ^3", "/tp Alex 12 40", "/teleport ~5 ~ ~-5", "/minecraft:teleport @s ~ 64 -340", "~ 64 -340",
-			"/tp Alex Steve", "/tp @e[type=cow, limit=1] 1 2 3", "[name:\"Base, x:200, z:5"}) {
+			"/tp Alex Steve", "/tp @e[type=cow, limit=1] 1 2 3", "[name:\"Base, x:200, z:5",
+			// A sentence, two places at once, a command that goes somewhere else than its numbers say: the whole text has to be the place.
+			"Meet at 120, 64, -340.", "Base x: 120 z: -340. Portal x: 800 z: 950", "x: 1 x: 2 z: 3",
+			"/execute in minecraft:the_nether at @s run tp @s 120 64 -340", "/execute as @s in minecraft:the_nether run tp @s 120 64 -340",
+			"/tp 12345 120 64 -340", "/tp @e[name=\"Base 5\"] 120 64 -340"}) {
 			MapCoordinates.Place place = MapCoordinates.parse(none);
 			if (place != null) {
 				throw new AssertionError("\"" + none + "\" was read as " + place);
