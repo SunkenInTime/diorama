@@ -13,8 +13,8 @@ public final class HudHides {
 	private static int minimap;
 	private static int worldWaypoints;
 	/**
-	 * Goes up whenever a handle opens or closes, the player switches an addon, or one fails, so the
-	 * settings screen knows to redraw its list.
+	 * Goes up whenever an addon is found, a handle opens or closes, the player switches an addon, or
+	 * one fails, so the settings screen knows to redraw its list.
 	 */
 	private static int changes;
 
@@ -31,7 +31,7 @@ public final class HudHides {
 		return worldWaypoints > 0;
 	}
 
-	/** A number that changes whenever what addons hide or whether one runs does. */
+	/** A number that changes whenever the addons listed, what they hide or whether one runs does. */
 	public static int changes() {
 		return changes;
 	}

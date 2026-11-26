@@ -478,10 +478,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 			}
 		}
-		if (tests.contains("addons-settings")) {
-			// After addon-api's checks, which need the test addon ticked.
-			AddonsSettingsTest.switchedOffForRestart(context);
-		}
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
 		}
@@ -615,6 +611,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			realms(context);
 		}
 		//?}
+		if (tests.contains("addons-settings")) {
+			// Last of all, so every section before it sees the test addons ticked.
+			AddonsSettingsTest.switchedOffForRestart(context);
+		}
 	}
 
 	/**

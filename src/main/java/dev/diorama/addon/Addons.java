@@ -145,20 +145,41 @@ public final class Addons {
 			return;
 		}
 		for (Found one : found) {
-			String name = one.name() == null || one.name().isBlank() ? one.modId() : one.name().strip();
-			Addon addon = new Addon(one.modId(), name, !hidesOff.contains(one.modId()));
-			ALL.add(addon);
-			DioramaAddon made = addon.call("its entrypoint", one.create());
-			if (made == null) {
-				continue;
-			}
-			addon.call("onReady", () -> {
-				made.onReady(addon);
-				return Boolean.TRUE;
-			});
-			if (!addon.failed()) {
-				Diorama.LOGGER.info("Diorama addon {} ready ({}, API {})", addon.id(), made.getClass().getName(), API_VERSION);
-			}
+			start(one);
 		}
+	}
+
+	/** Makes one addon and calls its onReady. */
+	private static void start(Found one) {
+		String name = one.name() == null || one.name().isBlank() ? one.modId() : one.name().strip();
+		Addon addon = new Addon(one.modId(), name, !hidesOff.contains(one.modId()));
+		ALL.add(addon);
+		// A new row for an open settings screen, though the addon may never hide anything.
+		HudHides.changed();
+		DioramaAddon made = addon.call("its entrypoint", one.create());
+		if (made == null) {
+			return;
+		}
+		addon.call("onReady", () -> {
+			made.onReady(addon);
+			return Boolean.TRUE;
+		});
+		if (!addon.failed()) {
+			Diorama.LOGGER.info("Diorama addon {} ready ({}, API {})", addon.id(), made.getClass().getName(), API_VERSION);
+		}
+	}
+
+	/**
+	 * For the game tests: one more addon found after the others, as if it had started while a
+	 * settings screen was open.
+	 */
+	public static void foundForTests(Found one) {
+		start(one);
+	}
+
+	/** For the game tests: drops an addon {@link #foundForTests} added, which must hold no handle. */
+	public static void forgetForTests(String modId) {
+		ALL.removeIf(addon -> addon.id().equals(modId));
+		HudHides.changed();
 	}
 }

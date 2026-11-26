@@ -40,9 +40,10 @@ import org.jspecify.annotations.Nullable;
  * test mods by the names their loader's metadata gives, the six that failed as stopped; the Minimap
  * tab says which addon hides the minimap; unticking it with a real click brings the minimap back
  * with the handle still open, writes the mod ID to config.json, and ticking it hides the minimap
- * again. The rows follow what addons hide while the screen is open, and a small window turns the
- * list into pages. It leaves the good addon ticked; at the end of the run
- * ({@link #switchedOffForRestart}) the good and broken addons are unticked, for
+ * again. The rows follow what addons hide while the screen is open, an addon found while it is
+ * open gets a row, and a small window turns the list into pages. It leaves the good addon ticked;
+ * after every other section of the run ({@link #switchedOffForRestart}) the good and broken addons
+ * are unticked, for
  * {@code addons-restart}: run that next on the same warm VM with DIORAMA_KEEP_CONFIG=1, and the
  * game starts again with that file.
  */
@@ -152,6 +153,7 @@ final class AddonsSettingsTest {
 		context.runOnClient(mc -> both.close());
 		context.waitTicks(3);
 		expectStates(context, "after closing that handle", "diorama.settings.addons.hiding.minimap");
+		foundWhileOpen(context);
 		context.setScreen(() -> null);
 
 		smallWindow(context);
@@ -163,6 +165,31 @@ final class AddonsSettingsTest {
 		}
 		savedOff(config, Set.of(), "at the end of addons-settings");
 		Diorama.LOGGER.info("addons-settings: listed, switched off and on with real clicks and keys, saved; left ticked");
+	}
+
+	/**
+	 * An addon found while the Addons tab is open that never hides anything, as when another
+	 * addon's onReady opens Diorama's settings: its row shows up without reopening the screen, and
+	 * goes when the test drops it.
+	 */
+	private static void foundWhileOpen(ClientGameTestContext context) {
+		String late = GOOD + "_late";
+		String name = "Diorama Test Addon (late)";
+		context.runOnClient(mc -> Addons.foundForTests(new Addons.Found(late, name, () -> api -> {
+		})));
+		context.waitTicks(3);
+		boolean shown = context.computeOnClient(mc -> tick(mc, name) != null);
+		context.getInput().setCursorPos(2, 2);
+		context.waitTicks(3);
+		context.takeScreenshot("addons-settings-08b-found-while-open");
+		context.runOnClient(mc -> Addons.forgetForTests(late));
+		context.waitTicks(3);
+		boolean gone = context.computeOnClient(mc -> tick(mc, name) == null);
+		if (!shown || !gone) {
+			throw new AssertionError("An addon found while the Addons tab was open, hiding nothing: its row "
+				+ (shown ? "showed, but stayed after it was dropped" : "didn't show until the screen was reopened"));
+		}
+		expectStates(context, "after an addon found while it was open was dropped", "diorama.settings.addons.hiding.minimap");
 	}
 
 	/**
