@@ -135,6 +135,11 @@ public final class Addons {
 		}
 	}
 
+	/** Throws unless this is the client thread, where everything addons can reach lives. */
+	public static void checkThread() {
+		Addon.checkThread();
+	}
+
 	private static void start() {
 		List<Found> found;
 		try {

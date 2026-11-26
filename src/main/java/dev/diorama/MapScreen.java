@@ -22,6 +22,7 @@ import dev.diorama.waypoint.WaypointListScreen;
 import dev.diorama.waypoint.WaypointOverlay;
 import dev.diorama.waypoint.WaypointShare;
 import dev.diorama.waypoint.WaypointStore;
+import dev.diorama.waypoint.Waystones;
 import dev.diorama.waypoint.Waypoints;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -895,7 +896,10 @@ public final class MapScreen extends Screen {
 		if (button == InputConstants.MOUSE_BUTTON_LEFT) {
 			WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, x, y);
 			if (pin != null && pin.waypoint().editable()) {
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
+				// A pin drawn last frame for a waypoint deleted since (by an addon, say) opens nothing.
+				if (held(pin.waypoint().source())) {
+					this.minecraft.gui.setScreen(new WaypointEditScreen(this, pin.waypoint().source(), false));
+				}
 			} else if (pin != null) {
 				// A waystone can't be edited here: its menu instead.
 				this.openMenu(x, y);
@@ -912,7 +916,8 @@ public final class MapScreen extends Screen {
 	/** Opens the menu for what's under a screen point: a waypoint's, or the spot's. */
 	private void openMenu(double screenX, double screenY) {
 		WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, screenX, screenY);
-		if (pin != null) {
+		// The pins are last frame's: one whose waypoint was deleted since (by an addon, say) gets no menu.
+		if (pin != null && held(pin.waypoint().source())) {
 			this.menu = new MapMenu(this.waypointItems(pin.waypoint()), this.font, screenX, screenY, this.width, this.height);
 			return;
 		}
@@ -1051,40 +1056,67 @@ public final class MapScreen extends Screen {
 		items.add(MapMenu.Item.title(Component.literal(shown.shownName())));
 		items.add(MapMenu.Item.info(this.where(shown.x, shown.y, shown.z)));
 		if (waypoint.editable()) {
-			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, () ->
-				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false))));
+			items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.edit"), true, ifHeld(waypoint, () ->
+				this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false)))));
 		}
-		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(waypoint.dimension), () -> {
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoint.teleport"), Waypoints.canTeleport(waypoint.dimension), ifHeld(waypoint, () -> {
 			Waypoints.teleport(waypoint.dimension, waypoint.x, waypoint.y, waypoint.z);
 			this.minecraft.gui.setScreen(null);
+		})));
+		// Copying stays open to say it copied, so a waypoint gone since closes the menu instead.
+		String coordinates = shown.x + " " + shown.y + " " + shown.z;
+		items.add(MapMenu.Item.stays(Component.translatable("diorama.menu.copy_coordinates"), Component.translatable("diorama.menu.copied"), () -> {
+			if (held(waypoint)) {
+				this.minecraft.keyboardHandler.setClipboard(coordinates);
+			} else {
+				this.menu = null;
+			}
 		}));
-		items.add(this.copyItem(shown.x + " " + shown.y + " " + shown.z));
-		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), () -> {
+		items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.share"), Component.translatable("diorama.menu.share_confirm"), ifHeld(waypoint, () -> {
 			if (WaypointShare.send(waypoint)) {
 				this.minecraft.gui.setScreen(null);
 			}
-		}));
+		})));
 		if (waypoint.kind == Waypoint.Kind.TEMPORARY) {
-			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.keep"), true, () -> {
+			items.add(MapMenu.Item.action(Component.translatable("diorama.menu.keep"), true, ifHeld(waypoint, () -> {
 				waypoint.kind = Waypoint.Kind.MANUAL;
 				this.changed();
-			}));
+			})));
 		}
-		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, () -> {
+		items.add(MapMenu.Item.action(Component.translatable("diorama.waypoints.hide"), true, ifHeld(waypoint, () -> {
 			WaypointStore store = WaypointStore.get();
 			if (store != null) {
 				store.setVisible(waypoint, false);
 			}
-		}));
+		})));
 		if (waypoint.editable()) {
-			items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), () -> {
+			items.add(MapMenu.Item.confirmed(Component.translatable("diorama.waypoint.delete"), Component.translatable("diorama.menu.delete_confirm"), ifHeld(waypoint, () -> {
 				WaypointStore store = WaypointStore.get();
 				if (store != null) {
 					store.remove(waypoint);
 				}
-			}));
+			})));
 		}
 		return items;
+	}
+
+	/**
+	 * Whether a waypoint is still one the store has: false for one deleted since a pin or a menu
+	 * was made for it, by an addon say. A waystone is the Waystones mod's, never the store's: it's
+	 * held while Waystones still has it, and it isn't picked up.
+	 */
+	private static boolean held(Waypoint waypoint) {
+		WaypointStore store = WaypointStore.get();
+		return store != null && (waypoint.kind == Waypoint.Kind.WAYSTONE ? Waystones.has(waypoint.id) : store.holds(waypoint));
+	}
+
+	/** A menu item's action that does nothing once its waypoint is gone ({@link #held}). */
+	private static Runnable ifHeld(Waypoint waypoint, Runnable action) {
+		return () -> {
+			if (held(waypoint)) {
+				action.run();
+			}
+		};
 	}
 
 	/** A line putting {@code coordinates} on the clipboard, spaced the way commands take them. */
@@ -1814,6 +1846,11 @@ public final class MapScreen extends Screen {
 	/** For tests: the Export button. */
 	public Button exportButton() {
 		return this.export;
+	}
+
+	/** For tests: what a right-click at this GUI point opens, from the pins drawn last frame, without a mouse event. */
+	public void openMenuForTests(double x, double y) {
+		this.openMenu(x, y);
 	}
 
 	/** For tests: the right-click menu, if it's open. */

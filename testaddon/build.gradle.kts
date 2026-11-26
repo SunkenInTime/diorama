@@ -3,7 +3,8 @@
 // classpath. Each jar is one mod with metadata for Fabric, NeoForge and Forge, found on Fabric
 // through its diorama entrypoint and on NeoForge and Forge through @DioramaEntrypoint.
 //   diorama-test-addon.jar              works, and lets the test hide and show Diorama's HUD through
-//                                       it; it also has a class marked @DioramaEntrypoint by mistake
+//                                       it and sync waypoints with a pretend map mod by polling; it
+//                                       also has a class marked @DioramaEntrypoint by mistake
 //   diorama-test-addon-broken.jar       hides the minimap, then throws from onReady
 //   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
 //   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError

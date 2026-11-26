@@ -77,8 +77,20 @@ public final class Waystones {
 	private Waystones() {
 	}
 
-	/** Listens to Waystones' events if Waystones is installed. Called every tick; does its work on the first. */
-	public static void start() {
+	/**
+	 * Called every client tick: listens to Waystones' events from the first, checks the ordinary
+	 * waystones against Waystones' own list now and then, and finds picked-up waystones placed
+	 * again. Here, rather than where the waystones are read, so reading what changed allocates
+	 * nothing.
+	 */
+	public static void tick() {
+		start();
+		check();
+		rediscover();
+	}
+
+	/** Listens to Waystones' events if Waystones is installed. Does its work on the first call. */
+	private static void start() {
 		if (started) {
 			return;
 		}
@@ -164,14 +176,37 @@ public final class Waystones {
 				waypoints.add(waypoint);
 			}
 		}
-		onClient(() -> {
-			Map<UUID, Waypoint> waystones = new LinkedHashMap<>();
-			for (Waypoint waypoint : waypoints) {
-				waystones.put(waypoint.id, waypoint);
-			}
-			KNOWN.put(kind, waystones);
+		onClient(() -> received(kind, waypoints));
+	}
+
+	/**
+	 * One kind's full list arrived, on the client thread. A waystone sent as it was keeps the
+	 * waypoint it had, and a list the same as before is no change, as the server sends the whole
+	 * list again for one change and on every join.
+	 */
+	private static void received(String kind, List<Waypoint> waypoints) {
+		Map<UUID, Waypoint> before = KNOWN.getOrDefault(kind, Map.of());
+		Map<UUID, Waypoint> waystones = new LinkedHashMap<>();
+		boolean changed = waypoints.size() != before.size();
+		java.util.Iterator<UUID> order = before.keySet().iterator();
+		for (Waypoint waypoint : waypoints) {
+			Waypoint old = before.get(waypoint.id);
+			Waypoint kept = old != null && same(old, waypoint) ? old : waypoint;
+			changed |= kept != old || !order.hasNext() || !order.next().equals(waypoint.id);
+			waystones.put(waypoint.id, kept);
+		}
+		KNOWN.put(kind, waystones);
+		if (changed) {
 			changes++;
-		});
+		}
+		// One sent from somewhere else was placed again there.
+		rediscover();
+	}
+
+	/** Whether Waystones sent a waystone as it was: what the map shows of it is the same. */
+	private static boolean same(Waypoint a, Waypoint b) {
+		return a.id.equals(b.id) && a.name.equals(b.name) && a.x == b.x && a.y == b.y && a.z == b.z && a.dimension.equals(b.dimension) && a.color == b.color
+			&& a.kind == b.kind;
 	}
 
 	/** One waystone changed: renamed, say. */
@@ -181,11 +216,18 @@ public final class Waystones {
 		String kind = kind(waystone);
 		Waypoint waypoint = waypoint(waystone);
 		onClient(() -> {
+			Map<UUID, Waypoint> ofKind = KNOWN.get(kind);
+			Waypoint old = ofKind == null ? null : ofKind.get(id);
+			if (waypoint != null && old != null && same(old, waypoint)) {
+				// Sent again as it was.
+				return;
+			}
 			forget(id);
 			if (waypoint != null) {
 				KNOWN.computeIfAbsent(kind, k -> new LinkedHashMap<>()).put(id, waypoint);
 			}
 			changes++;
+			rediscover();
 		});
 	}
 
@@ -193,35 +235,70 @@ public final class Waystones {
 	private static void removeReceived(Object event) throws ReflectiveOperationException {
 		UUID id = (UUID) get(event, "getWaystoneId", "waystoneId");
 		boolean destroyed = (Boolean) get(event, "wasDestroyed");
-		onClient(() -> {
-			if (!destroyed) {
-				for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
-					Waypoint waypoint = waystones.get(id);
-					if (waypoint != null) {
-						PICKED_UP.put(id, spot(waypoint));
-					}
+		onClient(() -> removed(id, destroyed));
+	}
+
+	private static void removed(UUID id, boolean destroyed) {
+		if (!destroyed) {
+			for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+				Waypoint waypoint = waystones.get(id);
+				if (waypoint != null) {
+					PICKED_UP.put(id, spot(waypoint));
 				}
 			}
-			forget(id);
-			changes++;
-		});
+		}
+		forget(id);
+		changes++;
 	}
 
 	/** False for a waystone the server still sends from where it stood before it was picked up. */
 	private static boolean placed(Waypoint waypoint) {
-		String spot = PICKED_UP.get(waypoint.id);
-		if (spot == null) {
-			return true;
+		return !PICKED_UP.containsKey(waypoint.id);
+	}
+
+	/**
+	 * Finds the picked-up waystones placed again: sent from another spot, or with the client seeing
+	 * a Waystones block back at theirs, which no event says. Each one found shows again, which
+	 * counts as a change. Run every client tick while any is picked up, and when a list or an
+	 * update comes, so what reads the waystones (the HUD, the map, addons) sees it the same, drawn
+	 * or not.
+	 */
+	private static void rediscover() {
+		if (PICKED_UP.isEmpty()) {
+			return;
 		}
-		if (!spot.equals(spot(waypoint)) || blockThere(waypoint)) {
-			PICKED_UP.remove(waypoint.id);
-			return true;
+		java.util.Iterator<Map.Entry<UUID, String>> each = PICKED_UP.entrySet().iterator();
+		while (each.hasNext()) {
+			Map.Entry<UUID, String> picked = each.next();
+			Waypoint waypoint = known(picked.getKey());
+			if (waypoint != null && (!picked.getValue().equals(spot(waypoint)) || blockThere(waypoint))) {
+				each.remove();
+				changes++;
+			}
 		}
-		return false;
+	}
+
+	private static @Nullable Waypoint known(UUID id) {
+		for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+			Waypoint waypoint = waystones.get(id);
+			if (waypoint != null) {
+				return waypoint;
+			}
+		}
+		return null;
+	}
+
+	/** Whether Waystones has told the player of this waystone, and it isn't picked up. */
+	public static boolean has(UUID id) {
+		Waypoint waypoint = known(id);
+		return waypoint != null && placed(waypoint);
 	}
 
 	/** Whether the client has the waystone's spot loaded with one of Waystones' blocks on it. */
 	private static boolean blockThere(Waypoint waypoint) {
+		if (BLOCK_BACK_FOR_TESTS.contains(waypoint.id)) {
+			return true;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		BlockPos pos = new BlockPos(waypoint.x, waypoint.y, waypoint.z);
 		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(waypoint.dimension) || !mc.level.hasChunkAt(pos)) {
@@ -384,13 +461,48 @@ public final class Waystones {
 
 	/** Goes up each time the known waystones change. */
 	static int changes() {
-		check();
 		return changes;
 	}
 
 	/** The player left the server or joined another; the next one sends its own. */
 	public static void clear() {
 		KNOWN.clear();
+		changes++;
+	}
+
+	/** For the game tests, which have no Waystones mod: waystones whose block the client sees back at their spot. */
+	private static final Set<UUID> BLOCK_BACK_FOR_TESTS = new HashSet<>();
+
+	/** For the game tests: Waystones told the client of this waystone, as a full list of one kind would. */
+	public static void knownForTests(Waypoint waystone) {
+		waystone.kind = Waypoint.Kind.WAYSTONE;
+		KNOWN.computeIfAbsent("diorama:test_waystone", k -> new LinkedHashMap<>()).put(waystone.id, waystone);
+		changes++;
+	}
+
+	/** For the game tests: Waystones sent this full list of one kind, handled as one from the server is. */
+	public static void listForTests(String kind, List<Waypoint> waystones) {
+		for (Waypoint waystone : waystones) {
+			waystone.kind = Waypoint.Kind.WAYSTONE;
+		}
+		received(kind, waystones);
+	}
+
+	/**
+	 * For the game tests: the waystone was picked up with Silk Touch, and the server goes on
+	 * sending it where it stood ({@link #PICKED_UP}); with {@code back}, the client then sees its
+	 * block there again, which no event announces.
+	 */
+	public static void pickedUpForTests(UUID id, boolean back) {
+		if (back) {
+			BLOCK_BACK_FOR_TESTS.add(id);
+			return;
+		}
+		// As a removal and then the next full list, which still has it, would leave it.
+		Waypoint waypoint = known(id);
+		if (waypoint != null) {
+			PICKED_UP.put(id, spot(waypoint));
+		}
 		changes++;
 	}
 }

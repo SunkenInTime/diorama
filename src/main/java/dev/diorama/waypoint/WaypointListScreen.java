@@ -162,6 +162,13 @@ public final class WaypointListScreen extends Screen {
 	 */
 	private int waystoneChanges;
 	private boolean hadWaystones;
+	/**
+	 * The store's {@link WaypointStore#revision} the rows were made from, set only when they're
+	 * made. Whenever the store's is another, by the player's own change here or an addon's, the
+	 * rows are made again at the next tick ({@link #refreshRows}), so a row for a waypoint that's
+	 * gone never stays.
+	 */
+	private int storeRevision;
 	/** Set by the add-waypoint key; tick() opens the editor. */
 	private boolean newWaypointPressed;
 	private boolean xaeroRead;
@@ -360,7 +367,7 @@ public final class WaypointListScreen extends Screen {
 	/** Moves the selected rows to one of the player's folders, or with an empty name back to their dimensions' own. */
 	private void moveTo(String folder) {
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		if (store == null || !this.stillHeld(store, this.movable())) {
 			return;
 		}
 		for (Waypoint waypoint : this.movable()) {
@@ -386,8 +393,37 @@ public final class WaypointListScreen extends Screen {
 		return left + ARROW + ACTION_GAP;
 	}
 
+	/**
+	 * A selected row's waypoint as the rows are made again: the same one, if it's still listed. A
+	 * waystone is a new object each time the server sends it, so it's found again among the
+	 * waystones by its ID; only Hide, Show and Teleport act on one.
+	 */
+	private static @Nullable Waypoint again(Waypoint waypoint, java.util.Set<Waypoint> listed, java.util.Map<UUID, Waypoint> waystones) {
+		if (listed.contains(waypoint)) {
+			return waypoint;
+		}
+		return waypoint.kind == Waypoint.Kind.WAYSTONE ? waystones.get(waypoint.id) : null;
+	}
+
+	/** What the Delete waiting for its second click deletes: the selected rows but waystones, or the one row. */
+	private List<Waypoint> deleting() {
+		return this.marked.size() > 1 ? this.movable() : this.selected == null ? List.of() : List.of(this.selected);
+	}
+
+	/** Whether two lists hold the same waypoints, the objects themselves, in any order. */
+	private static boolean sameWaypoints(List<Waypoint> one, List<Waypoint> two) {
+		if (one.size() != two.size()) {
+			return false;
+		}
+		java.util.Set<Waypoint> set = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+		set.addAll(one);
+		return set.containsAll(two);
+	}
+
 	@Override
 	protected void init() {
+		// A Delete waiting for its second click stays so only while the rows made again leave it the same waypoints to delete.
+		List<Waypoint> armedFor = this.armed ? this.deleting() : null;
 		this.all.clear();
 		this.others.clear();
 		WaypointStore store = WaypointStore.get();
@@ -406,19 +442,32 @@ public final class WaypointListScreen extends Screen {
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
 		this.hadWaystones = store != null && !store.waystones().isEmpty();
+		// -1 with no store: one that comes later, at revision 0, still makes the rows again.
+		this.storeRevision = store == null ? -1 : store.revision();
 		this.folderArmed = false;
 		this.folderActions.clear();
 		this.folderMenu = null;
-		if (this.selected != null && !this.all.contains(this.selected) && !this.others.contains(this.selected)) {
-			// A waystone is a new object each time the server sends it: find it again by its id.
-			UUID id = this.selected.id;
-			this.selected = java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> w.id.equals(id)).findFirst().orElse(null);
-		}
-		if (!this.marked.isEmpty()) {
-			java.util.Set<UUID> ids = new java.util.HashSet<>();
-			this.marked.forEach(w -> ids.add(w.id));
+		// The selection is kept as the same waypoints, not the same IDs: a file can hold two waypoints
+		// with one ID, and the one not selected must not join the selection or take a selected one's place.
+		if (this.selected != null || !this.marked.isEmpty()) {
+			java.util.Set<Waypoint> listed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+			listed.addAll(this.all);
+			listed.addAll(this.others);
+			java.util.Map<UUID, Waypoint> waystones = new java.util.HashMap<>();
+			for (Waypoint waypoint : listed) {
+				if (waypoint.kind == Waypoint.Kind.WAYSTONE) {
+					waystones.putIfAbsent(waypoint.id, waypoint);
+				}
+			}
+			this.selected = this.selected == null ? null : again(this.selected, listed, waystones);
+			List<Waypoint> wasMarked = List.copyOf(this.marked);
 			this.marked.clear();
-			java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> ids.contains(w.id)).forEach(this.marked::add);
+			for (Waypoint waypoint : wasMarked) {
+				Waypoint now = again(waypoint, listed, waystones);
+				if (now != null) {
+					this.marked.add(now);
+				}
+			}
 		}
 		if (!this.xaeroRead) {
 			this.xaeroRead = true;
@@ -475,6 +524,7 @@ public final class WaypointListScreen extends Screen {
 			this.sortDirection = null;
 			this.actions.clear();
 			this.marked.clear();
+			this.armed = false;
 			this.move = null;
 			this.visibility = null;
 			this.confirm = null;
@@ -582,6 +632,11 @@ public final class WaypointListScreen extends Screen {
 			}
 		}).size(20, 20).build());
 		this.filter();
+		if (armedFor != null && this.armed && !sameWaypoints(armedFor, this.deleting())) {
+			// The rows made again would have it delete other waypoints than the player clicked it for: it's asked again.
+			this.armed = false;
+			this.placeRowButtons();
+		}
 		this.setInitialFocus(box);
 	}
 
@@ -1453,9 +1508,72 @@ public final class WaypointListScreen extends Screen {
 				this.resort(store);
 			}
 		}
+		// The waypoints changed since the rows were made: by the player here, or by an addon. A row
+		// for one deleted goes, and the selection with it; one changed shows as it is now.
+		WaypointStore store = WaypointStore.get();
+		if (store != null && store.revision() != this.storeRevision) {
+			this.refreshRows();
+		}
 		if (this.newWaypointPressed) {
 			this.newWaypointPressed = false;
 			this.newWaypoint();
+		}
+	}
+
+	/**
+	 * Whether the store still has every one of these rows' waypoints (a waystone is the Waystones
+	 * mod's, and always counts). If one went since the rows were made, by an addon say, the rows
+	 * are made again now and the click does nothing: the player sees what's there and can click
+	 * again.
+	 */
+	private boolean stillHeld(WaypointStore store, java.util.Collection<Waypoint> acting) {
+		for (Waypoint waypoint : acting) {
+			if (waypoint.kind != Waypoint.Kind.WAYSTONE && !store.holds(waypoint)) {
+				this.refreshRows();
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Makes the rows again after the waypoints changed, keeping what the player had in hand: the
+	 * search box's text, whether it had the focus, and where its caret was; and the row at the top
+	 * of the list, if it's still there; and the selected rows still there, as the same waypoints
+	 * ({@link #init}). What's lost: an open list of folders, a folder's Delete waiting for its
+	 * second click, a row's Delete waiting for its second click if it would now delete other
+	 * waypoints than it was clicked for, and a selection of text in the search box.
+	 */
+	private void refreshRows() {
+		EditBox box = this.search;
+		boolean focused = box != null && this.getFocused() == box;
+		int caret = box == null ? 0 : box.getCursorPosition();
+		UUID top = null;
+		int below = 0;
+		for (int line = this.scroll; line < this.lines() && top == null; line++) {
+			int row = this.rowOn(line);
+			if (row >= 0) {
+				top = this.rows.get(row).id;
+				below = line - this.scroll;
+			}
+		}
+		this.rebuildWidgets();
+		EditBox again = this.search;
+		if (again != null) {
+			if (!focused && this.getFocused() == again) {
+				this.setFocused(null);
+			}
+			int at = Math.min(caret, again.getValue().length());
+			again.setCursorPosition(at);
+			again.setHighlightPos(at);
+		}
+		if (top != null) {
+			for (int row = 0; row < this.rows.size(); row++) {
+				if (this.rows.get(row).id.equals(top)) {
+					this.scrollTo(this.lineOf(row) - below);
+					break;
+				}
+			}
 		}
 	}
 
@@ -1472,7 +1590,8 @@ public final class WaypointListScreen extends Screen {
 	}
 
 	private void edit(@Nullable Waypoint waypoint) {
-		if (waypoint != null && waypoint.editable()) {
+		WaypointStore store = WaypointStore.get();
+		if (waypoint != null && waypoint.editable() && store != null && this.stillHeld(store, List.of(waypoint))) {
 			this.minecraft.gui.setScreen(new WaypointEditScreen(this, waypoint, false));
 		}
 	}
@@ -1482,7 +1601,7 @@ public final class WaypointListScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		if (store == null || !this.stillHeld(store, this.marked.size() > 1 ? this.marked : List.of(waypoint))) {
 			return;
 		}
 		if (this.marked.size() > 1) {
@@ -1510,6 +1629,9 @@ public final class WaypointListScreen extends Screen {
 
 	private void delete(@Nullable Waypoint waypoint) {
 		WaypointStore store = WaypointStore.get();
+		if (store != null && !this.stillHeld(store, this.marked.size() > 1 ? this.movable() : waypoint == null ? List.of() : List.of(waypoint))) {
+			return;
+		}
 		if (store != null && this.marked.size() > 1) {
 			this.movable().forEach(store::remove);
 		} else if (store != null && waypoint != null) {

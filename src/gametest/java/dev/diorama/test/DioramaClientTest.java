@@ -93,6 +93,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("addon-api")) {
 			AddonApiTest.titleScreen(context);
+			AddonWaypointsTest.titleScreen(context);
 		}
 		if (tests.contains("addons-restart")) {
 			AddonsSettingsTest.restartTitleScreen(context);
@@ -120,6 +121,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Diorama.LOGGER.info("Map warm-up done");
 			if (tests.contains("addon-api")) {
 				AddonApiTest.firstWorld(context, world);
+				AddonWaypointsTest.firstWorld(context, world);
 			}
 			if (tests.contains("addons-settings")) {
 				AddonsSettingsTest.run(context, world);
@@ -444,14 +446,24 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("addon-api")) {
 			AddonApiTest.left(context);
+			AddonWaypointsTest.left(context);
 		}
 		if (tests.contains("waypoint-export-xaero")) {
 			WaypointExportTest.intoXaero(context);
 		}
 		if ((spawnCell != null || tests.contains("addon-api") || tests.contains("xaero-real") || tests.contains("waypoint-export-xaero") || tests.contains("waypoints") || tests.contains("waystones") || tests.contains("nether-roof") || tests.contains("saved-chunks") || tests.contains("redraw") || tests.contains("facing")) && save != null) {
 			try (TestSingleplayerContext reopened = save.open()) {
+				if (tests.contains("waypoints")) {
+					// First: addon-api's part below clears the world's waypoints for its own pictures.
+					temporaryGone(context);
+				}
 				if (tests.contains("addon-api")) {
+					AddonWaypointsTest.reopened(context);
 					AddonApiTest.reopened(context, reopened);
+					//? if >=1.21.6 && fabric {
+					AddonWaypointsTest.frames(context, reopened);
+					//?}
+					AddonWaypointsTest.measure(context);
 				}
 				if (tests.contains("nether-roof")) {
 					NetherRoofTest.reopened(context, reopened);
@@ -465,9 +477,6 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("redraw")) {
 					RedrawTest.reopened(context);
 					RedrawTest.underRoof(context, reopened);
-				}
-				if (tests.contains("waypoints")) {
-					temporaryGone(context);
 				}
 				if (tests.contains("xaero-real")) {
 					XaeroRealTest.reopened(context);
@@ -6427,7 +6436,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	}
 
 	/** Presses a button the way a click does. */
-	private static void press(net.minecraft.client.gui.components.Button button) {
+	static void press(net.minecraft.client.gui.components.Button button) {
 		//? if >=1.21.9 {
 		button.onPress(null);
 		//?} else {

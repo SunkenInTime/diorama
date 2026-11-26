@@ -55,6 +55,8 @@ public final class Maps {
 	private final String worldKey;
 	private final Path file;
 	private Saved saved = new Saved();
+	/** Goes up with every change saved to the list, so what copies which map is in use can tell it's out of date. */
+	private int version;
 
 	/** What {@code maps.json} holds: for each dimension that has more than its main map, by ID. */
 	private static final class Saved {
@@ -143,6 +145,41 @@ public final class Maps {
 		known.addAll(this.dimensions());
 		known.add(here);
 		return known.stream().filter(dimension -> dimension.equals(here) || this.list(dimension).stream().anyMatch(map -> Files.isDirectory(map.folder()))).toList();
+	}
+
+	/** Goes up with every change saved to this list ({@link #inUse} among them). */
+	public int version() {
+		return this.version;
+	}
+
+	/** The dimensions whose map in use isn't their main one, by the ID of the one that is. */
+	public Map<String, String> inUse() {
+		Map<String, String> out = new LinkedHashMap<>();
+		for (Map.Entry<String, Dimension> dimension : this.saved.dimensions.entrySet()) {
+			if (!dimension.getValue().active.isEmpty()) {
+				out.put(dimension.getKey(), dimension.getValue().active);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * The IDs of every dimension's maps, as {@link #list} orders them, for the dimensions this
+	 * list has a record of; one it hasn't has only its main map.
+	 */
+	public Map<String, List<String>> saved() {
+		Map<String, List<String>> out = new LinkedHashMap<>();
+		for (Map.Entry<String, Dimension> dimension : this.saved.dimensions.entrySet()) {
+			List<String> ids = new ArrayList<>();
+			if (!dimension.getValue().mainDeleted) {
+				ids.add(MAIN);
+			}
+			for (Entry entry : dimension.getValue().maps) {
+				ids.add(entry.id);
+			}
+			out.put(dimension.getKey(), ids);
+		}
+		return out;
 	}
 
 	/** The ID of the map in use in a dimension. */
@@ -458,6 +495,7 @@ public final class Maps {
 	/** Saves the list; if that fails, puts back the list as it was before the change and says so. */
 	private boolean saveOrUndo(String before) {
 		if (this.save()) {
+			this.version++;
 			return true;
 		}
 		this.saved = GSON.fromJson(before, Saved.class);

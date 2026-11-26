@@ -82,6 +82,14 @@ public final class WaypointEditScreen extends Screen {
 	/** The icon picked, by {@link dev.diorama.render.WaypointIcons} id; empty shows the initials. */
 	private String icon;
 	private @Nullable Button iconButton;
+	/**
+	 * The waypoint as the editor opened on it, so Save writes only what the player changed here:
+	 * what else changed it meanwhile (an addon moving or hiding it, say) stays.
+	 */
+	private final Opened opened;
+
+	private record Opened(String name, String shownName, String initials, String dimension, int x, int y, int z, int color, boolean visible, String icon, String folder) {
+	}
 
 	public WaypointEditScreen(@Nullable Screen parent, Waypoint waypoint, boolean isNew) {
 		super(Component.translatable(isNew ? "diorama.waypoint.new" : "diorama.waypoint.edit"));
@@ -94,6 +102,8 @@ public final class WaypointEditScreen extends Screen {
 		WaypointStore store = WaypointStore.get();
 		String known = store == null ? null : store.folderName(waypoint.folder);
 		this.folder = known == null ? "" : known;
+		this.opened = new Opened(waypoint.name, waypoint.shownName(), waypoint.initials, waypoint.dimension, waypoint.x, waypoint.y, waypoint.z, this.color, this.visible, this.icon,
+			this.folder);
 		this.matchBars();
 	}
 
@@ -733,21 +743,60 @@ public final class WaypointEditScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		// No world, or the waypoint was deleted while the editor was open (by an addon, say): saving
+		// closes the editor and changes nothing, as with no world, rather than bring it back or
+		// change a waypoint that's gone.
+		if (store == null || this.gone(store)) {
 			this.onClose();
 			return;
 		}
-		this.waypoint.edited |= this.waypoint.kind.isPortal() && (!shown.name.equals(this.waypoint.name)
-			|| shown.x != this.waypoint.x || shown.y != this.waypoint.y || shown.z != this.waypoint.z);
-		this.waypoint.name = shown.name;
-		this.waypoint.initials = this.initials.getValue().trim();
-		this.waypoint.x = shown.x;
-		this.waypoint.y = shown.y;
-		this.waypoint.z = shown.z;
-		this.waypoint.color = this.color;
-		this.waypoint.icon = this.icon;
-		this.waypoint.visible = this.visible;
-		this.waypoint.folder = this.folder;
+		// A new waypoint takes everything; one already saved takes only what the player changed here.
+		boolean all = this.isNew;
+		boolean renamed = all || this.renamed();
+		// Each coordinate on its own: the player's Y and an addon's move along X both stay.
+		boolean movedX = all || shown.x != this.opened.x();
+		boolean movedY = all || shown.y != this.opened.y();
+		boolean movedZ = all || shown.z != this.opened.z();
+		// Moved to another dimension meanwhile: coordinates typed for the one the editor shows go there
+		// with all three, so none of them lands in a dimension it wasn't typed for.
+		boolean otherDimension = !all && !this.waypoint.dimension.equals(this.opened.dimension()) && (movedX || movedY || movedZ);
+		if (otherDimension) {
+			movedX = movedY = movedZ = true;
+		}
+		this.waypoint.edited |= this.waypoint.kind.isPortal() && (renamed && !shown.name.equals(this.waypoint.name)
+			|| movedX && shown.x != this.waypoint.x || movedY && shown.y != this.waypoint.y || movedZ && shown.z != this.waypoint.z);
+		if (renamed) {
+			this.waypoint.name = shown.name;
+		}
+		String initials = this.initials.getValue().trim();
+		if (all || !initials.equals(this.opened.initials())) {
+			this.waypoint.initials = initials;
+		}
+		if (otherDimension) {
+			this.waypoint.dimension = this.opened.dimension();
+			store.onMapInUse(this.waypoint);
+		}
+		if (movedX) {
+			this.waypoint.x = shown.x;
+		}
+		if (movedY) {
+			this.waypoint.y = shown.y;
+		}
+		if (movedZ) {
+			this.waypoint.z = shown.z;
+		}
+		if (all || this.color != this.opened.color()) {
+			this.waypoint.color = this.color;
+		}
+		if (all || !this.icon.equals(this.opened.icon())) {
+			this.waypoint.icon = this.icon;
+		}
+		if (all || this.visible != this.opened.visible()) {
+			this.waypoint.visible = this.visible;
+		}
+		if (all || !this.folder.equals(this.opened.folder())) {
+			this.waypoint.folder = this.folder;
+		}
 		// Saving a temporary waypoint from the editor keeps it; otherwise a renamed one would still
 		// vanish on leaving the world.
 		if (this.waypoint.kind == Waypoint.Kind.TEMPORARY) {
@@ -759,6 +808,17 @@ public final class WaypointEditScreen extends Screen {
 			store.changed();
 		}
 		this.onClose();
+	}
+
+	/**
+	 * Whether the player changed the name here: the field reads other than when the editor opened.
+	 * An automatic pin's name shows in the player's language, so the field is compared with that.
+	 */
+	private boolean renamed() {
+		String typed = this.name.getValue().trim();
+		String shown = this.opened.shownName();
+		shown = shown.length() > MAX_NAME ? shown.substring(0, MAX_NAME) : shown;
+		return !typed.isEmpty() && !typed.equals(shown.trim());
 	}
 
 	/** A coordinate as typed, or the saved one while the field doesn't read as a number. */
@@ -809,6 +869,11 @@ public final class WaypointEditScreen extends Screen {
 		} catch (NumberFormatException e) {
 			return null;
 		}
+	}
+
+	/** Whether the waypoint being edited was deleted since the screen that opened this saw it, by an addon say. */
+	private boolean gone(WaypointStore store) {
+		return !this.isNew && !store.holds(this.waypoint);
 	}
 
 	@Override

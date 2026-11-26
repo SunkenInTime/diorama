@@ -4,11 +4,14 @@ import dev.diorama.Diorama;
 import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
+import dev.diorama.api.Waypoints;
+import dev.diorama.api.World;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import net.minecraft.client.Minecraft;
@@ -18,7 +21,8 @@ import org.jspecify.annotations.Nullable;
  * One addon Diorama found, and the API it was handed: tied to the mod ID its loader reported, so
  * what it holds can be let go when it fails. It fails once: then what it hid shows again, its later
  * calls do nothing, and nothing of it is called again. The player can stop it hiding anything
- * ({@link #allow}): its handles stay open for it, and just aren't counted.
+ * ({@link #allow}): its handles stay open for it, and just aren't counted. That doesn't stop its
+ * waypoint edits ({@link AddonWaypoints}): the Addons tab says it stops what the addon hides.
  */
 final class Addon implements DioramaApi, Hud {
 	/**
@@ -40,6 +44,7 @@ final class Addon implements DioramaApi, Hud {
 	private final String name;
 	/** Its open handles, so they can be closed for it, and counted or not as the player picks. */
 	private final List<HudHides.Hold> holds = new ArrayList<>();
+	private final AddonWaypoints waypoints = new AddonWaypoints(this);
 	private boolean failed;
 	private boolean allowed;
 
@@ -203,6 +208,18 @@ final class Addon implements DioramaApi, Hud {
 		HudHides.Hold hold = new HudHides.Hold(this, bits);
 		this.holds.add(hold);
 		return hold;
+	}
+
+	@Override
+	public Optional<World> world() {
+		checkThread();
+		return CurrentWorld.world();
+	}
+
+	@Override
+	public Waypoints waypoints() {
+		checkThread();
+		return this.waypoints;
 	}
 
 	@Override

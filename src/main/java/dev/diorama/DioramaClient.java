@@ -100,7 +100,7 @@ public final class DioramaClient {
 	/** Called at the end of every client tick. */
 	public static void tick(Minecraft mc) {
 		// On the first tick every mod is set up, Waystones and its event library included.
-		Waystones.start();
+		Waystones.tick();
 		dev.diorama.addon.Addons.tick(mc);
 		MapSession.tick(mc);
 		Waypoints.watchSleep(mc);
