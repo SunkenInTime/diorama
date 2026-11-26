@@ -562,22 +562,26 @@ final class AddonWaypointsTest {
 	private static void staleWorlds(ClientGameTestContext context, List<String> wrong) {
 		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		// A waypoint get() finds while the world is known, so its lookup while it isn't means something.
+		UUID known = addOne(context, "Known before", 2, 9);
 		String unknown = context.computeOnClient(mc -> {
 			World before = api().world().orElseThrow();
+			boolean foundBefore = waypoints().get(known).isPresent();
 			WorldKey.unknownForTests = true;
 			try {
 				EditResult result = waypoints().edit(before, batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
-				return api().world().isPresent() + " " + waypoints().all().size() + " " + waypoints().revision() + " " + waypoints().get(UUID.randomUUID()).isPresent() + " "
+				return api().world().isPresent() + " " + waypoints().all().size() + " " + waypoints().revision() + " " + foundBefore + ">" + waypoints().get(known).isPresent() + " "
 					+ result.applied();
 			} finally {
 				WorldKey.unknownForTests = false;
 			}
 		});
 		boolean again = context.computeOnClient(mc -> api().world().map(w -> w.worldId().equals(worldId)).orElse(false));
-		if (!unknown.equals("false 0 0 false false") || !again) {
-			wrong.add("While the world isn't known: world() present, all() size, revision(), get() present, a batch applied: " + unknown + " (expected false 0 0 false false); known again "
-				+ again);
+		if (!unknown.equals("false 0 0 true>false false") || !again) {
+			wrong.add("While the world isn't known: world() present, all() size, revision(), get() of a known waypoint before>while, a batch applied: " + unknown
+				+ " (expected false 0 0 true>false false); known again " + again);
 		}
+		removeIds(context, List.of(known));
 
 		String elsewhere = context.computeOnClient(mc -> {
 			EditResult result = waypoints().edit(nowhere(), batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
@@ -1028,7 +1032,8 @@ final class AddonWaypointsTest {
 			return w;
 		});
 		tick(context, sync, 3);
-		steps.add("added in Diorama " + (other.named("Synced here") != null));
+		String exported = other.named("Synced here");
+		steps.add("added in Diorama " + (exported != null));
 		context.runOnClient(mc -> {
 			mine.name = "Synced renamed";
 			WaypointStore.get().changed();
@@ -1048,7 +1053,8 @@ final class AddonWaypointsTest {
 		steps.add("moved to a folder in Diorama " + (theirs != null && other.pins().get(theirs) != null && other.pins().get(theirs).folder().equals("Sync folder")));
 		context.runOnClient(mc -> WaypointStore.get().remove(mine));
 		tick(context, sync, 3);
-		steps.add("deleted in Diorama " + (theirs != null && !other.pins().containsKey(theirs)));
+		// The copy first made is the one renamed and deleted: none is left behind.
+		steps.add("deleted in Diorama " + (theirs != null && theirs.equals(exported) && !other.pins().containsKey(theirs) && other.named("Synced here") == null));
 
 		// The other mod to Diorama.
 		String id = context.computeOnClient(mc -> other.add(new OtherMod.Pin("From other", at.getX() - 6, at.getY(), at.getZ() - 6, "minecraft:overworld", 0x46A758, true, "")));
@@ -1300,33 +1306,37 @@ final class AddonWaypointsTest {
 		//?} else {
 		/*context.runOnClient(mc -> mc.player.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, net.minecraft.world.phys.Vec3.atCenterOf(middle)));
 		*///?}
-		context.runOnClient(mc -> {
-			AllocProbe.MINIMAP.attach();
-			AllocProbe.WAYPOINTS.attach();
-		});
-		DioramaClientTest.settle(context, 20);
-		context.takeScreenshot("addon-api-14-frames");
-		try (WorldPause paused = WorldPause.pause(context)) {
-			AllocProbe.MINIMAP.count(context, "warm-up", 150);
-			AllocProbe.WAYPOINTS.count(context, "warm-up", 150);
-			int passes = context.computeOnClient(mc -> TestAddon.sync().passes());
-			long minimapPolling = AllocProbe.MINIMAP.count(context, "polling sync ticking", 200);
-			long waypointsPolling = AllocProbe.WAYPOINTS.count(context, "polling sync ticking", 200);
-			int passesWhile = context.computeOnClient(mc -> TestAddon.sync().passes()) - passes;
-			context.runOnClient(mc -> syncTicking = false);
-			long minimapNone = AllocProbe.MINIMAP.count(context, "no addon polling", 200);
-			long waypointsNone = AllocProbe.WAYPOINTS.count(context, "no addon polling", 200);
-			context.runOnClient(mc -> syncTicking = true);
-			long minimapAgain = AllocProbe.MINIMAP.count(context, "polling again", 200);
-			long waypointsAgain = AllocProbe.WAYPOINTS.count(context, "polling again", 200);
-			Diorama.LOGGER.info("addon-api alloc: medians a frame: minimap {} polling, {} not, {} polling again; world waypoints {} polling, {} not, {} polling again; sync passes while idle {}",
-				minimapPolling, minimapNone, minimapAgain, waypointsPolling, waypointsNone, waypointsAgain, passesWhile);
+		try {
+			context.runOnClient(mc -> {
+				AllocProbe.MINIMAP.attach();
+				AllocProbe.WAYPOINTS.attach();
+			});
+			DioramaClientTest.settle(context, 20);
+			context.takeScreenshot("addon-api-14-frames");
+			try (WorldPause paused = WorldPause.pause(context)) {
+				AllocProbe.MINIMAP.count(context, "warm-up", 150);
+				AllocProbe.WAYPOINTS.count(context, "warm-up", 150);
+				int passes = context.computeOnClient(mc -> TestAddon.sync().passes());
+				long minimapPolling = AllocProbe.MINIMAP.count(context, "polling sync ticking", 200);
+				long waypointsPolling = AllocProbe.WAYPOINTS.count(context, "polling sync ticking", 200);
+				int passesWhile = context.computeOnClient(mc -> TestAddon.sync().passes()) - passes;
+				context.runOnClient(mc -> syncTicking = false);
+				long minimapNone = AllocProbe.MINIMAP.count(context, "no addon polling", 200);
+				long waypointsNone = AllocProbe.WAYPOINTS.count(context, "no addon polling", 200);
+				context.runOnClient(mc -> syncTicking = true);
+				long minimapAgain = AllocProbe.MINIMAP.count(context, "polling again", 200);
+				long waypointsAgain = AllocProbe.WAYPOINTS.count(context, "polling again", 200);
+				Diorama.LOGGER.info("addon-api alloc: medians a frame: minimap {} polling, {} not, {} polling again; world waypoints {} polling, {} not, {} polling again; sync passes while idle {}",
+					minimapPolling, minimapNone, minimapAgain, waypointsPolling, waypointsNone, waypointsAgain, passesWhile);
+			}
+		} finally {
+			// Whatever happened above: the sync stops ticking and the pins go, for whatever runs after.
+			context.runOnClient(mc -> {
+				syncTicking = false;
+				pins.forEach(WaypointStore.get()::remove);
+				TestAddon.sync().tick();
+			});
 		}
-		context.runOnClient(mc -> {
-			syncTicking = false;
-			pins.forEach(WaypointStore.get()::remove);
-			TestAddon.sync().tick();
-		});
 	}
 	//?}
 
