@@ -40,7 +40,14 @@ import org.jspecify.annotations.Nullable;
  * reading allocated 2 MB a build.
  *
  * <p>Logs, for each part: the builds, bytes and time a build, builds a second of game time, and what
- * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe).
+ * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe), and
+ * where the game's memory is ({@link MemoryLog}).
+ *
+ * <p>On boat, run it on a large VM ({@code --type large}). What stays in use after a full collection
+ * is 0.5 to 0.7 GB from the first part to the last, but the heap grows to its cap (40% of the VM)
+ * before collecting it all, memory outside the heap (the GL driver's, on a VM with no GPU, among it)
+ * adds about 1.5 GB, and Gradle keeps 1.1 to 1.9 GB: on a
+ * default VM that left 0.4 to 0.9 GB of its 8 GB, and once the kernel killed the game.
  */
 final class FogMaskBuildTest {
 	private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
@@ -78,8 +85,14 @@ final class FogMaskBuildTest {
 	 * the first build needs: under it, something new that allocated 100 KB every build would pass.
 	 */
 	private static final long MOST_TILT_MINIMAP_MEDIAN = 8 * 1024;
-	/** Ticks the redraw from the save after the tilt change may take. */
-	private static final int REDRAW_TICKS = 6000;
+	/**
+	 * Ticks the redraw from the save after the tilt change may go without drawing a chunk. It draws
+	 * hundreds a minute; the time it takes in all is up to the VM: 2900 to more than 6000 ticks on
+	 * NeoForge on a default boat VM.
+	 */
+	private static final int REDRAW_STALLED_TICKS = 2400;
+	/** Ticks the redraw may take in all, however steadily it goes. */
+	private static final int REDRAW_TICKS = 18000;
 	private static final int LARGE_WIDTH = 5120;
 	private static final int LARGE_HEIGHT = 1440;
 	/** The tiles a build read when the lookup table dropped every key: the large view must read more, or it tests nothing. */
@@ -92,6 +105,12 @@ final class FogMaskBuildTest {
 	private static final double WALK = 0.216;
 	private static final double ELYTRA = 1.6;
 	private static final int FLY_Y = 120;
+	/**
+	 * Blocks "cave minimap, walking" walks, more than the 128 map units a side of the squares the
+	 * minimap's mask origin snaps to at its zoom: it crosses into another square, so the mask is
+	 * built again however the walk lines up with them.
+	 */
+	private static final int CAVE_WALK = 140;
 
 	private static final class Part {
 		final String name;
@@ -110,6 +129,8 @@ final class FogMaskBuildTest {
 		/** The overview levels the remembered map was read at, a bit each. */
 		int rememberedLods;
 		int mostTiles;
+		/** Builds at a mask origin other than the build before's, in this part or the one before. */
+		int originMoves;
 		long @Nullable [] frames;
 		/** Each build's bytes, for the part's median; made here so keeping them allocates nothing. */
 		final long[] each = new long[4096];
@@ -132,6 +153,9 @@ final class FogMaskBuildTest {
 	private static long checkBytes;
 	private static long checkNanos;
 	private static int checked;
+	/** Where the last build's mask started, for {@link Part#originMoves}. */
+	private static double lastOriginU = Double.NaN;
+	private static double lastOriginV = Double.NaN;
 	private static int mismatches;
 	private static @Nullable String firstMismatch;
 	/** Set if the allocation counter ever gave -1, which would make every build look free. */
@@ -178,6 +202,8 @@ final class FogMaskBuildTest {
 		PARTS.clear();
 		FULL_MAP_BUILDS.clear();
 		checked = 0;
+		lastOriginU = Double.NaN;
+		lastOriginV = Double.NaN;
 		mismatches = 0;
 		firstMismatch = null;
 		rememberedChecked = 0;
@@ -198,6 +224,7 @@ final class FogMaskBuildTest {
 		if (off != null) {
 			throw new AssertionError("fog-mask can't measure what fog mask builds allocate: " + off);
 		}
+		Diorama.LOGGER.info("fog-mask | memory at the start | {}", MemoryLog.line());
 		boolean frames = MinimapAllocTest.register(context);
 		context.runOnClient(mc -> MapViewport.watchMasksForTests(new Watch()));
 		try {
@@ -261,18 +288,26 @@ final class FogMaskBuildTest {
 		large(context, world, x, z);
 		context.setScreen(() -> null);
 
-		// A room dug deep down off the spawn: the minimap shows a cave slice.
+		// A tunnel dug deep down off the spawn: the minimap shows a cave slice. The mask is kept while
+		// the view stays in the square its origin snaps to and nothing it reads changes, so a walk
+		// shorter than a square can rightly build nothing: this one walks further than a square
+		// across, east, along the map's columns.
 		int caveX = x + 300;
 		int caveY = 20;
+		if (Projection.u(caveX + 1, z) - Projection.u(caveX, z) != 1) {
+			throw new AssertionError("The map isn't facing north, so walking east in \"cave minimap, walking\" wouldn't cross the mask's squares");
+		}
+		int half = CAVE_WALK / 2 + 6;
 		world.getServer().runCommand("tp @a " + caveX + " " + FLY_Y + " " + z);
 		DioramaClientTest.settle(context, 40);
-		world.getServer().runCommand("fill " + (caveX - 12) + " " + (caveY - 1) + " " + (z - 4) + " " + (caveX + 12) + " " + (caveY + 4) + " " + (z + 4) + " stone");
-		world.getServer().runCommand("fill " + (caveX - 11) + " " + caveY + " " + (z - 2) + " " + (caveX + 11) + " " + (caveY + 2) + " " + (z + 2) + " air");
-		world.getServer().runCommand("tp @a " + (caveX - 10) + " " + caveY + " " + z + " -90 0");
+		world.getServer().runCommand("fill " + (caveX - half - 1) + " " + (caveY - 1) + " " + (z - 4) + " " + (caveX + half + 1) + " " + (caveY + 4) + " " + (z + 4) + " stone");
+		world.getServer().runCommand("fill " + (caveX - half) + " " + caveY + " " + (z - 2) + " " + (caveX + half) + " " + (caveY + 2) + " " + (z + 2) + " air");
+		int walkFrom = caveX - CAVE_WALK / 2;
+		world.getServer().runCommand("tp @a " + walkFrom + " " + caveY + " " + z + " -90 0");
 		context.runOnClient(mc -> mc.player.getAbilities().flying = false);
 		DioramaClientTest.settle(context, 60);
 		measure(context, world, "cave minimap, standing", frames, 100, null);
-		measure(context, world, "cave minimap, walking", frames, 100, tick -> new double[] {caveX - 10 + tick * WALK, caveY, z});
+		measure(context, world, "cave minimap, walking", frames, (int) Math.ceil(CAVE_WALK / WALK), tick -> new double[] {walkFrom + tick * WALK, caveY, z});
 		double cu = Projection.u(caveX, z);
 		double cv = Projection.v(caveX, caveY, z);
 		// Counted from before the screen opens: its first frame may already build the mask it shows.
@@ -335,24 +370,37 @@ final class FogMaskBuildTest {
 
 	/**
 	 * Waits for the map to be drawn again from the save after the tilt changed: everything the
-	 * player went over, a few hundred tiles at about 400 ms each on a VM with no GPU, beside the
-	 * baker. Two minutes wasn't always enough on NeoForge.
+	 * player went over, thousands of chunks, nearest first, beside the baker. How long that takes is
+	 * up to the VM, so the wait goes on as long as chunks are being drawn, and fails if none is for
+	 * {@link #REDRAW_STALLED_TICKS}, or after {@link #REDRAW_TICKS} in all.
 	 */
 	private static void waitForRedraw(ClientGameTestContext context) {
+		int last = Integer.MIN_VALUE;
+		int drawnAt = 0;
 		for (int waited = 0; ; waited += 20) {
-			String left = context.computeOnClient(mc -> {
+			// {chunks left, or -1 with no import running; what to say about it}
+			Object[] state = context.computeOnClient(mc -> {
 				SavedChunkImport chunks = MapSession.get().savedChunks();
 				if (chunks == null) {
-					return "no saved-chunk import running";
+					return new Object[] {-1, "no saved-chunk import running"};
 				}
-				return chunks.idle() ? null : chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done";
+				return new Object[] {chunks.idle() ? 0 : Math.max(1, chunks.chunksLeft()), chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done"};
 			});
-			if (left == null) {
+			int left = (int) state[0];
+			if (left == 0) {
 				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
 				return;
 			}
-			if (waited >= REDRAW_TICKS) {
-				throw new AssertionError("The map wasn't drawn again from the save within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
+			if (left != last) {
+				last = left;
+				drawnAt = waited;
+			}
+			if (waited % 400 == 0) {
+				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, state[1], MemoryLog.line());
+			}
+			if (left < 0 || waited - drawnAt >= REDRAW_STALLED_TICKS || waited >= REDRAW_TICKS) {
+				throw new AssertionError("The map wasn't drawn again from the save after the tilt changed (" + state[1] + ", " + waited + " ticks waited, the last "
+					+ (waited - drawnAt) + " with no chunk drawn), so \"tilt changed, redrawn\" can't run");
 			}
 			context.waitTicks(20);
 		}
@@ -378,6 +426,7 @@ final class FogMaskBuildTest {
 		context.waitTicks(5);
 		int[] size = context.computeOnClient(mc -> new int[] {mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight()});
 		Diorama.LOGGER.info("fog-mask | large view: window {} by {} at GUI scale 1", size[0], size[1]);
+		Diorama.LOGGER.info("fog-mask | memory with the large window | {}", MemoryLog.line());
 		try {
 			if (size[0] < LARGE_WIDTH || size[1] < LARGE_HEIGHT) {
 				throw new AssertionError("The window couldn't be made " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " for the large view: it's " + size[0] + " by " + size[1]);
@@ -443,6 +492,7 @@ final class FogMaskBuildTest {
 		});
 		PARTS.put(name, counting);
 		Diorama.LOGGER.info("fog-mask | {}", line(counting));
+		Diorama.LOGGER.info("fog-mask | memory after \"{}\" | {}", name, MemoryLog.line());
 	}
 
 	private static String line(Part p) {
@@ -451,7 +501,7 @@ final class FogMaskBuildTest {
 		if (p.builds > 0) {
 			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" median ").append(p.median()).append(" min ").append(p.leastBytes).append(" max ").append(p.mostBytes)
 				.append(" | us a build mean ").append(p.nanos / p.builds / 1000).append(" max ").append(p.mostNanos / 1000)
-				.append(" | most tiles a build reads ").append(p.mostTiles);
+				.append(" | most tiles a build reads ").append(p.mostTiles).append(" | origin moved ").append(p.originMoves).append(" times");
 		}
 		if (p.rememberedBuilds > 0) {
 			text.append(" | remembered map read by ").append(p.rememberedBuilds).append(" builds, ").append(p.rememberedTileBuilds).append(" with a remembered tile read, at overview levels ").append(lods(p.rememberedLods));
@@ -514,6 +564,12 @@ final class FogMaskBuildTest {
 			if (name.startsWith("cave") && p.caveBuilds == 0) {
 				throw new AssertionError("\"" + name + "\" never built a cave slice's mask: the player wasn't underground");
 			}
+		}
+		// What makes the walk build for certain: it crossed from one of the mask's squares into another.
+		Part walk = PARTS.get("cave minimap, walking");
+		if (walk.originMoves == 0) {
+			throw new AssertionError("Walking " + CAVE_WALK + " blocks in \"cave minimap, walking\", the minimap's mask never moved to another origin (" + walk.builds
+				+ " builds): the walk didn't cross into another of the squares the mask snaps to, so a build there wasn't certain");
 		}
 		for (String name : new String[] {largeFar, largeNear}) {
 			Part p = PARTS.get(name);
@@ -597,10 +653,15 @@ final class FogMaskBuildTest {
 			checked++;
 			if (part != null) {
 				part.mostTiles = Math.max(part.mostTiles, READ.size());
+				if (!Double.isNaN(lastOriginU) && (lastOriginU != originU || lastOriginV != originV)) {
+					part.originMoves++;
+				}
 				if (layer != TileKey.SURFACE) {
 					part.caveBuilds++;
 				}
 			}
+			lastOriginU = originU;
+			lastOriginV = originV;
 			if (!Arrays.equals(BEFORE, known)) {
 				mismatches++;
 				if (firstMismatch == null) {

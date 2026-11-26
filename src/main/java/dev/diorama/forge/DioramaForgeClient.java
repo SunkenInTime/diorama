@@ -13,6 +13,7 @@ import dev.diorama.SettingsScreen;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.addon.AddonLayers;
 import dev.diorama.addon.Addons;
 import dev.diorama.api.DioramaEntrypoint;
 import dev.diorama.drawing.DrawingStore;
@@ -136,6 +137,7 @@ final class DioramaForgeClient {
 	private static void joinedOrLeft() {
 		ServerRules.onDisconnect();
 		WaypointStore.onLeave();
+		AddonLayers.onJoinOrLeave();
 		Maps.onLeave();
 		DrawingStore.onLeave();
 		WorldKey.onJoinOrLeave();

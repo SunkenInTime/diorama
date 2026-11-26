@@ -180,9 +180,6 @@ public final class Radar {
 		}
 		double selfY = viewer.getPosition(partialTick).y;
 		Settings settings = Settings.get();
-		// Entities farther above or below than the range are left off; otherwise cave mobs crowd
-		// the surface view.
-		double range = settings.radarRange;
 		float margin = 12;
 		// Held, the player list key (Tab) names everything on the minimap, as it brings out names and
 		// icons on Xaero's: a dot or a face the player doesn't know says what it is without opening the map.
@@ -201,9 +198,10 @@ public final class Radar {
 				continue;
 			}
 			Vec3 pos = entity.getPosition(partialTick);
-			// A player the server reports from afar is one the player is looking for, at whatever height,
-			// and stays on the map as they come near: the caret says which way.
-			if (Math.abs(pos.y - selfY) > range && !TrackedPlayers.tracks(entity)) {
+			// Entities farther above or below than their category's height range are left off; otherwise
+			// cave mobs crowd the surface view. A player the server reports from afar is one the player is
+			// looking for, at whatever height, and stays on the map as they come near: the caret says which way.
+			if (Math.abs(pos.y - selfY) > category.reach() && !TrackedPlayers.tracks(entity)) {
 				continue;
 			}
 			double u = Projection.u(pos.x, pos.z);

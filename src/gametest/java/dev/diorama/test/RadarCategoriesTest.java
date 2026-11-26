@@ -1,5 +1,6 @@
 package dev.diorama.test;
 
+import com.mojang.authlib.GameProfile;
 import dev.diorama.MapScreen;
 import dev.diorama.RadarCategories;
 import dev.diorama.RadarCategoriesScreen;
@@ -12,9 +13,11 @@ import dev.diorama.render.Radar;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityType;
 
@@ -22,10 +25,13 @@ import net.minecraft.world.entity.EntityType;
  * The radar's categories ({@code radar-categories}), driven as a player would: Radar tab,
  * Categories, New category, a name, its mobs picked from the list, a bigger icon and names. Then
  * the point of them (#344): with the kind a mob belongs to switched off, the mobs in the player's
- * own category stay on the radar. An old settings file keeps what it switched off.
+ * own category stay on the radar. An old settings file keeps what it switched off. And each
+ * category's own height range, with players at any height from the start.
  */
 final class RadarCategoriesTest {
 	private static final Set<String> SUMMONED = Set.of("cow", "sheep", "pig", "chicken", "husk");
+	/** The stand-in for another player. */
+	private static final int FRIEND = -424243;
 
 	private RadarCategoriesTest() {
 	}
@@ -213,6 +219,7 @@ final class RadarCategoriesTest {
 			throw new AssertionError("With the cows' category off the map's radar shows " + shown);
 		}
 		context.setScreen(() -> null);
+		heightRanges(context, world, x, y, z);
 		// The category Diorama makes when Cobblemon or Pixelmon is installed, as the list shows it.
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
@@ -271,6 +278,146 @@ final class RadarCategoriesTest {
 			restored.save();
 		});
 		world.getServer().runCommand("kill @e[type=!player]");
+	}
+
+	/**
+	 * Each category's own height range: with the radar's at its lowest, so the cave's mobs stay off
+	 * the map, a friend down there still shows, as players do at any height unless the player says
+	 * otherwise. Players set to follow the radar's go with the mobs, which is how it was for everyone
+	 * before; hostile mobs set to any height bring the husk back.
+	 */
+	private static void heightRanges(ClientGameTestContext context, TestSingleplayerContext world, int x, int y, int z) {
+		int below = y - 24;
+		world.getServer().runCommand("fill " + (x + 4) + " " + below + " " + (z + 3) + " " + (x + 6) + " " + (below + 2) + " " + (z + 5) + " air");
+		world.getServer().runCommand("summon husk " + (x + 5) + " " + below + " " + (z + 4) + " {NoAI:1b,PersistenceRequired:1b,Silent:1b,Invulnerable:1b,Tags:[\"diorama_deep\"]}");
+		int range = context.computeOnClient(mc -> Settings.get().radarRange);
+		context.runOnClient(mc -> {
+			Settings.get().radarRange = Settings.RANGES[0];
+			// Tests run one real client, so the friend is a stand-in added on the client.
+			RemotePlayer friend = new RemotePlayer(mc.level, new GameProfile(UUID.fromString("069a79f4-44e9-4726-a5be-fca90e38aaf5"), "Notch"));
+			friend.setId(FRIEND);
+			friend.snapTo(x - 4.5, below, z + 4.5);
+			//? if >=1.21 {
+			mc.level.addEntity(friend);
+			//?} else {
+			/*mc.level.addPlayer(friend.getId(), friend);
+			*///?}
+		});
+		try {
+			DioramaClientTest.settle(context, 40);
+			context.takeScreenshot("radar-height-01-friend-below-shown");
+			expectDeep(context, Set.of("player"), "With the radar's height range at 16 m and nothing else changed");
+
+			// Players follow the radar's range, on their category's screen: the friend goes with the mobs.
+			context.setScreen(() -> new RadarCategoryScreen(null, RadarCategories.kind(Radar.Kind.PLAYER)));
+			context.waitTicks(5);
+			context.getInput().setCursorPos(0, 0);
+			context.waitTicks(3);
+			context.takeScreenshot("radar-height-02-players-category");
+			DioramaClientTest.clickAlong(context, "Height range: ", 0.0);
+			context.getInput().setCursorPos(0, 0);
+			context.waitTicks(3);
+			context.takeScreenshot("radar-height-03-players-same-as-radar");
+			if (context.computeOnClient(mc -> RadarCategories.kind(Radar.Kind.PLAYER).range()) != RadarCategories.SAME_RANGE) {
+				throw new AssertionError("The left end of the Players' Height range slider isn't the radar's own range");
+			}
+			context.setScreen(() -> null);
+			context.waitTicks(10);
+			context.takeScreenshot("radar-height-04-friend-below-hidden");
+			expectDeep(context, Set.of(), "With players following the radar's 16 m");
+
+			// Hostile mobs at any height: the husk in the cave shows, the friend stays off.
+			context.setScreen(() -> new RadarCategoryScreen(null, RadarCategories.kind(Radar.Kind.HOSTILE)));
+			context.waitTicks(5);
+			DioramaClientTest.clickAlong(context, "Height range: ", 1.0);
+			if (context.computeOnClient(mc -> RadarCategories.kind(Radar.Kind.HOSTILE).range()) != RadarCategories.ANY_RANGE) {
+				throw new AssertionError("The right end of the Hostile mobs' Height range slider isn't any height");
+			}
+			context.setScreen(() -> null);
+			context.waitTicks(10);
+			context.takeScreenshot("radar-height-05-husk-below-shown");
+			expectDeep(context, Set.of("husk"), "With hostile mobs at any height and players following the radar's 16 m");
+			context.setScreen(() -> new RadarCategoriesScreen(null));
+			context.waitTicks(5);
+			context.getInput().setCursorPos(0, 0);
+			context.waitTicks(3);
+			context.takeScreenshot("radar-height-06-list");
+			context.setScreen(() -> null);
+
+			// A range of its own in blocks: 32 m reaches the husk 24 below, 16 m doesn't, whatever the radar's says.
+			context.runOnClient(mc -> RadarCategories.kind(Radar.Kind.HOSTILE).range(32));
+			expectDeep(context, Set.of("husk"), "With hostile mobs at 32 m");
+			context.runOnClient(mc -> {
+				RadarCategories.kind(Radar.Kind.HOSTILE).range(16);
+				Settings.get().radarRange = 128;
+			});
+			// The friend follows the radar's range, now 128 m, and is back; the husk keeps to its own 16 m.
+			expectDeep(context, Set.of("player"), "With hostile mobs at 16 m and the radar's range, which players follow, at 128 m");
+			// One of the player's own categories has its range too: husks in one at any height.
+			context.runOnClient(mc -> {
+				RadarCategories.Category deep = new RadarCategories.Category();
+				deep.name = "Deep";
+				deep.mobs.add("minecraft:husk");
+				deep.range = RadarCategories.ANY_RANGE;
+				Settings.get().radarCategories.add(0, deep);
+				RadarCategories.changed();
+			});
+			expectDeep(context, Set.of("husk", "player"), "With husks in a category of their own at any height");
+			// And the file keeps them.
+			context.runOnClient(mc -> {
+				Settings.get().save();
+				Settings s = Settings.reload();
+				if (s.radarCategories.get(0).range != RadarCategories.ANY_RANGE || RadarCategories.kind(Radar.Kind.HOSTILE).range() != 16
+					|| RadarCategories.kind(Radar.Kind.PLAYER).range() != RadarCategories.SAME_RANGE) {
+					throw new AssertionError("The height ranges didn't come back from the saved file");
+				}
+				s.radarCategories.remove(0);
+				RadarCategories.changed();
+			});
+
+			// Nothing picked: players at any height, every other kind as the radar's.
+			context.runOnClient(mc -> {
+				Settings.get().radarKinds.clear();
+				for (Radar.Kind kind : Radar.Kind.values()) {
+					int usual = kind == Radar.Kind.PLAYER ? RadarCategories.ANY_RANGE : RadarCategories.SAME_RANGE;
+					if (RadarCategories.kind(kind).range() != usual) {
+						throw new AssertionError(kind + " starts with the height range " + RadarCategories.kind(kind).range());
+					}
+				}
+			});
+		} finally {
+			context.runOnClient(mc -> {
+				Settings.get().radarRange = range;
+				Settings.get().radarKinds.clear();
+				Settings.get().save();
+				mc.level.removeEntity(FRIEND, net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);
+			});
+			world.getServer().runCommand("kill @e[tag=diorama_deep]");
+		}
+	}
+
+	/** Which of the two 24 blocks below, the friend and the husk, the map's radar shows. */
+	private static void expectDeep(ClientGameTestContext context, Set<String> expected, String when) {
+		context.setScreen(MapScreen::new);
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(dev.diorama.Projection.u(mc.player.getX(), mc.player.getZ()),
+			dev.diorama.Projection.v(mc.player.getX(), mc.player.getY(), mc.player.getZ()), 3.0, TileKey.SURFACE));
+		context.waitTicks(5);
+		Set<String> shown = context.computeOnClient(mc -> {
+			Set<String> deep = new TreeSet<>();
+			for (Radar.Blip blip : ((MapScreen) mc.gui.screen()).blips()) {
+				if (blip.entity().getId() == FRIEND) {
+					deep.add("player");
+				} else if (blip.dy() < -20 && EntityType.getKey(blip.entity().getType()).getPath().equals("husk")) {
+					deep.add("husk");
+				}
+			}
+			return deep;
+		});
+		context.setScreen(() -> null);
+		context.waitTicks(3);
+		if (!shown.equals(expected)) {
+			throw new AssertionError(when + ", of the friend and the husk 24 blocks below the radar shows " + shown + ", not " + expected);
+		}
 	}
 
 	/**

@@ -202,6 +202,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("seasons")) {
 				SeasonsTest.run(context, world);
 			}
+			if (tests.contains("e33chat")) {
+				E33ChatTest.run(context, world);
+			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
 			}
@@ -463,6 +466,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("addon-api")) {
 					AddonWaypointsTest.reopened(context);
 					AddonApiTest.reopened(context, reopened);
+					AddonMarkersTest.run(context, reopened);
 					//? if >=1.21.6 && fabric {
 					AddonWaypointsTest.frames(context, reopened);
 					//?}
@@ -494,6 +498,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 					savedMap(context, reopened, spawnCell, tests.contains("fog-of-war"));
 					seenAfterLeaving(context);
 				}
+			}
+			if (tests.contains("addon-api")) {
+				// Layers kept from the reopened world, checked at the title screen and in a new world.
+				AddonMarkersTest.afterReopened(context);
 			}
 		}
 		if (tests.contains("recreated-world")) {
@@ -556,6 +564,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
+		}
+		if (tests.contains("e33chat-server")) {
+			E33ChatTest.server(context);
 		}
 		if (tests.contains("radar-sneaking-server")) {
 			RadarSneakingTest.server(context);
@@ -3422,6 +3433,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			int listed = 0;
 			int same = 0;
 			int fromModel = 0;
+			StringBuilder dots = new StringBuilder();
 			for (String name : names) {
 				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
 					net.minecraft.resources.Identifier id = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
@@ -3431,6 +3443,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 					String listedFace = dev.diorama.render.MobFaces.modelOnly ? null : dev.diorama.render.MobFaces.describe(entity);
 					String modelFace = dev.diorama.render.MobFaces.describeFromModel(entity);
 					dev.diorama.Diorama.LOGGER.info("MODEL-FACE {} | listed: {} | model: {}", name, listedFace, modelFace);
+					// Every mob of Minecraft's own has a picture: none is left a dot.
+					if (!name.contains(":") && dev.diorama.render.MobFaces.describe(entity) == null) {
+						dots.append(' ').append(name);
+					}
 					if (listedFace != null) {
 						listed++;
 						same += listedFace.equals(modelFace) ? 1 : 0;
@@ -3443,6 +3459,19 @@ public class DioramaClientTest implements FabricClientGameTest {
 			dev.diorama.Diorama.LOGGER.info("MODEL-FACE summary: {} mobs, {} drawn with a face ({} the same as the one read off the model), {} with only a model face",
 				names.size(), listed, same, fromModel);
 			StringBuilder wrong = new StringBuilder();
+			if (!dots.isEmpty()) {
+				wrong.append("\n  no picture, only a dot:").append(dots);
+			}
+			// The two that were dots on every version are there, with a picture that can be drawn.
+			for (String name : new String[] {"snow_golem", "warden"}) {
+				boolean drawn = false;
+				for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+					drawn |= entity.getType().toShortString().equals(name) && dev.diorama.render.MobFaces.canDraw(entity);
+				}
+				if (!drawn) {
+					wrong.append("\n  ").append(name).append(": not in the world, or no picture to draw");
+				}
+			}
 			// Mobs with hand-made faces whose models give the same face on every version.
 			for (String name : new String[] {"creeper", "spider", "cave_spider", "blaze", "allay", "pig", "sheep"}) {
 				boolean found = false;
@@ -4511,6 +4540,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (text.contains("xaero-waypoint:Old Mine:")) {
 					command = link;
+					// One link: the line gets it as it arrives, and chat must not add a second.
+					String add = net.minecraft.network.chat.Component.translatable("diorama.share.add").getString();
+					if (text.indexOf(add) != text.lastIndexOf(add)) {
+						throw new AssertionError("The shared line has more than one [Add] link: " + text);
+					}
 				}
 			}
 			if (command == null) {

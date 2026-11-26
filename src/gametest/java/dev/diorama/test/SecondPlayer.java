@@ -124,6 +124,11 @@ final class SecondPlayer implements AutoCloseable {
 		}
 	}
 
+	/** The player says a line in chat. */
+	void say(String line) {
+		this.command(Puppet.SAY + line);
+	}
+
 	/** The player holds the sneak key down, or lets it go. */
 	void sneak(boolean down) {
 		this.command(down ? Puppet.SNEAK : Puppet.STAND);

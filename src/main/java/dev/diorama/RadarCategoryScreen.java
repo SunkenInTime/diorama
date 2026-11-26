@@ -13,9 +13,9 @@ import net.minecraft.network.chat.Component;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One radar category's settings: whether it shows, its icon size and its names, and for one of the
- * player's own its name, its mobs and Delete. Each change is saved as it's made, as on the settings
- * screen. Xaero's Minimap has these three per category among a dozen more.
+ * One radar category's settings: whether it shows, its icon size, its names and its height range,
+ * and for one of the player's own its name, its mobs and Delete. Each change is saved as it's made,
+ * as on the settings screen. Xaero's Minimap has these four per category among a dozen more.
  */
 public final class RadarCategoryScreen extends Screen {
 	private static final int WIDTH = 260;
@@ -37,7 +37,7 @@ public final class RadarCategoryScreen extends Screen {
 	}
 
 	private int rows() {
-		return 3 + (this.own != null ? 2 : 0);
+		return 4 + (this.own != null ? 2 : 0);
 	}
 
 	private int top() {
@@ -95,6 +95,19 @@ public final class RadarCategoryScreen extends Screen {
 		}
 		y += ROW;
 
+		// The first step follows the Radar tab's Height range, the last has no end; between them, the tab's steps.
+		int[] ranges = Settings.RANGES;
+		int range = this.entry.range();
+		int rangeStep = range == RadarCategories.SAME_RANGE ? 0 : range == RadarCategories.ANY_RANGE ? ranges.length + 1 : 1 + SettingsScreen.indexOf(ranges, range);
+		java.util.function.IntUnaryOperator atStep = i -> i == 0 ? RadarCategories.SAME_RANGE : i > ranges.length ? RadarCategories.ANY_RANGE : ranges[i - 1];
+		SettingsScreen.StepSlider reach = new SettingsScreen.StepSlider(Component.translatable("diorama.settings.range"), rangeStep, ranges.length + 2,
+			i -> this.entry.range(atStep.applyAsInt(i)), i -> rangeValue(atStep.applyAsInt(i)));
+		reach.setPosition(left, y);
+		reach.setWidth(WIDTH);
+		reach.setTooltip(Tooltip.create(Component.translatable("diorama.radar_category.range.tooltip")));
+		this.addRenderableWidget(reach);
+		y += ROW;
+
 		if (own != null) {
 			this.addRenderableWidget(Button.builder(SettingsScreen.label(Component.translatable("diorama.radar_category.mobs"), Component.literal(Integer.toString(own.mobs.size()))),
 				b -> this.minecraft.gui.setScreen(new RadarMobsScreen(this, own)))
@@ -116,6 +129,17 @@ public final class RadarCategoryScreen extends Screen {
 
 	private static Component namesValue(Settings.NameTags names) {
 		return Component.translatable("diorama.settings.player_names." + names.name().toLowerCase(Locale.ROOT));
+	}
+
+	/** A height range as the slider and the list of categories say it. */
+	static Component rangeValue(int range) {
+		if (range == RadarCategories.ANY_RANGE) {
+			return Component.translatable("diorama.radar_category.any_range");
+		}
+		if (range == RadarCategories.SAME_RANGE) {
+			return Component.translatable("diorama.radar_category.same_size", Settings.get().radarRange + " m");
+		}
+		return Component.literal(range + " m");
 	}
 
 	private void delete() {

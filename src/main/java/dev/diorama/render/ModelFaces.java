@@ -61,8 +61,9 @@ public final class ModelFaces {
 	 * A face of a box that looks out of the front: where its middle is (in texture pixels), how deep,
 	 * and the texture rectangle on it, from 0 to 1. {@code straight} when it's the box's own front,
 	 * unturned, so {@code w} x {@code h}, the box's size, is also its size in texture pixels.
+	 * {@code shrunk} when it's that but drawn smaller than its texture rectangle.
 	 */
-	private record Front(float cx, float cy, float z, int w, int h, boolean straight, float uLeft, float vTop, float uRight, float vBottom) {
+	private record Front(float cx, float cy, float z, int w, int h, boolean straight, boolean shrunk, float uLeft, float vTop, float uRight, float vBottom) {
 	}
 
 	/** A part's pose, size and whether it's shown, to put back after reading. */
@@ -482,13 +483,16 @@ public final class ModelFaces {
 					vBottom = corners.at[o + 4];
 				}
 			}
-			// A grown box (a hat layer) is bigger than its texture rectangle by the same on every side.
+			// A grown box (a hat layer) is bigger than its texture rectangle by the same on every side,
+			// and a shrunk one (a snow golem's head) smaller by the same.
 			// A turned one (a hat's brim) shows another of its faces at the front.
 			float grownX = maxX - minX - w;
 			float grownY = maxY - minY - h;
-			boolean straight = !back && Math.abs(grownX - grownY) < 0.01F && grownX > -0.01F && grownX < 2;
+			boolean even = !back && Math.abs(grownX - grownY) < 0.01F;
+			boolean straight = even && grownX > -0.01F && grownX < 2;
+			boolean shrunk = even && grownX <= -0.01F && grownX > -2;
 			// The far side goes under the near one.
-			out.add(new Front((minX + maxX) / 2, (minY + maxY) / 2, back ? z + 0.01F : z, w, h, straight, uLeft, vTop, uRight, vBottom));
+			out.add(new Front((minX + maxX) / 2, (minY + maxY) / 2, back ? z + 0.01F : z, w, h, straight, shrunk, uLeft, vTop, uRight, vBottom));
 			if (!anyFace) {
 				return;
 			}
@@ -638,6 +642,10 @@ public final class ModelFaces {
 		}
 		// The texture's size, in texture pixels, from the biggest unturned box; each face's own size from that.
 		Front main = fronts.stream().filter(Front::straight).max(Comparator.comparingInt((Front f) -> f.w() * f.h())).orElse(null);
+		if (main == null) {
+			// Only when no box is its texture's size: a shrunk box is never picked over one that is.
+			main = fronts.stream().filter(Front::shrunk).max(Comparator.comparingInt((Front f) -> f.w() * f.h())).orElse(null);
+		}
 		if (main == null) {
 			return null;
 		}

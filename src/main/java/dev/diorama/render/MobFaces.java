@@ -135,6 +135,9 @@ public final class MobFaces {
 		for (EntityType<?> type : new EntityType<?>[] {EntityTypes.PILLAGER, EntityTypes.VINDICATOR, EntityTypes.EVOKER}) {
 			FACES.put(type, new Faces(illager, null));
 		}
+		// The warden's head without the tendrils either side of it: with them the picture is 48 wide,
+		// too big for ModelFaces to take as a face, and the head a third of it.
+		FACES.put(EntityTypes.WARDEN, new Faces(new Face(128, 128, 10, 42, 16, 16), null));
 		FACES.put(EntityTypes.RAVAGER, new Faces(new Face(128, 128, 16, 16, 16, 20), null));
 		FACES.put(EntityTypes.VILLAGER, new Faces(
 			new Face(64, 64, 8, 8, 8, 10, VILLAGER_HAT, VILLAGER_NOSE),

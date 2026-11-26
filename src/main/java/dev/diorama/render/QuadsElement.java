@@ -26,6 +26,22 @@ public record QuadsElement(
 	public static QuadsElement of(
 		RenderPipeline pipeline, TextureSetup textures, float[] xyz, float @Nullable [] uvs, int[] colors, int quads, @Nullable ScreenRectangle scissor
 	) {
+		return make(pipeline, textures, xyz, uvs, colors, quads, scissor, true);
+	}
+
+	/**
+	 * {@link #of}, holding on to the arrays instead of copying them: for a caller that leaves them
+	 * alone until the frame has been drawn, so that drawing many quads a frame copies nothing.
+	 */
+	public static QuadsElement kept(
+		RenderPipeline pipeline, TextureSetup textures, float[] xyz, float @Nullable [] uvs, int[] colors, int quads, @Nullable ScreenRectangle scissor
+	) {
+		return make(pipeline, textures, xyz, uvs, colors, quads, scissor, false);
+	}
+
+	private static QuadsElement make(
+		RenderPipeline pipeline, TextureSetup textures, float[] xyz, float @Nullable [] uvs, int[] colors, int quads, @Nullable ScreenRectangle scissor, boolean copy
+	) {
 		float minX = Float.MAX_VALUE;
 		float minY = Float.MAX_VALUE;
 		float maxX = -Float.MAX_VALUE;
@@ -41,6 +57,9 @@ public record QuadsElement(
 		ScreenRectangle bounds = new ScreenRectangle(x0, y0, (int) Math.ceil(maxX) - x0, (int) Math.ceil(maxY) - y0);
 		if (scissor != null) {
 			bounds = scissor.intersection(bounds);
+		}
+		if (!copy) {
+			return new QuadsElement(pipeline, textures, xyz, uvs, colors, quads, scissor, bounds);
 		}
 		return new QuadsElement(
 			pipeline, textures, Arrays.copyOf(xyz, quads * 12), uvs == null ? null : Arrays.copyOf(uvs, quads * 8),

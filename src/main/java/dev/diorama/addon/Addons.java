@@ -133,6 +133,9 @@ public final class Addons {
 			started = true;
 			start();
 		}
+		AddonLayers.sync();
+		// Lets the arrays kept for drawing layers go once none is open, though no map draws.
+		dev.diorama.render.AddonOverlay.any();
 	}
 
 	/** Throws unless this is the client thread, where everything addons can reach lives. */

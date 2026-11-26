@@ -4,8 +4,14 @@
 // through its diorama entrypoint and on NeoForge and Forge through @DioramaEntrypoint.
 //   diorama-test-addon.jar              works, and lets the test hide and show Diorama's HUD through
 //                                       it and sync waypoints with a pretend map mod by polling; it
-//                                       also has a class marked @DioramaEntrypoint by mistake
-//   diorama-test-addon-broken.jar       hides the minimap, then throws from onReady
+//                                       also has a class marked @DioramaEntrypoint by mistake, and
+//                                       shows markers and lines on the maps (markers/MapMarkers)
+//                                       with an icon of its own: its pack.mcmeta is for Forge 1.20.1,
+//                                       which loads no assets from a mod jar without one; and 300
+//                                       made-up icons (many/n000 to many/n299, made at build time),
+//                                       more than Diorama's icon texture holds at once
+//   diorama-test-addon-broken.jar       hides the minimap and opens a layer of markers, then throws
+//                                       from onReady
 //   diorama-test-addon-linkage.jar      hides the minimap, then calls a class its jar doesn't have
 //   diorama-test-addon-assertion.jar    hides the minimap, then throws an AssertionError
 //   diorama-test-addon-unprintable.jar  hides the minimap, then throws an exception whose
@@ -16,6 +22,11 @@
 //                                       getMessage() calls itself
 // ./gradlew :testaddon:assemble puts them in testaddon/build/libs; boat_run.py --mods takes that
 // folder (docs/development.md). Never released.
+import java.awt.Color
+import java.awt.image.BufferedImage
+import java.io.File
+import javax.imageio.ImageIO
+
 plugins {
 	java
 }
@@ -58,6 +69,31 @@ for (set in addons) {
 		}
 	}
 }
+
+// 300 waypoint icons, each different, for the test that shows more icons over time than
+// Diorama's marker texture holds at once: made here rather than kept in git.
+val manyIcons = tasks.register("manyIcons") {
+	val out = layout.buildDirectory.dir("generated/many-icons")
+	outputs.dir(out)
+	doLast {
+		val folder = out.get().dir("assets/diorama_test_addon/textures/waypoint_icons/many").asFile
+		folder.mkdirs()
+		for (n in 0 until 300) {
+			val image = BufferedImage(11, 11, BufferedImage.TYPE_INT_ARGB)
+			val rgb = Color.HSBtoRGB(n / 300f, 0.8f, 0.9f)
+			for (y in 0 until 11) {
+				for (x in 0 until 11) {
+					val edge = x == 0 || y == 0 || x == 10 || y == 10
+					// The number in binary across the middle row, so no two are alike.
+					val bit = y == 5 && x in 1..9 && (n shr (x - 1) and 1) == 1
+					image.setRGB(x, y, if (edge) 0xFF101418.toInt() else if (bit) -1 else rgb)
+				}
+			}
+			ImageIO.write(image, "png", File(folder, "n" + n.toString().padStart(3, '0') + ".png"))
+		}
+	}
+}
+main.resources.srcDir(manyIcons)
 
 tasks.named<Jar>("jar") {
 	archiveFileName = "diorama-test-addon.jar"

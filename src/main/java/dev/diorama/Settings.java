@@ -639,7 +639,7 @@ public final class Settings {
 	}
 
 	/** The value in {@code steps} nearest to {@code value}. */
-	private static int nearest(int[] steps, int value) {
+	static int nearest(int[] steps, int value) {
 		int nearest = steps[0];
 		for (int step : steps) {
 			if (Math.abs((long) step - value) < Math.abs((long) nearest - value)) {

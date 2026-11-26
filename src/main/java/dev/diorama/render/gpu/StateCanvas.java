@@ -100,6 +100,20 @@ final class StateCanvas implements MapCanvas {
 	}
 
 	@Override
+	public void solidsKept(float[] xyz, int[] colors, int quads) {
+		this.graphics.guiRenderState.addGuiElement(QuadsElement.kept(
+			RenderPipelines.GUI, TextureSetup.noTexture(), xyz, null, colors, quads, this.graphics.scissorStack.peek()
+		));
+	}
+
+	@Override
+	public void rectsKept(MapTexture texture, Sampling sampling, float[] xyz, float[] uvs, int[] colors, int quads) {
+		this.graphics.guiRenderState.addGuiElement(QuadsElement.kept(
+			RenderPipelines.GUI_TEXTURED, ((StateTexture) texture).single(sampling), xyz, uvs, colors, quads, this.graphics.scissorStack.peek()
+		));
+	}
+
+	@Override
 	public void playerFace(AbstractClientPlayer player, int x, int y, int size, int argb) {
 		//? if >=26.1 {
 		PlayerFaceExtractor.extractRenderState(this.graphics, player.getSkin(), x, y, size, argb);

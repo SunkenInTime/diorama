@@ -11,6 +11,7 @@ import dev.diorama.ServerRules;
 import dev.diorama.TrackedPlayers;
 import dev.diorama.WorldKey;
 import dev.diorama.XaeroChannels;
+import dev.diorama.addon.AddonLayers;
 import dev.diorama.addon.Addons;
 import dev.diorama.api.DioramaAddon;
 import dev.diorama.drawing.DrawingStore;
@@ -113,6 +114,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			AddonLayers.onJoinOrLeave();
 			Maps.onLeave();
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();
@@ -127,6 +129,7 @@ public final class DioramaFabric implements ClientModInitializer {
 		ClientPlayConnectionEvents.JOIN.register((listener, sender, mc) -> {
 			ServerRules.onDisconnect();
 			WaypointStore.onLeave();
+			AddonLayers.onJoinOrLeave();
 			Maps.onLeave();
 			DrawingStore.onLeave();
 			WorldKey.onJoinOrLeave();

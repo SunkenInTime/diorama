@@ -68,6 +68,20 @@ public interface MapCanvas {
 	/** Many quads of one of the mod's textures in one draw, like {@link #blits}. */
 	void rects(MapTexture texture, Sampling sampling, float[] xyz, float[] uvs, int[] colors, int quads);
 
+	/**
+	 * {@link #solids}, for arrays the caller leaves alone until the frame has been drawn: from
+	 * 1.21.6, where the GUI keeps what it is given until the end of the frame, they are kept rather
+	 * than copied. Before, everything draws straight away, so it is {@link #solids}.
+	 */
+	default void solidsKept(float[] xyz, int[] colors, int quads) {
+		this.solids(xyz, colors, quads);
+	}
+
+	/** {@link #rects}, for arrays the caller leaves alone until the frame has been drawn, like {@link #solidsKept}. */
+	default void rectsKept(MapTexture texture, Sampling sampling, float[] xyz, float[] uvs, int[] colors, int quads) {
+		this.rects(texture, sampling, xyz, uvs, colors, quads);
+	}
+
 	/** A player's face with its hat layer, {@code size} across, at (x, y). */
 	void playerFace(AbstractClientPlayer player, int x, int y, int size, int argb);
 
