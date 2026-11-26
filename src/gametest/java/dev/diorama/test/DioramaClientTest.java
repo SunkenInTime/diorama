@@ -200,6 +200,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("tour")) {
 				tour(context, world);
 			}
+			if (tests.contains("minimap-alloc")) {
+				MinimapAllocTest.run(context, world);
+			}
 			if (tests.contains("radar")) {
 				radar(context, world);
 			}

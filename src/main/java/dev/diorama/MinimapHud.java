@@ -10,6 +10,7 @@ import dev.diorama.drawing.DrawingOverlay;
 import dev.diorama.drawing.DrawingStore;
 import dev.diorama.render.Markers;
 import dev.diorama.render.Radar;
+import dev.diorama.render.ShownText;
 import dev.diorama.render.TextSize;
 import dev.diorama.render.gpu.MapCanvas;
 import dev.diorama.waypoint.Waypoint;
@@ -298,7 +299,7 @@ public final class MinimapHud implements HudElement {
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(tx, textY);
 			graphics.pose().scale(text);
-			graphics.text(font, line.text(), 0, 0, line.color(), true);
+			ShownText.draw(graphics, font, line.text(), 0, 0, line.color(), true);
 			graphics.pose().popMatrix();
 			left = Math.min(left, tx - 1);
 			textRight = Math.max(textRight, tx + w + 1);
@@ -435,7 +436,7 @@ public final class MinimapHud implements HudElement {
 			graphics.pose().translate(TextSize.snap(bx), TextSize.snap(by));
 			graphics.pose().scale(text);
 			graphics.fill(0, 0, w, h, 0xA0101418);
-			graphics.text(font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
+			ShownText.draw(graphics, font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
 			graphics.pose().popMatrix();
 		}
 	}
@@ -473,7 +474,7 @@ public final class MinimapHud implements HudElement {
 			graphics.pose().translate(TextSize.snap(bx), TextSize.snap(by));
 			graphics.pose().scale(text);
 			graphics.fill(0, 0, w, h, 0xA0101418);
-			graphics.text(font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
+			ShownText.draw(graphics, font, letters[i], 2, 1, i == 0 ? 0xFFFF6B6B : 0xFFFFFFFF, false);
 			graphics.pose().popMatrix();
 		}
 	}
