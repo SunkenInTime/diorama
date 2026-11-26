@@ -26,9 +26,10 @@ import org.jspecify.annotations.Nullable;
  * a cave slice ({@code fog-mask}). Every build's known share, read from the tiles, is checked
  * against the same reading done the way 0.11 did it ({@link #readAsBefore}), pixel for pixel; and
  * what builds allocate on the render thread is kept under {@link #MOST_MINIMAP_BYTES} and
- * {@link #MOST_FULL_MAP_MEDIAN}. In 0.11 a minimap build allocated about 280 KB, all of it lookup
- * keys: each tile was looked up again on every row of the mask it lay on, and for a tile not in
- * memory every overview level above it too.
+ * {@link #MOST_FULL_MAP_MEDIAN}, and while panning a full map in a 5120 by 1440 window at GUI scale
+ * 1 under {@link #MOST_LARGE_PANNING_MEDIAN}. In 0.11 a minimap build allocated about 280 KB, all of
+ * it lookup keys: each tile was looked up again on every row of the mask it lay on, and for a tile
+ * not in memory every overview level above it too.
  *
  * <p>Logs, for each part: the builds, bytes and time a build, builds a second of game time, and what
  * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe).
@@ -47,6 +48,20 @@ final class FogMaskBuildTest {
 	 * the median was a megabyte.
 	 */
 	private static final long MOST_FULL_MAP_MEDIAN = 24 * 1024;
+	/**
+	 * The most the median build may allocate while panning the full map in a window this wide at GUI
+	 * scale 1 over unmapped land, where a build reads about 22,000 tiles. Only the keys for tiles
+	 * panned into allocate, a few hundred a build, 32 bytes each: about 10 KB. Before the lookup table
+	 * could grow past 16,384 slots, a build reading more than 6,144 tiles dropped every key and made
+	 * them all again, 0.5 to 1.5 MB a build.
+	 */
+	private static final long MOST_LARGE_PANNING_MEDIAN = 64 * 1024;
+	private static final int LARGE_WIDTH = 5120;
+	private static final int LARGE_HEIGHT = 1440;
+	/** The tiles a build read when the lookup table dropped every key: the large view must read more, or it tests nothing. */
+	private static final int TABLE_DROPPED_AT = 6144;
+	/** Map units the large view pans a tick, about as fast as dragging the map. */
+	private static final double LARGE_PAN = 400;
 	/** Every full map build's bytes, for its median. */
 	private static final List<Long> FULL_MAP_BUILDS = new ArrayList<>();
 	/** Blocks a tick: walking (4.3 m/s), and an elytra (32 m/s). */
@@ -66,9 +81,17 @@ final class FogMaskBuildTest {
 		int caveBuilds;
 		int mostTiles;
 		long @Nullable [] frames;
+		/** Each build's bytes, for the part's median; made here so keeping them allocates nothing. */
+		final long[] each = new long[4096];
 
 		Part(String name) {
 			this.name = name;
+		}
+
+		long median() {
+			long[] sorted = Arrays.copyOf(this.each, Math.min(this.builds, this.each.length));
+			Arrays.sort(sorted);
+			return sorted.length == 0 ? 0 : sorted[sorted.length / 2];
 		}
 	}
 
@@ -81,6 +104,8 @@ final class FogMaskBuildTest {
 	private static int checked;
 	private static int mismatches;
 	private static @Nullable String firstMismatch;
+	/** Set if the allocation counter ever gave -1, which would make every build look free. */
+	private static boolean counterOff;
 	private static final int[] BEFORE = new int[256 * 256];
 	/** The tiles one build reads, as many as it looks up in the map. */
 	private static final java.util.Set<TileKey> READ = new java.util.HashSet<>();
@@ -94,6 +119,21 @@ final class FogMaskBuildTest {
 		checked = 0;
 		mismatches = 0;
 		firstMismatch = null;
+		counterOff = false;
+		// With the JVM's per-thread allocation counting off, every reading is -1 and every build
+		// would count as allocating nothing: the budgets would pass without measuring anything.
+		String off = context.computeOnClient(mc -> {
+			if (!THREADS.isThreadAllocatedMemorySupported()) {
+				return "this JVM can't count a thread's allocations";
+			}
+			if (!THREADS.isThreadAllocatedMemoryEnabled() || THREADS.getCurrentThreadAllocatedBytes() < 0) {
+				return "the JVM's per-thread allocation counting is off (ThreadMXBean.isThreadAllocatedMemoryEnabled() is false)";
+			}
+			return null;
+		});
+		if (off != null) {
+			throw new AssertionError("fog-mask can't measure what fog mask builds allocate: " + off);
+		}
 		boolean frames = MinimapAllocTest.register(context);
 		context.runOnClient(mc -> MapViewport.watchMasksForTests(new Watch()));
 		try {
@@ -146,8 +186,7 @@ final class FogMaskBuildTest {
 		double[] zooms = {2.0, 0.4, 0.08, 0.03, 0.01, 0.003};
 		for (double zoom : zooms) {
 			String name = "full map, zoom " + zoom;
-			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, zoom, TileKey.SURFACE));
-			measure(context, world, name, false, 60, null);
+			measure(context, world, name, false, 60, null, () -> context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, zoom, TileKey.SURFACE)));
 			context.takeScreenshot("fog-mask-" + name.replace(", ", "-").replace(' ', '-'));
 		}
 		// Panning at a far zoom: a build for each step.
@@ -155,6 +194,7 @@ final class FogMaskBuildTest {
 			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u + tick * 40, v, 0.03, TileKey.SURFACE));
 			return null;
 		});
+		large(context, world, x, z);
 		context.setScreen(() -> null);
 
 		// A room dug deep down off the spawn: the minimap shows a cave slice.
@@ -169,13 +209,15 @@ final class FogMaskBuildTest {
 		DioramaClientTest.settle(context, 60);
 		measure(context, world, "cave minimap, standing", frames, 100, null);
 		measure(context, world, "cave minimap, walking", frames, 100, tick -> new double[] {caveX - 10 + tick * WALK, caveY, z});
-		context.setScreen(MapScreen::new);
-		context.waitTicks(5);
 		double cu = Projection.u(caveX, z);
 		double cv = Projection.v(caveX, caveY, z);
-		int layer = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
-		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cu, cv, 1.0, layer));
-		measure(context, world, "cave full map", false, 40, null);
+		// Counted from before the screen opens: its first frame may already build the mask it shows.
+		measure(context, world, "cave full map", false, 40, null, () -> {
+			context.setScreen(MapScreen::new);
+			context.waitTicks(5);
+			int layer = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).view().layer());
+			context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(cu, cv, 1.0, layer));
+		});
 		context.takeScreenshot("fog-mask-cave-full-map");
 		context.setScreen(() -> null);
 		world.getServer().runCommand("tp @a " + x + " " + FLY_Y + " " + z + " 90 0");
@@ -183,13 +225,58 @@ final class FogMaskBuildTest {
 		context.waitTicks(40);
 	}
 
+	/**
+	 * The full map in a 5120 by 1440 window at GUI scale 1, panning over land nobody has mapped, at a
+	 * zoom where its builds read overview tiles and the finer levels under them (coarse sampling), and
+	 * at one where they read the detailed levels' overviews (one spot a texel). Each build reads about
+	 * 22,000 tiles, far more than the 6,144 at which the lookup table used to drop every key.
+	 */
+	private static void large(ClientGameTestContext context, TestSingleplayerContext world, int x, int z) {
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		DioramaClientTest.setGuiScale(context, 1);
+		context.getInput().resizeWindow(LARGE_WIDTH, LARGE_HEIGHT);
+		context.waitTicks(5);
+		int[] size = context.computeOnClient(mc -> new int[] {mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight()});
+		Diorama.LOGGER.info("fog-mask | large view: window {} by {} at GUI scale 1", size[0], size[1]);
+		try {
+			if (size[0] < LARGE_WIDTH || size[1] < LARGE_HEIGHT) {
+				throw new AssertionError("The window couldn't be made " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " for the large view: it's " + size[0] + " by " + size[1]);
+			}
+			// Far from anywhere the player went.
+			double u = Projection.u(x - 300_000, z - 300_000);
+			double v = Projection.v(x - 300_000, 64, z - 300_000);
+			for (double zoom : new double[] {0.07, 0.3}) {
+				context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, zoom, TileKey.SURFACE));
+				// The first builds make the keys and grow the table; the panning after is what's measured.
+				context.waitTicks(10);
+				measure(context, world, "full map, " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " at GUI scale 1, zoom " + zoom + ", panning", false, 120, tick -> {
+					context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u + tick * LARGE_PAN, v + tick * LARGE_PAN / 2, zoom, TileKey.SURFACE));
+					return null;
+				});
+			}
+			context.takeScreenshot("fog-mask-full-map-large-panning");
+		} finally {
+			context.getInput().resizeWindow(1600, 900);
+			DioramaClientTest.setGuiScale(context, scale);
+			context.waitTicks(5);
+		}
+	}
+
 	private interface Path {
 		/** Where the player is at this tick, {x, y, z}; null to leave it. */
 		double @Nullable [] at(int tick);
 	}
 
-	/** Counts the builds of {@code ticks} ticks, moving the player along {@code path} each tick. */
 	private static void measure(ClientGameTestContext context, TestSingleplayerContext world, String name, boolean frames, int ticks, @Nullable Path path) {
+		measure(context, world, name, frames, ticks, path, null);
+	}
+
+	/**
+	 * Counts the builds of {@code ticks} ticks, moving the player along {@code path} each tick.
+	 * {@code then}, if given, runs once counting has started: a change to the view made there is
+	 * counted even if a frame draws before the first tick.
+	 */
+	private static void measure(ClientGameTestContext context, TestSingleplayerContext world, String name, boolean frames, int ticks, @Nullable Path path, @Nullable Runnable then) {
 		Part counting = new Part(name);
 		counting.ticks = ticks;
 		context.runOnClient(mc -> {
@@ -198,6 +285,9 @@ final class FogMaskBuildTest {
 				MinimapAllocTest.startCounting();
 			}
 		});
+		if (then != null) {
+			then.run();
+		}
 		for (int tick = 0; tick < ticks; tick++) {
 			double[] at = path == null ? null : path.at(tick);
 			if (at != null) {
@@ -238,10 +328,15 @@ final class FogMaskBuildTest {
 
 	private static void report() {
 		Diorama.LOGGER.info("fog-mask | {} builds checked against 0.11's reading, {} differed", checked, mismatches);
+		if (counterOff) {
+			throw new AssertionError("The JVM's per-thread allocation counter gave -1 during fog-mask: counting was turned off partway, so the bytes measured mean nothing");
+		}
 		if (mismatches > 0) {
 			throw new AssertionError(mismatches + " of " + checked + " fog mask builds read the tiles differently from 0.11; the first: " + firstMismatch);
 		}
-		String[] mustBuild = {"minimap, walking, unexplored", "minimap, flying, unexplored", "minimap zoomed out, flying, unexplored", "full map, zoom 0.03, panning", "cave minimap, walking", "cave full map"};
+		String largeFar = "full map, " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " at GUI scale 1, zoom 0.07, panning";
+		String largeNear = "full map, " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " at GUI scale 1, zoom 0.3, panning";
+		String[] mustBuild = {"minimap, walking, unexplored", "minimap, flying, unexplored", "minimap zoomed out, flying, unexplored", "full map, zoom 0.03, panning", largeFar, largeNear, "cave minimap, walking", "cave full map"};
 		for (String name : mustBuild) {
 			Part p = PARTS.get(name);
 			if (p == null || p.builds == 0) {
@@ -249,6 +344,22 @@ final class FogMaskBuildTest {
 			}
 			if (name.startsWith("cave") && p.caveBuilds == 0) {
 				throw new AssertionError("\"" + name + "\" never built a cave slice's mask: the player wasn't underground");
+			}
+		}
+		for (String name : new String[] {largeFar, largeNear}) {
+			Part p = PARTS.get(name);
+			if (p.mostTiles <= TABLE_DROPPED_AT) {
+				throw new AssertionError("\"" + name + "\" read at most " + p.mostTiles + " tiles a build, no more than the " + TABLE_DROPPED_AT + " this part is there to go past");
+			}
+		}
+		// Each panning part on its own: its builds are many, and a pooled median could hide one part's.
+		for (String name : new String[] {"full map, zoom 0.03, panning", largeFar, largeNear}) {
+			Part p = PARTS.get(name);
+			long most = name.equals("full map, zoom 0.03, panning") ? MOST_FULL_MAP_MEDIAN : MOST_LARGE_PANNING_MEDIAN;
+			long median = p.median();
+			if (median > most) {
+				throw new AssertionError("Panning in \"" + name + "\", the median fog mask build allocated " + median + " bytes on the render thread, over " + most
+					+ " (" + p.builds + " builds, most tiles a build " + p.mostTiles + "): are the tile keys made again every build?");
 			}
 		}
 		for (Part p : PARTS.values()) {
@@ -274,6 +385,9 @@ final class FogMaskBuildTest {
 			checkNanos = 0;
 			startNanos = System.nanoTime();
 			startBytes = THREADS.getCurrentThreadAllocatedBytes();
+			if (startBytes < 0) {
+				counterOff = true;
+			}
 		}
 
 		@Override
@@ -313,6 +427,9 @@ final class FogMaskBuildTest {
 				p.bytes += bytes;
 				p.mostBytes = Math.max(p.mostBytes, bytes);
 				p.leastBytes = Math.min(p.leastBytes, bytes);
+				if (p.builds <= p.each.length) {
+					p.each[p.builds - 1] = bytes;
+				}
 				if (p.name.contains("full map")) {
 					FULL_MAP_BUILDS.add(bytes);
 				}

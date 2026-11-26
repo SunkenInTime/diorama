@@ -800,101 +800,105 @@ public final class MapViewport {
 		// fog doesn't close over a trail or a small map that fills only part of it.
 		boolean coarse = view.layer() == TileKey.SURFACE && texel >= COARSE_TEXEL;
 		double[] spots = coarse ? COARSE_SPOTS : MIDDLE;
-		for (int j = 0; j < MASK; j++) {
-			for (int i = 0; i < MASK; i++) {
-				float most = 0;
-				for (int spot = 0; spot < spots.length && most < 1; spot += 2) {
-					double u = originU + (i + spots[spot]) * texel;
-					double v = originV + (j + spots[spot + 1]) * texel;
-					int tv = (int) Math.floor(v / units);
-					int cellY = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - tv * units) / cellUnits));
-					int tu = (int) Math.floor(u / units);
-					if (tu != lastTu || tv != lastTv) {
-						tile = tiles.get(layer, tu, tv, lod);
-						lastTu = tu;
-						lastTv = tv;
-						above = null;
-						if (tile == null || !tile.hasCoverage()) {
-							// As drawTiles stands a coarser tile in for one that hasn't loaded: it knows as much.
-							int upTu = tu;
-							int upTv = tv;
-							for (int l = lod + 1; l <= TileKey.MAX_LOD && above == null; l++) {
-								// As TileKey.parent() goes up a level.
-								upTu = Math.floorDiv(upTu, 2);
-								upTv = Math.floorDiv(upTv, 2);
-								MapTile candidate = tiles.get(layer, upTu, upTv, l);
-								if (candidate != null && candidate.hasCoverage()) {
-									above = candidate;
-									aboveTu = upTu;
-									aboveTv = upTv;
-									aboveLod = l;
+		// Let go of the level and tiles even if reading them throws: the table is static.
+		try {
+			for (int j = 0; j < MASK; j++) {
+				for (int i = 0; i < MASK; i++) {
+					float most = 0;
+					for (int spot = 0; spot < spots.length && most < 1; spot += 2) {
+						double u = originU + (i + spots[spot]) * texel;
+						double v = originV + (j + spots[spot + 1]) * texel;
+						int tv = (int) Math.floor(v / units);
+						int cellY = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - tv * units) / cellUnits));
+						int tu = (int) Math.floor(u / units);
+						if (tu != lastTu || tv != lastTv) {
+							tile = tiles.get(layer, tu, tv, lod);
+							lastTu = tu;
+							lastTv = tv;
+							above = null;
+							if (tile == null || !tile.hasCoverage()) {
+								// As drawTiles stands a coarser tile in for one that hasn't loaded: it knows as much.
+								int upTu = tu;
+								int upTv = tv;
+								for (int l = lod + 1; l <= TileKey.MAX_LOD && above == null; l++) {
+									// As TileKey.parent() goes up a level.
+									upTu = Math.floorDiv(upTu, 2);
+									upTv = Math.floorDiv(upTv, 2);
+									MapTile candidate = tiles.get(layer, upTu, upTv, l);
+									if (candidate != null && candidate.hasCoverage()) {
+										above = candidate;
+										aboveTu = upTu;
+										aboveTv = upTv;
+										aboveLod = l;
+									}
 								}
 							}
 						}
-					}
-					float known = 0;
-					if (tile != null && tile.hasCoverage()) {
-						int cellX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - tu * units) / cellUnits));
-						known = tile.coverage(cellX, cellY);
-					} else if (above != null) {
-						// As TileKey.units() works it out.
-						double aboveSpan = (double) Projection.TILE_UNITS * (1 << aboveLod);
-						double aboveCell = aboveSpan / Projection.COVERAGE_CELLS;
-						int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - aboveTu * aboveSpan) / aboveCell)));
-						int aboveY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - aboveTv * aboveSpan) / aboveCell)));
-						known = above.coverage(cellX, aboveY);
-					} else {
-						// Or a finer tile under this spot, as drawTiles shrinks it in: the next level down
-						// if it's in memory, else the one below that.
-						for (int down = 1; down <= FINER_STAND_INS && lod - down >= 0; down++) {
-							double span = units / (1 << down);
-							int finerTu = (int) Math.floor(u / span);
-							int finerTv = (int) Math.floor(v / span);
-							if (finerTu != lastFinerTu[down - 1] || finerTv != lastFinerTv[down - 1]) {
-								finer[down - 1] = tiles.get(layer, finerTu, finerTv, lod - down);
-								lastFinerTu[down - 1] = finerTu;
-								lastFinerTv[down - 1] = finerTv;
-							}
-							MapTile under = finer[down - 1];
-							if (under != null) {
-								if (under.hasCoverage()) {
-									double finerCell = span / Projection.COVERAGE_CELLS;
-									int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - finerTu * span) / finerCell)));
-									int finerY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - finerTv * span) / finerCell)));
-									known = under.coverage(cellX, finerY);
+						float known = 0;
+						if (tile != null && tile.hasCoverage()) {
+							int cellX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - tu * units) / cellUnits));
+							known = tile.coverage(cellX, cellY);
+						} else if (above != null) {
+							// As TileKey.units() works it out.
+							double aboveSpan = (double) Projection.TILE_UNITS * (1 << aboveLod);
+							double aboveCell = aboveSpan / Projection.COVERAGE_CELLS;
+							int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - aboveTu * aboveSpan) / aboveCell)));
+							int aboveY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - aboveTv * aboveSpan) / aboveCell)));
+							known = above.coverage(cellX, aboveY);
+						} else {
+							// Or a finer tile under this spot, as drawTiles shrinks it in: the next level down
+							// if it's in memory, else the one below that.
+							for (int down = 1; down <= FINER_STAND_INS && lod - down >= 0; down++) {
+								double span = units / (1 << down);
+								int finerTu = (int) Math.floor(u / span);
+								int finerTv = (int) Math.floor(v / span);
+								if (finerTu != lastFinerTu[down - 1] || finerTv != lastFinerTv[down - 1]) {
+									finer[down - 1] = tiles.get(layer, finerTu, finerTv, lod - down);
+									lastFinerTu[down - 1] = finerTu;
+									lastFinerTv[down - 1] = finerTv;
 								}
-								break;
+								MapTile under = finer[down - 1];
+								if (under != null) {
+									if (under.hasCoverage()) {
+										double finerCell = span / Projection.COVERAGE_CELLS;
+										int cellX = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - finerTu * span) / finerCell)));
+										int finerY = Math.max(0, Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - finerTv * span) / finerCell)));
+										known = under.coverage(cellX, finerY);
+									}
+									break;
+								}
 							}
 						}
-					}
-					// Ground the overviews don't have yet can be on a detailed tile drawn over them.
-					if (drawsNear && known < 1) {
-						int nearTu = (int) Math.floor(u / Projection.TILE_UNITS);
-						int nearTv = (int) Math.floor(v / Projection.TILE_UNITS);
-						if (Math.abs(nearTu - nearU) <= NEAR_TILES && Math.abs(nearTv - nearV) <= NEAR_TILES) {
-							if (nearTu != lastNearTu || nearTv != lastNearTv) {
-								nearTile = tiles.get(layer, nearTu, nearTv, 0);
-								lastNearTu = nearTu;
-								lastNearTv = nearTv;
-							}
-							if (nearTile != null && nearTile.hasCoverage()) {
-								double cell = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
-								int nearX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - nearTu * (double) Projection.TILE_UNITS) / cell));
-								int nearY = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - nearTv * (double) Projection.TILE_UNITS) / cell));
-								known = Math.max(known, nearTile.coverage(nearX, nearY));
+						// Ground the overviews don't have yet can be on a detailed tile drawn over them.
+						if (drawsNear && known < 1) {
+							int nearTu = (int) Math.floor(u / Projection.TILE_UNITS);
+							int nearTv = (int) Math.floor(v / Projection.TILE_UNITS);
+							if (Math.abs(nearTu - nearU) <= NEAR_TILES && Math.abs(nearTv - nearV) <= NEAR_TILES) {
+								if (nearTu != lastNearTu || nearTv != lastNearTv) {
+									nearTile = tiles.get(layer, nearTu, nearTv, 0);
+									lastNearTu = nearTu;
+									lastNearTv = nearTv;
+								}
+								if (nearTile != null && nearTile.hasCoverage()) {
+									double cell = (double) Projection.TILE_UNITS / Projection.COVERAGE_CELLS;
+									int nearX = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((u - nearTu * (double) Projection.TILE_UNITS) / cell));
+									int nearY = Math.min(Projection.COVERAGE_CELLS - 1, (int) ((v - nearTv * (double) Projection.TILE_UNITS) / cell));
+									known = Math.max(known, nearTile.coverage(nearX, nearY));
+								}
 							}
 						}
+						most = Math.max(most, known);
 					}
-					most = Math.max(most, known);
+					if (coarse && most > 0) {
+						most = 1;
+					}
+					this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(most * 255);
 				}
-				if (coarse && most > 0) {
-					most = 1;
-				}
-				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(most * 255);
 			}
+		} finally {
+			tiles.end();
+			Arrays.fill(finer, null);
 		}
-		tiles.end();
-		Arrays.fill(finer, null);
 		if (watch != null) {
 			watch.sampled(level, layer, lod, originU, originV, texel, coarse, drawsNear, nearU, nearV, this.maskPixels);
 		}
@@ -1256,5 +1260,7 @@ public final class MapViewport {
 		}
 		this.layerKey = null;
 		this.maskInputs = null;
+		// The full map or an export preview may have grown the tile table to thousands of keys.
+		MASK_TILES.shrink();
 	}
 }

@@ -11,15 +11,32 @@ import org.jspecify.annotations.Nullable;
  * with a new key each time: 200 KB to 2 MB a build, a build or more a second while the player
  * moves. Here the key for a tile is made the first time a build reads it and kept while builds go on
  * reading it, and what the map has there is looked up once a build. Render thread.
+ *
+ * <p>The table grows to hold every key a build reads, so a view that reads thousands of tiles, the
+ * full map on a big screen or a cave slice's export preview zoomed out, keeps them all from one
+ * build to the next. Once it's five eighths full after a build, keys neither that build nor the one
+ * before read are dropped, which keeps a minimap flying over new land to the tiles around it.
+ *
+ * <p>Memory: at most {@link #MOST_SLOTS} slots, 28 bytes each (7 MiB), and three quarters as many
+ * kept keys, 32 bytes each (6 MiB): 13 MiB in all. A view only takes what its builds read, and the
+ * table goes back to {@link #FIRST_SLOTS} slots (14 KB) when a map view closes ({@link #shrink}).
+ * A build that alone reads more tiles than that holds has its keys made again as it reads, as
+ * before this table: only a cave slice's export preview zoomed all the way out, at GUI scale 1 on a
+ * window wider than 4K, reads that many.
  */
 final class MaskTiles {
 	/** Slots to start with, a power of two: a minimap's build reads up to about a hundred tiles. */
 	private static final int FIRST_SLOTS = 512;
 	/**
-	 * The most slots, a power of two. The full map zoomed far out reads about 5,500 tiles a build
-	 * (overviews, the levels above them, and the finer ones under them).
+	 * The most slots, a power of two, three quarters of which hold keys: 196,608. Over unmapped land,
+	 * the full map in a 5120 by 1440 window at GUI scale 1 reads up to about 22,000 tiles a build
+	 * (its overview level, the levels above and the two finer ones under it); a cave slice's export
+	 * preview zoomed all the way out reads 22,000 in a 1080p window at GUI scale 4, 87,000 in a
+	 * 1600 by 900 one at scale 2, and 153,000 at scale 1.
 	 */
-	private static final int MOST_SLOTS = 16384;
+	private static final int MOST_SLOTS = 1 << 18;
+	/** How full, in eighths, the table may be after a build before the keys no recent build read are dropped. */
+	private static final int SWEEP_AT = 5;
 
 	private int[] layers = new int[FIRST_SLOTS];
 	private int[] us = new int[FIRST_SLOTS];
@@ -38,16 +55,31 @@ final class MaskTiles {
 		this.level = level;
 		this.build++;
 		if (this.build == 0) {
-			// After four billion builds: no slot may look read in this one.
+			// After four billion builds: no slot may look read in this one or the one before.
 			Arrays.fill(this.readIn, 0);
-			this.build = 1;
+			this.build = 2;
 		}
 	}
 
-	/** The build is done: the tiles it found are let go. */
+	/** The build is done, or stopped partway: the tiles it found are let go, and keys no recent build read are dropped if the table is filling. */
 	void end() {
 		this.level = null;
 		Arrays.fill(this.found, null);
+		if (this.count >= this.keys.length / 8 * SWEEP_AT) {
+			this.drop(1);
+			if (this.count >= this.keys.length / 2 && this.keys.length < MOST_SLOTS) {
+				// The last two builds' keys alone nearly fill it: room for as many again, so the next
+				// builds' new tiles don't call for this every build.
+				this.resize(this.keys.length * 2, true);
+			}
+		}
+	}
+
+	/** Back to the table's first size, dropping every key: a view that read thousands of tiles has closed. */
+	void shrink() {
+		if (this.keys.length > FIRST_SLOTS) {
+			this.resize(FIRST_SLOTS, false);
+		}
 	}
 
 	/** What {@link MapLevel#peek} gives for this tile, looked up once this build. */
@@ -65,8 +97,19 @@ final class MaskTiles {
 			slot = slot + 1 & mask;
 		}
 		// Kept under three quarters full, so a slot is always found within a few steps.
-		if (this.count >= this.keys.length * 3 / 4) {
-			this.prune();
+		if (this.count >= this.keys.length / 4 * 3) {
+			if (this.keys.length < MOST_SLOTS) {
+				// Every key stays: the rest of this build, and the next, read most of them again.
+				this.resize(this.keys.length * 2, true);
+			} else {
+				this.drop(0);
+				if (this.count >= this.keys.length / 4 * 3) {
+					// This build alone reads more than fit: start again from empty, in the same arrays.
+					Arrays.fill(this.keys, null);
+					Arrays.fill(this.found, null);
+					this.count = 0;
+				}
+			}
 			slot = this.free(hash(layer, tileU, tileV, lod));
 		}
 		TileKey key = new TileKey(layer, tileU, tileV, lod);
@@ -77,33 +120,52 @@ final class MaskTiles {
 	}
 
 	/**
-	 * Keeps only the keys this build has read, in as many slots as leave room for as many again:
-	 * so a minimap flying over new land keeps the hundred or so tiles around it rather than every
-	 * tile it ever passed, and the full map zoomed far out gets room for its thousands. If this build
-	 * alone reads more than fit, every key is dropped and made again when read.
+	 * Drops every key the last {@code builds} builds before this one and this one didn't read, in
+	 * place: each key after a dropped one that would no longer be found from its hash moves back
+	 * into the gap, as a linear-probing table's removal goes.
 	 */
-	private void prune() {
+	private void drop(int builds) {
+		int i = 0;
+		while (i < this.keys.length) {
+			if (this.keys[i] != null && this.build - this.readIn[i] > builds) {
+				this.remove(i);
+				this.count--;
+				// Slot i may hold a key moved back from further on: look at it again.
+			} else {
+				i++;
+			}
+		}
+	}
+
+	private void remove(int gap) {
+		int mask = this.keys.length - 1;
+		int at = gap;
+		while (true) {
+			at = at + 1 & mask;
+			if (this.keys[at] == null) {
+				break;
+			}
+			int home = hash(this.layers[at], this.us[at], this.vs[at], this.lods[at]) & mask;
+			// Found from its hash only past the gap if its home lies after the gap, up to where it is.
+			boolean staysPut = gap <= at ? gap < home && home <= at : gap < home || home <= at;
+			if (!staysPut) {
+				this.put(gap, this.keys[at], this.found[at], this.readIn[at]);
+				gap = at;
+			}
+		}
+		this.keys[gap] = null;
+		this.found[gap] = null;
+	}
+
+	/** The table at {@code slots} slots, with every key it has if {@code keep}, else none. */
+	private void resize(int slots, boolean keep) {
+		int[] oldLayers = this.layers;
+		int[] oldUs = this.us;
+		int[] oldVs = this.vs;
+		int[] oldLods = this.lods;
 		@Nullable TileKey[] oldKeys = this.keys;
 		@Nullable MapTile[] oldFound = this.found;
 		int[] oldReadIn = this.readIn;
-		int live = 0;
-		for (int i = 0; i < oldKeys.length; i++) {
-			if (oldKeys[i] != null && oldReadIn[i] == this.build) {
-				live++;
-			}
-		}
-		int slots = FIRST_SLOTS;
-		while (slots < MOST_SLOTS && slots * 3 / 8 <= live) {
-			slots *= 2;
-		}
-		this.count = 0;
-		// Only what this build found goes with the keys dropped: looked up again, it's the same.
-		boolean keep = slots * 3 / 8 > live;
-		if (!keep && slots == oldKeys.length) {
-			Arrays.fill(this.keys, null);
-			Arrays.fill(this.found, null);
-			return;
-		}
 		this.layers = new int[slots];
 		this.us = new int[slots];
 		this.vs = new int[slots];
@@ -111,13 +173,14 @@ final class MaskTiles {
 		this.keys = new TileKey[slots];
 		this.found = new MapTile[slots];
 		this.readIn = new int[slots];
+		this.count = 0;
 		if (!keep) {
 			return;
 		}
 		for (int i = 0; i < oldKeys.length; i++) {
 			TileKey key = oldKeys[i];
-			if (key != null && oldReadIn[i] == this.build) {
-				this.put(this.free(hash(key.layer(), key.tileU(), key.tileV(), key.lod())), key, oldFound[i], oldReadIn[i]);
+			if (key != null) {
+				this.put(this.free(hash(oldLayers[i], oldUs[i], oldVs[i], oldLods[i])), key, oldFound[i], oldReadIn[i]);
 				this.count++;
 			}
 		}
