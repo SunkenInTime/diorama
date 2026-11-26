@@ -30,8 +30,8 @@ import java.util.Objects;
  * }</pre>
  */
 public final class MapLine {
-	/** The most points one line can have: 4,096. */
-	public static final int MAX_POINTS = 4096;
+	/** The most points one line can have: 1,024. */
+	public static final int MAX_POINTS = 1024;
 	/** The narrowest a line can be, in GUI pixels: 1. */
 	public static final int MIN_WIDTH = 1;
 	/** The widest a line can be, in GUI pixels: 8. */
@@ -141,13 +141,14 @@ public final class MapLine {
 		 * @param y up is positive: the height of the place (see {@link Marker})
 		 * @param z south is positive
 		 * @return this builder
-		 * @throws IllegalArgumentException if a coordinate is infinite or NaN, or the line already
-		 *     has {@link #MAX_POINTS} points
+		 * @throws IllegalArgumentException if {@code x} or {@code z} is beyond
+		 *     {@link Marker#MAX_COORDINATE} either way, {@code y} beyond {@link Marker#MAX_HEIGHT},
+		 *     any of them NaN, or the line already has {@link #MAX_POINTS} points
 		 */
 		public Builder point(double x, double y, double z) {
-			Checks.coordinate("x", x);
-			Checks.coordinate("y", y);
-			Checks.coordinate("z", z);
+			Checks.horizontal("x", x);
+			Checks.height(y);
+			Checks.horizontal("z", z);
 			if (this.count == MAX_POINTS) {
 				throw new IllegalArgumentException("A line can go through " + MAX_POINTS + " points at most; split a longer one");
 			}

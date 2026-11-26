@@ -19,12 +19,12 @@ import java.util.Objects;
  * }</pre>
  */
 public final class LayerContent {
-	/** The most markers one layer can show: 4,096. */
-	public static final int MAX_MARKERS = 4096;
+	/** The most markers one layer can show: 1,024. */
+	public static final int MAX_MARKERS = 1024;
 	/** The most lines one layer can show: 1,024. */
 	public static final int MAX_LINES = 1024;
-	/** The most points all of one layer's lines can have together: 16,384. */
-	public static final int MAX_LINE_POINTS = 16384;
+	/** The most points all of one layer's lines can have together: 4,096. */
+	public static final int MAX_LINE_POINTS = 4096;
 	/** Nothing: a layer shows this until its first {@link MapLayer#replace}. */
 	public static final LayerContent EMPTY = new LayerContent(List.of(), List.of());
 

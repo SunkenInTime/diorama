@@ -45,12 +45,15 @@ public interface DioramaApi {
 
 	/**
 	 * Opens a layer of markers and lines on Diorama's maps, empty until its first
-	 * {@link MapLayer#replace}. See {@link MapLayer} for how long it holds and how it is drawn.
+	 * {@link MapLayer#replace}. See {@link MapLayer} for how long it holds, how it is drawn, and
+	 * how a new world empties it: an addon that shows things per world replaces its layers again
+	 * when {@link #world}'s ID changes.
 	 *
 	 * @param name what this addon calls it: 1 to 32 characters, {@code a-z 0-9 _ - .}, such as
 	 *     {@code trains}; not the name of another layer this addon has open
-	 * @return the layer, open until this addon closes it or fails. For an addon Diorama switched
-	 *     off, a layer that is already closed and shows nothing.
+	 * @return the layer, open until this addon closes it or fails. An addon that failed, so that
+	 *     Diorama switched it off, gets a layer that is already closed: {@link MapLayer#isOpen}
+	 *     is false, {@link MapLayer#replace} does nothing, and it never shows.
 	 * @throws IllegalArgumentException if the name won't do, or this addon already has a layer of
 	 *     that name open
 	 * @throws IllegalStateException if this addon already has {@link MapLayer#MAX_OPEN} layers

@@ -7,6 +7,9 @@ import dev.diorama.api.MapLayer;
 import dev.diorama.api.MapLine;
 import dev.diorama.api.Marker;
 import dev.diorama.api.ResourceId;
+import dev.diorama.api.World;
+import dev.diorama.api.WorldId;
+import java.util.Objects;
 
 /**
  * What an addon draws on Diorama's maps, in three layers around a spot, using nothing but the
@@ -22,6 +25,11 @@ import dev.diorama.api.ResourceId;
  * </ul>
  * A real addon would call {@link #tick} from its own client tick event; the game tests call it
  * from theirs.
+ *
+ * <p>Diorama empties every layer when the world changes, so {@link #tick} also watches
+ * {@link DioramaApi#world} and hands the places and roads over again whenever the world's ID
+ * changes. (A real addon would show each world's own places; these are the same ones around the
+ * same spot in any world.) The carts are handed over every tick anyway.
  */
 public final class MapMarkers implements AutoCloseable {
 	/** A colour no block uses, so the tests can find the carts on screen. */
@@ -29,6 +37,7 @@ public final class MapMarkers implements AutoCloseable {
 	public static final ResourceId OWN_ICON = ResourceId.of("diorama_test_addon:raid");
 	public static final ResourceId MISSING_ICON = ResourceId.of("diorama_test_addon:no_such_icon");
 
+	private final DioramaApi api;
 	private final DimensionId dimension;
 	private final double x;
 	private final double y;
@@ -37,6 +46,8 @@ public final class MapMarkers implements AutoCloseable {
 	private final MapLayer cartLayer;
 	private final MapLayer placeLayer;
 	private final MapLayer roadLayer;
+	/** The world the places and roads were last handed over in, or null for none. */
+	private WorldId shownFor;
 	private long ticks;
 
 	/**
@@ -45,6 +56,7 @@ public final class MapMarkers implements AutoCloseable {
 	 * @param carts how many carts go round, up to {@link LayerContent#MAX_MARKERS}
 	 */
 	public MapMarkers(DioramaApi api, DimensionId dimension, double x, double y, double z, int carts) {
+		this.api = api;
 		this.dimension = dimension;
 		this.x = x;
 		this.y = y;
@@ -53,9 +65,17 @@ public final class MapMarkers implements AutoCloseable {
 		this.roadLayer = api.openLayer("roads");
 		this.cartLayer = api.openLayer("carts");
 		this.placeLayer = api.openLayer("places");
-		this.placeLayer.replace(this.placeContent());
-		this.roadLayer.replace(this.roadContent());
 		this.tick();
+	}
+
+	/** Hands the places and roads over again if the world changed since they last were: Diorama emptied them. */
+	private void followWorld() {
+		WorldId now = this.api.world().map(World::worldId).orElse(null);
+		if (now != null && !Objects.equals(now, this.shownFor)) {
+			this.shownFor = now;
+			this.placeLayer.replace(this.placeContent());
+			this.roadLayer.replace(this.roadContent());
+		}
 	}
 
 	private LayerContent placeContent() {
@@ -85,8 +105,9 @@ public final class MapMarkers implements AutoCloseable {
 			.build();
 	}
 
-	/** Moves the carts on one step and hands the layer all of them again. */
+	/** Moves the carts on one step and hands the layer all of them again, and follows the world. */
 	public void tick() {
+		this.followWorld();
 		this.ticks++;
 		LayerContent.Builder content = LayerContent.builder();
 		for (int i = 0; i < this.carts; i++) {

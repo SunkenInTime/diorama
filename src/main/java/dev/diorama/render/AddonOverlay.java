@@ -1,9 +1,11 @@
 package dev.diorama.render;
 
+import dev.diorama.Diorama;
 import dev.diorama.Projection;
 import dev.diorama.addon.AddonLayers;
 import dev.diorama.api.DimensionId;
 import dev.diorama.api.LayerContent;
+import dev.diorama.api.MapLayer;
 import dev.diorama.api.MapLine;
 import dev.diorama.api.Marker;
 import dev.diorama.api.ResourceId;
@@ -25,11 +27,19 @@ import org.jspecify.annotations.Nullable;
  * way the player's drawings are ({@link dev.diorama.drawing.DrawingOverlay}): a dark rim, then the
  * colour, round at each point, and drawn in one draw too.
  *
- * <p>What it draws a frame goes into arrays it keeps, which the GUI holds on to until the frame is
- * drawn instead of copying ({@link MapCanvas#rectsKept}): so a crowd of markers allocates nothing
- * a frame beyond its labels, which the game's text drawing allocates for. Each kind of draw has
- * two sets of arrays and takes them in turn, so drawing the same view twice in a frame can't
- * change what the first draw handed the GUI. With no layer open, nothing happens at all.
+ * <p>Where things are on screen is worked out in doubles, and every line is cut to the view (a
+ * little outside it) before any corner becomes a float, so a line from one end of the world to the
+ * other gives corners near the view like any other. On a round minimap, what crosses its circle
+ * is cut to the circle, and a marker is drawn only if all of what it draws is inside.
+ *
+ * <p>What it draws a frame goes into arrays kept between frames, which the GUI holds on to until
+ * the frame is drawn instead of copying ({@link MapCanvas#rectsKept}): so a crowd of markers
+ * allocates nothing a frame beyond its labels, which the game's text drawing allocates for. The
+ * arrays are shared by every view, {@link #RING} sets for each kind taken in turn, so up to that
+ * many draws of a frame can't change what an earlier one handed the GUI. They never grow past a
+ * map's budget ({@link MapLayer#MAX_DRAWN_MARKERS}, {@link MapLayer#MAX_DRAWN_LINE_PIECES}), are
+ * cut down once they've been far bigger than needed for a while, and are let go when the last
+ * layer closes. With no layer open, nothing happens at all.
  */
 public final class AddonOverlay {
 	/** A marker's dark outline, a pixel each side of its dot, as the radar's mob dots have. */
@@ -41,6 +51,16 @@ public final class AddonOverlay {
 	private static final float RIM = 1;
 	/** The corners of a line's joint: an octagon round each point. */
 	private static final float[] OCTAGON = new float[16];
+	/**
+	 * How many draws of each kind may still be waiting for the screen: the minimap and the full
+	 * map draw once a frame each, and this leaves room for a view drawn twice. A set of arrays, and
+	 * an icon's tile in {@link MarkerAtlas}, is used again only this many draws later.
+	 */
+	public static final int RING = 4;
+	/** Quads a set of arrays starts with. */
+	private static final int FIRST = 64;
+	/** Draws in a row a set's arrays can be four times what they hold before they're cut down. */
+	private static final int SHRINK_AFTER = 60;
 
 	static {
 		for (int i = 0; i < 8; i++) {
@@ -53,7 +73,7 @@ public final class AddonOverlay {
 	/** For the game tests: told where each marker was put, frame by frame. Null outside them. */
 	public static @Nullable Probe probe;
 
-	/** What a test hears about each frame's markers. */
+	/** What a test hears about each frame's markers and lines. */
 	public interface Probe {
 		/** A frame of a view starts: its lines are drawn next, then its markers. */
 		void frame(boolean fullscreen);
@@ -61,24 +81,37 @@ public final class AddonOverlay {
 		/** A view's markers are about to be placed. */
 		void view(boolean fullscreen, MapViewport.View view);
 
-		/** One marker drawn at (x, y) on screen, its index in its layer's content. */
-		void marker(boolean fullscreen, AddonLayers.Layer layer, int index, float x, float y);
+		/** One marker drawn at (x, y) on screen, its index in its layer's content, and its icon's tile or -1 for a dot. */
+		void marker(boolean fullscreen, AddonLayers.Layer layer, int index, float x, float y, int tile);
 
-		/** One line with a point on screen, its index in its layer's content. */
+		/** One line that gave quads, its index in its layer's content. */
 		void line(boolean fullscreen, AddonLayers.Layer layer, int index);
+
+		/** What one draw handed the GUI: {@code quads} quads, four corners of x, y, z each, and a colour each. */
+		void drawn(boolean fullscreen, boolean lines, float[] xyz, int[] colors, int quads);
 	}
 
-	private final Quads[] markerQuads = {new Quads(), new Quads()};
-	private final Quads[] lineQuads = {new Quads(), new Quads()};
-	private int markerTurn;
-	private int lineTurn;
-	/** The labels to draw after the markers: each marker, and where it went. */
-	private Marker[] labels = new Marker[16];
-	private float[] labelAt = new float[32];
-	/** A line's points on screen, kept between lines and frames. */
-	private float[] sx = new float[64];
-	private float[] sy = new float[64];
-	private final float[] polygon = new float[16];
+	/** The markers' and lines' sets of arrays, shared by every view, and whose turn is next. */
+	private static final Quads[] MARKERS = new Quads[RING];
+	private static final Quads[] LINES = new Quads[RING];
+	private static int markerTurn;
+	private static int lineTurn;
+	/** Whether any set of arrays is held, to let go once no layer is open. */
+	private static boolean holding;
+	private static boolean markersOverSaid;
+	private static boolean linesOverSaid;
+	/** The labels to draw after the markers: each marker, and where it went and how far it reaches. */
+	private static Marker[] labels = new Marker[16];
+	private static float[] labelAt = new float[48];
+	/** A line's points on screen, kept between lines and frames: never more than a line's {@link MapLine#MAX_POINTS}. */
+	private static double[] sx = new double[64];
+	private static double[] sy = new double[64];
+	/** The polygon being cut into quads. */
+	private static final float[] POLYGON = new float[16];
+	/** The part of a segment {@link #clip} kept, from 0 to 1 along it. */
+	private double t0;
+	private double t1;
+
 	/** Where this frame's labels are, in cells of {@link #LABEL_CELL} GUI pixels over the view: a cell holds the frame's stamp once taken. */
 	private int[] taken = new int[0];
 	private int takenX;
@@ -94,27 +127,95 @@ public final class AddonOverlay {
 	private double zoom;
 	private double cos;
 	private double sin;
-	private float middleX;
-	private float middleY;
+	private double middleX;
+	private double middleY;
 	/** The last dimension asked for by its text, and its ID. */
 	private @Nullable String dimensionText;
 	private @Nullable DimensionId dimension;
 
-	/** The markers' and lines' arrays of quads, kept between frames. */
+	/** A set of quads' arrays, kept between frames, never more quads than {@link #budget}. Lines have no texture, so no UVs. */
 	private static final class Quads {
-		float[] xyz = new float[12 * 64];
-		float[] uvs = new float[8 * 64];
-		int[] colors = new int[64];
+		final int budget;
+		float[] xyz;
+		float @Nullable [] uvs;
+		int[] colors;
 		int count;
+		/** Draws in a row it has held under a quarter of its room. */
+		int idle;
 
-		void room(int more) {
-			if (this.count + more > this.colors.length) {
-				int n = Math.max(this.colors.length * 2, this.count + more);
+		Quads(boolean textured, int budget) {
+			this.budget = budget;
+			this.xyz = new float[FIRST * 12];
+			this.uvs = textured ? new float[FIRST * 8] : null;
+			this.colors = new int[FIRST];
+		}
+
+		/** Makes room for {@code more} quads, unless that passes the budget: then false, and nothing changes. */
+		boolean room(int more) {
+			int need = this.count + more;
+			if (need > this.budget) {
+				return false;
+			}
+			if (need > this.colors.length) {
+				int n = Math.min(this.budget, Math.max(this.colors.length * 2, need));
 				this.xyz = Arrays.copyOf(this.xyz, n * 12);
-				this.uvs = Arrays.copyOf(this.uvs, n * 8);
+				if (this.uvs != null) {
+					this.uvs = Arrays.copyOf(this.uvs, n * 8);
+				}
 				this.colors = Arrays.copyOf(this.colors, n);
 			}
+			return true;
 		}
+
+		/**
+		 * After a draw: once it has held under a quarter of its room for {@link #SHRINK_AFTER}
+		 * draws, the arrays are cut to twice what it holds. New arrays: the GUI may still hold the
+		 * old ones this frame.
+		 */
+		void settle() {
+			if (this.colors.length <= FIRST || this.count * 4 >= this.colors.length) {
+				this.idle = 0;
+				return;
+			}
+			if (++this.idle < SHRINK_AFTER) {
+				return;
+			}
+			int n = Math.max(FIRST, this.count * 2);
+			this.xyz = new float[n * 12];
+			if (this.uvs != null) {
+				this.uvs = new float[n * 8];
+			}
+			this.colors = new int[n];
+			this.idle = 0;
+		}
+
+		long bytes() {
+			return this.xyz.length * 4L + (this.uvs == null ? 0 : this.uvs.length * 4L) + this.colors.length * 4L;
+		}
+	}
+
+	/** The next set of arrays in a ring, made the first time, emptied. */
+	private static Quads next(Quads[] ring, int turn, boolean textured, int budget) {
+		Quads quads = ring[turn];
+		if (quads == null) {
+			quads = new Quads(textured, budget);
+			ring[turn] = quads;
+			holding = true;
+		}
+		quads.count = 0;
+		return quads;
+	}
+
+	/** Bytes of arrays held for addons' layers now, for the tests: the sets, labels and a line's points. */
+	public static long heldBytes() {
+		long bytes = 0;
+		for (Quads quads : MARKERS) {
+			bytes += quads == null ? 0 : quads.bytes();
+		}
+		for (Quads quads : LINES) {
+			bytes += quads == null ? 0 : quads.bytes();
+		}
+		return bytes + labels.length * 4L + labelAt.length * 4L + sx.length * 16L;
 	}
 
 	/** The dimension with this ID, as the API names it; the last one is kept, so asking every frame costs nothing. */
@@ -130,9 +231,28 @@ public final class AddonOverlay {
 		return this.dimension;
 	}
 
-	/** Whether any layer is open: the maps ask before working out anything to draw. */
+	/**
+	 * Whether any layer is open: the maps ask before working out anything to draw. With none, the
+	 * arrays kept for drawing them are let go.
+	 */
 	public static boolean any() {
-		return !AddonLayers.open().isEmpty();
+		if (!AddonLayers.open().isEmpty()) {
+			return true;
+		}
+		if (holding) {
+			release();
+		}
+		return false;
+	}
+
+	private static void release() {
+		Arrays.fill(MARKERS, null);
+		Arrays.fill(LINES, null);
+		labels = new Marker[16];
+		labelAt = new float[48];
+		sx = new double[64];
+		sy = new double[64];
+		holding = false;
 	}
 
 	private void place(MapViewport.View view, GuiGraphicsExtractor graphics) {
@@ -141,8 +261,8 @@ public final class AddonOverlay {
 		this.zoom = view.zoom();
 		this.cos = view.turn() == 0 ? 1 : Math.cos(view.turn());
 		this.sin = view.turn() == 0 ? 0 : Math.sin(view.turn());
-		this.middleX = (float) (view.x() + view.width() / 2.0);
-		this.middleY = (float) (view.y() + view.height() / 2.0);
+		this.middleX = view.x() + view.width() / 2.0;
+		this.middleY = view.y() + view.height() / 2.0;
 		this.circle = view.round() ? Circle.in(view) : null;
 		//? if <1.21.6 {
 		/*// The GUI depth-tests before 1.21.6: draw at the depth the rest of the view is drawn at.
@@ -153,37 +273,41 @@ public final class AddonOverlay {
 	}
 
 	// Where a point of the map is on screen, turned with the view: View.screenX(u, v) and screenY(u, v).
-	private float screenX(double u, double v) {
-		return (float) (this.middleX + ((u - this.centerU) * this.cos - (v - this.centerV) * this.sin) * this.zoom);
+	private double screenX(double u, double v) {
+		return this.middleX + ((u - this.centerU) * this.cos - (v - this.centerV) * this.sin) * this.zoom;
 	}
 
-	private float screenY(double u, double v) {
-		return (float) (this.middleY + ((u - this.centerU) * this.sin + (v - this.centerV) * this.cos) * this.zoom);
+	private double screenY(double u, double v) {
+		return this.middleY + ((u - this.centerU) * this.sin + (v - this.centerV) * this.cos) * this.zoom;
 	}
 
 	/**
-	 * The layers' markers in {@code dimension}, with their labels on the full map. Call it inside
-	 * no scissor of its own: it cuts to the view.
+	 * The layers' markers in {@code dimension}, with their labels on the full map, up to
+	 * {@link MapLayer#MAX_DRAWN_MARKERS}. Call it inside no scissor of its own: it cuts to the view.
 	 */
 	public void drawMarkers(GuiGraphicsExtractor graphics, MapViewport.View view, @Nullable DimensionId dimension, boolean fullscreen) {
 		List<AddonLayers.Layer> layers = AddonLayers.open();
 		if (layers.isEmpty() || dimension == null) {
 			return;
 		}
+		AddonLayers.sync();
 		Probe probe = AddonOverlay.probe;
 		if (probe != null) {
 			probe.view(fullscreen, view);
 		}
 		this.place(view, graphics);
-		Quads quads = this.markerQuads[this.markerTurn];
-		this.markerTurn ^= 1;
-		quads.count = 0;
+		Quads quads = next(MARKERS, markerTurn, true, MapLayer.MAX_DRAWN_MARKERS * 2);
+		markerTurn = (markerTurn + 1) % RING;
+		MarkerAtlas.startDraw();
+		int drawn = 0;
 		int labelCount = 0;
 		double gui = Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
-		float left = view.x();
-		float top = view.y();
-		float right = view.x() + view.width();
-		float bottom = view.y() + view.height();
+		double left = view.x();
+		double top = view.y();
+		double right = view.x() + view.width();
+		double bottom = view.y() + view.height();
+		Circle circle = this.circle;
+		all:
 		for (int l = 0; l < layers.size(); l++) {
 			AddonLayers.Layer layer = layers.get(l);
 			if (!layer.shown()) {
@@ -198,64 +322,89 @@ public final class AddonOverlay {
 				}
 				double u = Projection.u(marker.x(), marker.z());
 				double v = Projection.v(marker.x(), marker.y(), marker.z());
-				float x = this.screenX(u, v);
-				float y = this.screenY(u, v);
-				float half = marker.size() / 2.0F + 1;
+				double x = this.screenX(u, v);
+				double y = this.screenY(u, v);
+				Optional<ResourceId> icon = marker.icon();
+				// How far it reaches from its middle: a dot and its outline, or the icon's whole tile,
+				// which at a small size is bigger than the size asked for.
+				double dotHalf = marker.size() / 2.0 + 1;
+				double iconHalf = icon.isPresent() ? WaypointIcons.TILE * Radar.texel(marker.size(), WaypointIcons.TILE) / 2.0 : dotHalf;
+				double reach = Math.max(dotHalf, iconHalf);
+				if (x + reach < left || x - reach > right || y + reach < top || y - reach > bottom
+					|| circle != null && Math.hypot(x - circle.cx, y - circle.cy) - reach * Math.sqrt(2) > circle.r) {
+					continue;
+				}
+				if (drawn == MapLayer.MAX_DRAWN_MARKERS) {
+					if (!markersOverSaid) {
+						markersOverSaid = true;
+						Diorama.LOGGER.warn("Addons' layers have more than {} markers in a map's view; from {}'s layer {} on, the rest aren't drawn",
+							MapLayer.MAX_DRAWN_MARKERS, layer.modId(), layer.layerName());
+					}
+					break all;
+				}
+				int tile = icon.isPresent() ? MarkerAtlas.tile(icon.get()) : MarkerAtlas.NONE;
+				double half = tile != MarkerAtlas.NONE ? iconHalf : dotHalf;
 				if (x + half < left || x - half > right || y + half < top || y - half > bottom) {
 					continue;
 				}
-				Circle circle = this.circle;
-				if (circle != null && !(circle.contains(x - half, y - half) && circle.contains(x + half, y - half)
-					&& circle.contains(x - half, y + half) && circle.contains(x + half, y + half))) {
+				float x0 = (float) (x - half);
+				float y0 = (float) (y - half);
+				float x1 = (float) (x + half);
+				float y1 = (float) (y + half);
+				if (circle != null && !(circle.contains(x0, y0) && circle.contains(x1, y0) && circle.contains(x0, y1) && circle.contains(x1, y1))) {
 					continue;
 				}
-				this.marker(quads, marker, x, y, gui);
+				float fx = (float) x;
+				float fy = (float) y;
+				this.marker(quads, marker, tile, fx, fy, (float) half, gui);
+				drawn++;
 				if (probe != null) {
-					probe.marker(fullscreen, layer, i, x, y);
+					probe.marker(fullscreen, layer, i, fx, fy, tile);
 				}
 				if (fullscreen && !marker.label().isEmpty()) {
-					if (labelCount == this.labels.length) {
-						this.labels = Arrays.copyOf(this.labels, labelCount * 2);
-						this.labelAt = Arrays.copyOf(this.labelAt, labelCount * 4);
+					if (labelCount == labels.length) {
+						labels = Arrays.copyOf(labels, labelCount * 2);
+						labelAt = Arrays.copyOf(labelAt, labelCount * 6);
 					}
-					this.labels[labelCount] = marker;
-					this.labelAt[labelCount * 2] = x;
-					this.labelAt[labelCount * 2 + 1] = y;
+					labels[labelCount] = marker;
+					labelAt[labelCount * 3] = fx;
+					labelAt[labelCount * 3 + 1] = fy;
+					labelAt[labelCount * 3 + 2] = (float) half;
 					labelCount++;
 				}
 			}
 		}
-		if (quads.count == 0) {
-			return;
+		if (probe != null) {
+			probe.drawn(fullscreen, false, quads.xyz, quads.colors, quads.count);
 		}
-		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
-		MapCanvas.of(graphics).rectsKept(MarkerAtlas.texture(), Sampling.CLAMP_CRISP, quads.xyz, quads.uvs, quads.colors, quads.count);
-		if (labelCount > 0) {
-			Font font = Minecraft.getInstance().font;
-			this.clearTaken(view);
-			for (int k = 0; k < labelCount; k++) {
-				this.label(graphics, font, this.labels[k], this.labelAt[k * 2], this.labelAt[k * 2 + 1]);
-				this.labels[k] = null;
+		if (quads.count > 0) {
+			graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
+			MapCanvas.of(graphics).rectsKept(MarkerAtlas.texture(), Sampling.CLAMP_CRISP, quads.xyz, quads.uvs, quads.colors, quads.count);
+			if (labelCount > 0) {
+				Font font = Minecraft.getInstance().font;
+				this.clearTaken(view);
+				for (int k = 0; k < labelCount; k++) {
+					this.label(graphics, font, labels[k], labelAt[k * 3], labelAt[k * 3 + 1], labelAt[k * 3 + 2]);
+					labels[k] = null;
+				}
 			}
+			graphics.disableScissor();
 		}
-		graphics.disableScissor();
+		quads.settle();
 	}
 
-	/** One marker's quads: its icon, or its dot over a dark outline. */
-	private void marker(Quads quads, Marker marker, float x, float y, double gui) {
-		Optional<ResourceId> icon = marker.icon();
-		int tile = icon.isPresent() ? MarkerAtlas.tile(icon.get()) : MarkerAtlas.NONE;
-		float size = marker.size();
+	/** One marker's quads, reaching {@code half} from (x, y): its icon, or its dot over a dark outline. */
+	private void marker(Quads quads, Marker marker, int tile, float x, float y, float half, double gui) {
+		quads.room(2);
 		if (tile != MarkerAtlas.NONE) {
 			// Each of the icon's pixels a whole number of screen pixels, as the waypoint icons are.
-			float texel = Radar.texel(size, WaypointIcons.TILE);
-			float half = WaypointIcons.TILE * texel / 2;
 			float u0 = MarkerAtlas.tileX(tile) / (float) MarkerAtlas.SIZE;
 			float v0 = MarkerAtlas.tileY(tile) / (float) MarkerAtlas.SIZE;
 			float side = WaypointIcons.TILE / (float) MarkerAtlas.SIZE;
 			this.rect(quads, x - half, y - half, x + half, y + half, u0, v0, u0 + side, v0 + side, 0xFFFFFFFF);
 			return;
 		}
+		float size = marker.size();
 		this.dot(quads, x, y, size + 2, gui, OUTLINE);
 		this.dot(quads, x, y, size, gui, 0xFF000000 | marker.rgb());
 	}
@@ -269,9 +418,8 @@ public final class AddonOverlay {
 		this.rect(quads, x - half, y - half, x + half, y + half, u0, v0, u0 + side, v0 + side, argb);
 	}
 
-	/** An upright rectangle, its corners in the order MapCanvas.rect gives them. */
+	/** An upright rectangle, its corners in the order MapCanvas.rect gives them. Room for it is already made. */
 	private void rect(Quads quads, float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1, int argb) {
-		quads.room(1);
 		int q = quads.count++;
 		float[] xyz = quads.xyz;
 		float[] uvs = quads.uvs;
@@ -306,11 +454,11 @@ public final class AddonOverlay {
 	 * shows and the others wait for the player to zoom in. That also keeps a crowd from costing a
 	 * label each, as the game's text drawing allocates for every one.
 	 */
-	private void label(GuiGraphicsExtractor graphics, Font font, Marker marker, float x, float y) {
+	private void label(GuiGraphicsExtractor graphics, Font font, Marker marker, float x, float y, float half) {
 		String text = marker.label();
 		int w = font.width(text);
 		int left = Math.round(x - w / 2.0F);
-		int top = Math.round(y + marker.size() / 2.0F + 3);
+		int top = Math.round(y + half + 2);
 		if (!this.take(left - 2, top - 1, left + w + 2, top + 9)) {
 			return;
 		}
@@ -362,22 +510,23 @@ public final class AddonOverlay {
 	}
 
 	/**
-	 * The layers' lines in {@code dimension}, cut to the view, a round one's circle included. Call
-	 * it inside no scissor of its own.
+	 * The layers' lines in {@code dimension}, cut to the view, a round one's circle included, up to
+	 * {@link MapLayer#MAX_DRAWN_LINE_PIECES} quads. Call it inside no scissor of its own.
 	 */
 	public void drawLines(GuiGraphicsExtractor graphics, MapViewport.View view, @Nullable DimensionId dimension, boolean fullscreen) {
 		List<AddonLayers.Layer> layers = AddonLayers.open();
 		if (layers.isEmpty() || dimension == null) {
 			return;
 		}
+		AddonLayers.sync();
 		Probe probe = AddonOverlay.probe;
 		if (probe != null) {
 			probe.frame(fullscreen);
 		}
 		this.place(view, graphics);
-		Quads quads = this.lineQuads[this.lineTurn];
-		this.lineTurn ^= 1;
-		quads.count = 0;
+		Quads quads = next(LINES, lineTurn, false, MapLayer.MAX_DRAWN_LINE_PIECES);
+		lineTurn = (lineTurn + 1) % RING;
+		all:
 		for (int l = 0; l < layers.size(); l++) {
 			AddonLayers.Layer layer = layers.get(l);
 			if (!layer.shown()) {
@@ -391,52 +540,64 @@ public final class AddonOverlay {
 				if (in != dimension && !in.equals(dimension)) {
 					continue;
 				}
-				if (this.line(quads, view, line) && probe != null) {
+				int before = quads.count;
+				if (!this.line(quads, view, line)) {
+					// Past the budget: none of this line, and nothing after it.
+					quads.count = before;
+					if (!linesOverSaid) {
+						linesOverSaid = true;
+						Diorama.LOGGER.warn("Addons' layers have more lines in a map's view than it draws a frame ({} pieces); from {}'s layer {} on, the rest aren't drawn",
+							MapLayer.MAX_DRAWN_LINE_PIECES, layer.modId(), layer.layerName());
+					}
+					break all;
+				}
+				if (quads.count > before && probe != null) {
 					probe.line(fullscreen, layer, i);
 				}
 			}
 		}
-		if (quads.count == 0) {
-			return;
+		if (probe != null) {
+			probe.drawn(fullscreen, true, quads.xyz, quads.colors, quads.count);
 		}
-		graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
-		MapCanvas.of(graphics).solidsKept(quads.xyz, quads.colors, quads.count);
-		graphics.disableScissor();
+		if (quads.count > 0) {
+			graphics.enableScissor(view.x(), view.y(), view.x() + view.width(), view.y() + view.height());
+			MapCanvas.of(graphics).solidsKept(quads.xyz, quads.colors, quads.count);
+			graphics.disableScissor();
+		}
+		quads.settle();
 	}
 
-	/** One line's quads, if any of it is in the view: its rim, then its colour over it. */
+	/** One line's quads, if any of it is in the view: its rim, then its colour over it. False if they don't fit in the budget. */
 	private boolean line(Quads quads, MapViewport.View view, MapLine line) {
 		int n = line.pointCount();
-		if (this.sx.length < n) {
-			this.sx = new float[Math.max(n, this.sx.length * 2)];
-			this.sy = new float[this.sx.length];
+		if (sx.length < n) {
+			sx = new double[Math.max(n, sx.length * 2)];
+			sy = new double[sx.length];
 		}
-		float minX = Float.MAX_VALUE;
-		float minY = Float.MAX_VALUE;
-		float maxX = -Float.MAX_VALUE;
-		float maxY = -Float.MAX_VALUE;
+		double minX = Double.MAX_VALUE;
+		double minY = Double.MAX_VALUE;
+		double maxX = -Double.MAX_VALUE;
+		double maxY = -Double.MAX_VALUE;
 		for (int k = 0; k < n; k++) {
 			double x = line.x(k);
 			double z = line.z(k);
 			double u = Projection.u(x, z);
 			double v = Projection.v(x, line.y(k), z);
-			float px = this.screenX(u, v);
-			float py = this.screenY(u, v);
-			this.sx[k] = px;
-			this.sy[k] = py;
+			double px = this.screenX(u, v);
+			double py = this.screenY(u, v);
+			sx[k] = px;
+			sy[k] = py;
 			minX = Math.min(minX, px);
 			maxX = Math.max(maxX, px);
 			minY = Math.min(minY, py);
 			maxY = Math.max(maxY, py);
 		}
-		float grow = line.width() + RIM * 2;
+		double grow = line.width() / 2.0 + RIM + 1;
 		if (maxX + grow < view.x() || minX - grow > view.x() + view.width() || maxY + grow < view.y() || minY - grow > view.y() + view.height()) {
-			return false;
+			return true;
 		}
 		int rgb = line.rgb();
-		this.stroke(quads, view, n, line.width() + RIM * 2, rim(rgb));
-		this.stroke(quads, view, n, line.width(), 0xFF000000 | rgb);
-		return true;
+		return this.stroke(quads, view, n, line.width() + RIM * 2, rim(rgb)) && this.stroke(quads, view, n, line.width(), 0xFF000000 | rgb);
 	}
 
 	/** The colour darkened to three tenths, for the rim under a line, as the player's drawings have. */
@@ -447,68 +608,121 @@ public final class AddonOverlay {
 		return 0xFF000000 | r << 16 | g << 8 | b;
 	}
 
-	/** A line through the screen points in {@link #sx} and {@link #sy}, {@code width} wide, round at every point. */
-	private void stroke(Quads quads, MapViewport.View view, int n, float width, int argb) {
-		float half = width / 2;
-		float left = view.x() - half;
-		float top = view.y() - half;
-		float right = view.x() + view.width() + half;
-		float bottom = view.y() + view.height() + half;
-		float[] sx = this.sx;
-		float[] sy = this.sy;
+	/**
+	 * A line through the screen points in {@link #sx} and {@link #sy}, {@code width} wide, round at
+	 * every point. Each straight piece is cut to the view, a pixel past where its width could show,
+	 * before it becomes floats, and on a round minimap left out where it passes wide of the circle.
+	 * False if it doesn't fit in the budget.
+	 */
+	private boolean stroke(Quads quads, MapViewport.View view, int n, float width, int argb) {
+		double half = width / 2.0;
+		double pad = half + 1;
+		double left = view.x() - pad;
+		double top = view.y() - pad;
+		double right = view.x() + view.width() + pad;
+		double bottom = view.y() + view.height() + pad;
+		Circle circle = this.circle;
+		double[] sx = AddonOverlay.sx;
+		double[] sy = AddonOverlay.sy;
+		float[] p = POLYGON;
 		for (int k = 0; k + 1 < n; k++) {
-			float ax = sx[k];
-			float ay = sy[k];
-			float bx = sx[k + 1];
-			float by = sy[k + 1];
-			if (Math.max(ax, bx) < left || Math.min(ax, bx) > right || Math.max(ay, by) < top || Math.min(ay, by) > bottom) {
+			double ax = sx[k];
+			double ay = sy[k];
+			double dx = sx[k + 1] - ax;
+			double dy = sy[k + 1] - ay;
+			double length = Math.sqrt(dx * dx + dy * dy);
+			if (length < 1e-4) {
 				continue;
 			}
-			float dx = bx - ax;
-			float dy = by - ay;
-			float length = (float) Math.sqrt(dx * dx + dy * dy);
-			if (length < 1e-4F) {
+			this.t0 = 0;
+			this.t1 = 1;
+			if (!(this.clip(-dx, ax - left) && this.clip(dx, right - ax) && this.clip(-dy, ay - top) && this.clip(dy, bottom - ay))) {
 				continue;
 			}
-			float nx = -dy / length * half;
-			float ny = dx / length * half;
-			this.polygon[0] = ax + nx;
-			this.polygon[1] = ay + ny;
-			this.polygon[2] = ax - nx;
-			this.polygon[3] = ay - ny;
-			this.polygon[4] = bx - nx;
-			this.polygon[5] = by - ny;
-			this.polygon[6] = bx + nx;
-			this.polygon[7] = by + ny;
-			this.convex(quads, 4, argb);
+			double x0 = ax + dx * this.t0;
+			double y0 = ay + dy * this.t0;
+			double x1 = ax + dx * this.t1;
+			double y1 = ay + dy * this.t1;
+			if (circle != null && distance(circle.cx, circle.cy, x0, y0, x1, y1) > circle.r + half) {
+				continue;
+			}
+			double nx = -dy / length * half;
+			double ny = dx / length * half;
+			p[0] = (float) (x0 + nx);
+			p[1] = (float) (y0 + ny);
+			p[2] = (float) (x0 - nx);
+			p[3] = (float) (y0 - ny);
+			p[4] = (float) (x1 - nx);
+			p[5] = (float) (y1 - ny);
+			p[6] = (float) (x1 + nx);
+			p[7] = (float) (y1 + ny);
+			if (!this.convex(quads, 4, argb)) {
+				return false;
+			}
 		}
 		for (int k = 0; k < n; k++) {
-			float x = sx[k];
-			float y = sy[k];
-			if (x < left || x > right || y < top || y > bottom) {
+			double x = sx[k];
+			double y = sy[k];
+			if (x < left || x > right || y < top || y > bottom || circle != null && Math.hypot(x - circle.cx, y - circle.cy) > circle.r + half) {
 				continue;
 			}
 			for (int c = 0; c < 8; c++) {
-				this.polygon[c * 2] = x + OCTAGON[c * 2] * half;
-				this.polygon[c * 2 + 1] = y + OCTAGON[c * 2 + 1] * half;
+				p[c * 2] = (float) (x + OCTAGON[c * 2] * half);
+				p[c * 2 + 1] = (float) (y + OCTAGON[c * 2 + 1] * half);
 			}
-			this.convex(quads, 8, argb);
+			if (!this.convex(quads, 8, argb)) {
+				return false;
+			}
 		}
+		return true;
 	}
 
 	/**
-	 * The convex polygon in {@link #polygon} as quads, turned the way the GUI draws (it culls the
-	 * other), and cut to the circle on a round minimap. Only a piece that crosses the circle is cut,
-	 * which is the one place this allocates.
+	 * One edge of the Liang-Barsky clip: narrows {@link #t0} to {@link #t1} to the part of the
+	 * segment on the inside of an edge, where {@code d} is how fast it heads out and {@code room}
+	 * how far inside it starts. False when none of it is left.
 	 */
-	private void convex(Quads quads, int n, int argb) {
-		float[] p = this.polygon;
+	private boolean clip(double d, double room) {
+		if (d == 0) {
+			return room >= 0;
+		}
+		double t = room / d;
+		if (d < 0) {
+			if (t > this.t1) {
+				return false;
+			}
+			this.t0 = Math.max(this.t0, t);
+		} else {
+			if (t < this.t0) {
+				return false;
+			}
+			this.t1 = Math.min(this.t1, t);
+		}
+		return true;
+	}
+
+	/** How far (px, py) is from the segment (x0, y0) to (x1, y1). */
+	private static double distance(double px, double py, double x0, double y0, double x1, double y1) {
+		double dx = x1 - x0;
+		double dy = y1 - y0;
+		double lengthSquared = dx * dx + dy * dy;
+		double t = lengthSquared == 0 ? 0 : Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / lengthSquared));
+		return Math.hypot(px - (x0 + dx * t), py - (y0 + dy * t));
+	}
+
+	/**
+	 * The convex polygon in {@link #POLYGON} as quads, turned the way the GUI draws (it culls the
+	 * other), and cut to the circle on a round minimap, with nothing allocated. False if they don't
+	 * fit in the budget.
+	 */
+	private boolean convex(Quads quads, int n, int argb) {
+		float[] p = POLYGON;
 		float area = 0;
 		for (int k = 0, j = n - 1; k < n; j = k++) {
 			area += p[j * 2] * p[k * 2 + 1] - p[k * 2] * p[j * 2 + 1];
 		}
 		if (area == 0) {
-			return;
+			return true;
 		}
 		if (area > 0) {
 			// The GUI's corner order (top left, bottom left, bottom right, top right) turns the other way on screen.
@@ -522,58 +736,42 @@ public final class AddonOverlay {
 				p[j * 2 + 1] = y;
 			}
 		}
+		float[] corners = p;
+		int count = n;
 		Circle circle = this.circle;
 		if (circle != null) {
 			boolean inside = true;
-			boolean near = false;
-			for (int k = 0; k < n; k++) {
-				float x = p[k * 2];
-				float y = p[k * 2 + 1];
-				inside &= circle.contains(x, y);
-				near |= Math.abs(x - circle.cx) <= circle.r && Math.abs(y - circle.cy) <= circle.r;
+			for (int k = 0; k < n && inside; k++) {
+				inside = circle.contains(p[k * 2], p[k * 2 + 1]);
 			}
 			if (!inside) {
-				if (!near) {
-					return;
+				count = circle.cutConvex(p, n);
+				if (count < 3) {
+					return true;
 				}
-				float[] corners = circle.clip(p, n);
-				if (corners != null) {
-					for (int i = 0; i + 8 <= corners.length; i += 8) {
-						this.quad(quads, corners, i, argb);
-					}
-				}
-				return;
+				corners = Circle.cutCorners();
 			}
 		}
 		// A fan from the first corner, two triangles to a quad; an odd one left over repeats its last corner.
-		for (int k = 1; k + 1 < n; k += 2) {
-			quads.room(1);
+		if (!quads.room((count - 1) / 2)) {
+			return false;
+		}
+		for (int k = 1; k + 1 < count; k += 2) {
 			int q = quads.count++;
 			int at = q * 12;
-			int last = Math.min(k + 2, n - 1);
-			this.corner(quads.xyz, at, p, 0);
-			this.corner(quads.xyz, at + 3, p, k);
-			this.corner(quads.xyz, at + 6, p, k + 1);
-			this.corner(quads.xyz, at + 9, p, last);
+			int last = Math.min(k + 2, count - 1);
+			this.corner(quads.xyz, at, corners, 0);
+			this.corner(quads.xyz, at + 3, corners, k);
+			this.corner(quads.xyz, at + 6, corners, k + 1);
+			this.corner(quads.xyz, at + 9, corners, last);
 			quads.colors[q] = argb;
 		}
+		return true;
 	}
 
 	private void corner(float[] xyz, int at, float[] p, int k) {
 		xyz[at] = p[k * 2];
 		xyz[at + 1] = p[k * 2 + 1];
 		xyz[at + 2] = this.z;
-	}
-
-	private void quad(Quads quads, float[] corners, int from, int argb) {
-		quads.room(1);
-		int q = quads.count++;
-		int at = q * 12;
-		for (int c = 0; c < 4; c++) {
-			quads.xyz[at + c * 3] = corners[from + c * 2];
-			quads.xyz[at + c * 3 + 1] = corners[from + c * 2 + 1];
-			quads.xyz[at + c * 3 + 2] = this.z;
-		}
-		quads.colors[q] = argb;
 	}
 }

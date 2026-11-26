@@ -50,6 +50,14 @@ public final class Marker {
 	public static final int DOT_SIZE = 6;
 	/** An icon's size when none is given, in GUI pixels: 11, the size waypoint icons are drawn at. */
 	public static final int ICON_SIZE = 11;
+	/**
+	 * How far east, west, north or south a marker or a line's point can be: 30,000,000 blocks,
+	 * where the game stops a player (its {@code Level.MAX_LEVEL_SIZE}). The world border can't go
+	 * further out.
+	 */
+	public static final int MAX_COORDINATE = 30_000_000;
+	/** How far up or down a marker or a line's point can be: 20,000,000 blocks, where the game stops a player. */
+	public static final int MAX_HEIGHT = 20_000_000;
 
 	private final DimensionId dimension;
 	private final double x;
@@ -81,11 +89,12 @@ public final class Marker {
 	 * @param z south is positive; the middle of a block is its coordinate plus 0.5
 	 * @return a builder with the rest at their defaults: a dot in the first colour of Diorama's
 	 *     palette (red), {@link #DOT_SIZE} across, with no label
-	 * @throws IllegalArgumentException if a coordinate is infinite or NaN
+	 * @throws IllegalArgumentException if {@code x} or {@code z} is beyond {@link #MAX_COORDINATE}
+	 *     either way, {@code y} beyond {@link #MAX_HEIGHT}, or any of them NaN
 	 * @throws NullPointerException if {@code dimension} is null
 	 */
 	public static Builder builder(DimensionId dimension, double x, double y, double z) {
-		return new Builder(Objects.requireNonNull(dimension, "dimension"), Checks.coordinate("x", x), Checks.coordinate("y", y), Checks.coordinate("z", z));
+		return new Builder(Objects.requireNonNull(dimension, "dimension"), Checks.horizontal("x", x), Checks.height(y), Checks.horizontal("z", z));
 	}
 
 	/** {@return the dimension it is in} */
@@ -176,13 +185,19 @@ public final class Marker {
 		 * outline in, as Diorama's icons have, so it reads on any ground. An ID no resource pack has
 		 * an image for shows as a dot in {@link #rgb}.
 		 *
+		 * <p>A map shows up to 210 different icons at once, which is as many as its icon texture
+		 * holds; a marker whose icon finds no room that frame shows as a dot in {@link #rgb}, and
+		 * Diorama logs it once. An icon no marker shows any more gives its room up.
+		 *
 		 * @param icon such as {@code diorama:home} for
 		 *     {@code assets/diorama/textures/waypoint_icons/home.png}
 		 * @return this builder
+		 * @throws IllegalArgumentException if the icon's path has an empty part, {@code .} or
+		 *     {@code ..}, such as {@code mymod:icons//den} or {@code mymod:../den}
 		 * @throws NullPointerException if {@code icon} is null
 		 */
 		public Builder icon(ResourceId icon) {
-			this.icon = Objects.requireNonNull(icon, "icon");
+			this.icon = Checks.icon(icon);
 			return this;
 		}
 
@@ -193,8 +208,12 @@ public final class Marker {
 		 * markers in order), and the others show once the player zooms in far enough to part
 		 * them: put the labels that matter most first.
 		 *
-		 * @param label {@link #MAX_LABEL_LENGTH} UTF-16 units at most once spaces at the ends are
-		 *     taken off, or empty for none
+		 * <p>A label is plain text, drawn in one colour: the game's formatting codes ({@code §} and
+		 * the character after it) are taken out. A label that is empty after that is no label, and
+		 * takes no room from others.
+		 *
+		 * @param label {@link #MAX_LABEL_LENGTH} UTF-16 units at most once formatting codes and
+		 *     spaces at the ends are taken off, or empty for none
 		 * @return this builder
 		 * @throws IllegalArgumentException if the label is too long
 		 * @throws NullPointerException if {@code label} is null

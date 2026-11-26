@@ -133,6 +133,7 @@ public final class Addons {
 			started = true;
 			start();
 		}
+		AddonLayers.sync();
 	}
 
 	/** Throws unless this is the client thread, where everything addons can reach lives. */

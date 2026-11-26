@@ -2,9 +2,11 @@ package dev.diorama.addon;
 
 import dev.diorama.api.LayerContent;
 import dev.diorama.api.MapLayer;
+import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The layers of markers and lines addons have open ({@link MapLayer}), in the order they were
@@ -12,14 +14,54 @@ import java.util.Objects;
  * over, as the addon built it: replacing it swaps one reference, and nothing is copied or worked
  * out until a map draws it. The maps read {@link #open} every frame; with no layer open that is
  * one size check. Only the client thread changes or reads them.
+ *
+ * <p>When the world open changes, every layer is emptied ({@link #sync}), so what an addon showed
+ * in one world never shows in another.
  */
 public final class AddonLayers {
 	/** Every open layer, of every addon, oldest first. */
 	private static final List<Layer> OPEN = new ArrayList<>();
 	/** Moves whenever a layer opens, closes or is given new content, or an addon is switched on or off. */
 	private static long changes;
+	/** The world the layers' content is for: its store, and its key (null with no world). */
+	private static @Nullable WaypointStore seenStore;
+	private static @Nullable String seenKey;
 
 	private AddonLayers() {
+	}
+
+	/**
+	 * Empties every layer if the world open isn't the one their content was handed over in: the
+	 * player left it, or joined another (a different world key, so a different
+	 * {@link dev.diorama.api.World#worldId}). Asked each client tick, before a map draws the
+	 * layers, and before a layer takes new content, so content handed over in the new world is
+	 * never emptied for the old one's sake. With no layer open, nothing to do.
+	 */
+	public static void sync() {
+		if (OPEN.isEmpty()) {
+			return;
+		}
+		WaypointStore store = CurrentWorld.store();
+		if (store == seenStore) {
+			return;
+		}
+		seenStore = store;
+		String key = store == null ? null : store.worldKey();
+		if (Objects.equals(key, seenKey)) {
+			return;
+		}
+		seenKey = key;
+		for (Layer layer : OPEN) {
+			layer.content = LayerContent.EMPTY;
+		}
+		changed();
+	}
+
+	/** The first layer to open takes the world open now as the one its content is for. */
+	private static void seeWorldNow() {
+		WaypointStore store = CurrentWorld.store();
+		seenStore = store;
+		seenKey = store == null ? null : store.worldKey();
 	}
 
 	/** The open layers, oldest first, those of addons the player switched off included: check {@link Layer#shown}. Don't change it. */
@@ -48,6 +90,9 @@ public final class AddonLayers {
 			this.name = name;
 			this.open = open;
 			if (open) {
+				if (OPEN.isEmpty()) {
+					seeWorldNow();
+				}
 				OPEN.add(this);
 				changed();
 			}
@@ -73,6 +118,7 @@ public final class AddonLayers {
 		public void replace(LayerContent content) {
 			Addon.checkThread();
 			Objects.requireNonNull(content, "content");
+			sync();
 			if (this.open && content != this.content) {
 				this.content = content;
 				changed();

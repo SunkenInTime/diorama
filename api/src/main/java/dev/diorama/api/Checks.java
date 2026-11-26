@@ -58,21 +58,74 @@ final class Checks {
 		return trimmed;
 	}
 
-	/** A coordinate of a marker or a line's point: any finite number. */
-	static double coordinate(String axis, double value) {
-		if (!Double.isFinite(value)) {
-			throw new IllegalArgumentException("A place on the map needs finite coordinates; " + axis + " is " + value);
+	/**
+	 * An east-west or north-south coordinate of a marker or a line's point: finite, and no further
+	 * out than {@link Marker#MAX_COORDINATE}, where the game stops a player.
+	 */
+	static double horizontal(String axis, double value) {
+		if (!(Math.abs(value) <= Marker.MAX_COORDINATE)) {
+			throw new IllegalArgumentException("A place on the map has x and z from -" + Marker.MAX_COORDINATE + " to " + Marker.MAX_COORDINATE + ", where the game stops a player; "
+				+ axis + " is " + value);
 		}
 		return value;
 	}
 
+	/** A height of a marker or a line's point: finite, and no further than {@link Marker#MAX_HEIGHT} up or down. */
+	static double height(double value) {
+		if (!(Math.abs(value) <= Marker.MAX_HEIGHT)) {
+			throw new IllegalArgumentException("A place on the map has y from -" + Marker.MAX_HEIGHT + " to " + Marker.MAX_HEIGHT + ", where the game stops a player; y is " + value);
+		}
+		return value;
+	}
+
+	/**
+	 * A marker's label as plain text: the game's formatting codes ({@code §} and the character
+	 * after it) taken out, then spaces at the ends.
+	 */
 	static String label(String label) {
 		Objects.requireNonNull(label, "label");
-		String trimmed = label.strip();
+		String plain = label;
+		int code = label.indexOf('\u00A7');
+		if (code >= 0) {
+			StringBuilder kept = new StringBuilder(label.length());
+			for (int i = 0; i < label.length(); i++) {
+				char c = label.charAt(i);
+				if (c == '\u00A7') {
+					// The code's character goes with it.
+					i++;
+				} else {
+					kept.append(c);
+				}
+			}
+			plain = kept.toString();
+		}
+		String trimmed = plain.strip();
 		if (trimmed.length() > Marker.MAX_LABEL_LENGTH) {
 			throw new IllegalArgumentException("A marker's label can be " + Marker.MAX_LABEL_LENGTH + " UTF-16 units at most; this is " + trimmed.length() + ": \"" + trimmed + "\"");
 		}
 		return trimmed;
+	}
+
+	/**
+	 * An icon for a marker: a path of parts split by {@code /}, none of them empty, {@code .} or
+	 * {@code ..}, since it names a file under {@code textures/waypoint_icons/}.
+	 */
+	static ResourceId icon(ResourceId icon) {
+		Objects.requireNonNull(icon, "icon");
+		String path = icon.path();
+		int start = 0;
+		while (start <= path.length()) {
+			int end = path.indexOf('/', start);
+			if (end < 0) {
+				end = path.length();
+			}
+			String part = path.substring(start, end);
+			if (part.isEmpty() || part.equals(".") || part.equals("..")) {
+				throw new IllegalArgumentException("A marker's icon names a file under textures/waypoint_icons/, so its path can't have an empty part, \".\" or \"..\": " + icon);
+			}
+			start = end + 1;
+		}
+		return icon;
 	}
 
 	/** Characters the game allows in a resource ID's namespace, or with {@code slash} its path. */

@@ -4,16 +4,24 @@ import dev.diorama.Diorama;
 import dev.diorama.api.ResourceId;
 import dev.diorama.render.gpu.MapTexture;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Every picture addons' markers are drawn with, in one texture, so a map draws all of them in one
  * go and in their order: a round dot at two sizes (the small one for dots up to {@link #SMALL_DOT}
- * screen pixels across, the big one above, so neither is shrunk or blown up far) and each icon a
- * marker has asked for, as the waypoint icons have them ({@link WaypointIcons}): cut to its opaque
- * pixels on an 11-pixel tile. An icon is added the first time a marker shows it, and stays until a
- * resource reload. Render thread only.
+ * screen pixels across, the big one above, so neither is shrunk or blown up far) and the icons
+ * markers show, as the waypoint icons have them ({@link WaypointIcons}): cut to their opaque
+ * pixels on an 11-pixel tile. Render thread only.
+ *
+ * <p>The icons share {@link #SLOTS} tiles. An icon gets a tile the first time a marker in view
+ * shows it, and keeps it while markers go on showing it. When every tile is taken, a new icon
+ * takes the tile of the icon drawn longest ago, as long as no draw still waiting to reach the
+ * screen uses it: the last {@link AddonOverlay#RING} draws may be, since the GUI holds on to them
+ * until the end of the frame. With none free, the marker shows as a dot that frame. Icons no
+ * resource pack has are remembered, up to {@link #MAX_MISSING} of them, so they aren't looked for
+ * every frame. A resource reload drops it all.
  */
 public final class MarkerAtlas {
 	static final int SIZE = 256;
@@ -21,19 +29,37 @@ public final class MarkerAtlas {
 	private static final int CELL = WaypointIcons.TILE + 1;
 	private static final int COLUMNS = SIZE / CELL;
 	private static final int ROWS = SIZE / 2 / CELL;
+	/** How many icons the texture holds at once: 210. */
+	public static final int SLOTS = COLUMNS * ROWS;
+	/** How many icon IDs with no image are remembered: the ones asked for longest ago are forgotten first. */
+	static final int MAX_MISSING = 256;
 	/** Where the dots are, and how big. */
 	static final int SMALL_DOT = 32;
 	static final int BIG_DOT = 128;
 	private static final int SMALL_X = 0;
 	private static final int DOTS_Y = SIZE / 2;
 	private static final int BIG_X = SIZE - BIG_DOT;
-	/** An icon no resource pack has, or one past the atlas's room: a dot is drawn instead. */
+	/** An icon no resource pack has, or one with no tile free this frame: a dot is drawn instead. */
 	static final int NONE = -1;
 
 	private static @Nullable MapTexture texture;
-	/** Each icon asked for, by ID, and its tile, or {@link #NONE}. */
+	/** The icon on each tile, or null for one never used. */
+	private static final ResourceId[] ICONS = new ResourceId[SLOTS];
+	/** The draw that last showed each tile's icon. */
+	private static final long[] DRAWN = new long[SLOTS];
+	/** Each icon on a tile, and which: never more than {@link #SLOTS}. */
 	private static final Map<ResourceId, Integer> TILES = new HashMap<>();
+	/** Icons no resource pack has, the one asked for longest ago first. */
+	private static final Map<ResourceId, Boolean> MISSING = new LinkedHashMap<>(16, 0.75F, true) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<ResourceId, Boolean> eldest) {
+			return this.size() > MAX_MISSING;
+		}
+	};
+	/** Tiles handed out so far, from the first: past this they're all new. */
 	private static int used;
+	/** The draw of markers going on now, counted from 1. */
+	private static long draw;
 	private static boolean fullSaid;
 
 	private MarkerAtlas() {
@@ -52,25 +78,69 @@ public final class MarkerAtlas {
 		return made;
 	}
 
-	/** The tile an icon is on, or {@link #NONE}: it loads the icon the first time it's asked for. */
+	/** A map starts a draw of markers: the tiles it asks for from now on are this draw's. */
+	static void startDraw() {
+		draw++;
+	}
+
+	/**
+	 * The tile an icon is on, or {@link #NONE}: it loads the icon the first time it's asked for,
+	 * and marks its tile as used by this draw. Ask only for markers that are drawn.
+	 */
 	static int tile(ResourceId icon) {
 		Integer known = TILES.get(icon);
 		if (known != null) {
+			DRAWN[known] = draw;
 			return known;
 		}
-		int tile = NONE;
+		if (MISSING.get(icon) != null) {
+			return NONE;
+		}
 		PinArt.Image image = WaypointIcons.image(icon.toString());
-		if (image != null) {
-			if (used < COLUMNS * ROWS) {
-				tile = used++;
-				texture().write(0, tileX(tile), tileY(tile), WaypointIcons.TILE, image.abgr(WaypointIcons.TILE));
-			} else if (!fullSaid) {
+		if (image == null) {
+			MISSING.put(icon, Boolean.TRUE);
+			return NONE;
+		}
+		int tile = free();
+		if (tile == NONE) {
+			if (!fullSaid) {
 				fullSaid = true;
-				Diorama.LOGGER.warn("Addon markers use more than {} icons; {} and any after it show as dots until resources are reloaded", COLUMNS * ROWS, icon);
+				Diorama.LOGGER.warn("Addon markers show more than {} different icons at once; {} and others show as dots while there's no room", SLOTS, icon);
+			}
+			return NONE;
+		}
+		ResourceId was = ICONS[tile];
+		if (was != null) {
+			TILES.remove(was);
+		}
+		ICONS[tile] = icon;
+		DRAWN[tile] = draw;
+		TILES.put(icon, tile);
+		texture().write(0, tileX(tile), tileY(tile), WaypointIcons.TILE, image.abgr(WaypointIcons.TILE));
+		return tile;
+	}
+
+	/**
+	 * A tile for a new icon: one never used, or else the one drawn longest ago that none of the
+	 * last {@link AddonOverlay#RING} draws used, as those may not have reached the screen yet.
+	 */
+	private static int free() {
+		if (used < SLOTS) {
+			return used++;
+		}
+		long before = draw - AddonOverlay.RING;
+		int best = NONE;
+		for (int tile = 0; tile < SLOTS; tile++) {
+			if (DRAWN[tile] <= before && (best == NONE || DRAWN[tile] < DRAWN[best])) {
+				best = tile;
 			}
 		}
-		TILES.put(icon, tile);
-		return tile;
+		return best;
+	}
+
+	/** How many icons have a tile, and how many missing ones are remembered: for the tests. */
+	public static int[] counts() {
+		return new int[] {TILES.size(), MISSING.size()};
 	}
 
 	static int tileX(int tile) {
@@ -97,6 +167,9 @@ public final class MarkerAtlas {
 	/** Drops the icons: a resource reload may have changed them. */
 	public static void forget() {
 		TILES.clear();
+		MISSING.clear();
+		java.util.Arrays.fill(ICONS, null);
+		java.util.Arrays.fill(DRAWN, 0);
 		used = 0;
 		fullSaid = false;
 		if (texture != null) {

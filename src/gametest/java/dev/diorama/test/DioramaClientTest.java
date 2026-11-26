@@ -493,6 +493,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 					seenAfterLeaving(context);
 				}
 			}
+			if (tests.contains("addon-api")) {
+				// Layers kept from the reopened world, checked at the title screen and in a new world.
+				AddonMarkersTest.afterReopened(context);
+			}
 		}
 		if (tests.contains("recreated-world")) {
 			recreatedWorld(context);
