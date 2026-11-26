@@ -9,11 +9,19 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+//? if fabric {
+import net.fabricmc.loader.api.FabricLoader;
+//?} else if neoforge {
+/*import net.neoforged.fml.ModList;
+*///?} else {
+/*import net.minecraftforge.fml.ModList;
+*///?}
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
 import com.mojang.brigadier.CommandDispatcher;
 import org.jspecify.annotations.Nullable;
@@ -36,6 +44,8 @@ public final class WaypointShare {
 	/** The waypoint editor's limits. */
 	private static final int MAX_NAME = 32;
 	private static final Pattern DIMENSION_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
+	/** How the "Add" link's command starts. */
+	private static final String ADD_COMMAND = "/diorama waypoint add ";
 
 	/** A waypoint someone shared. {@code y} is null when the sender didn't know the height. */
 	public record Shared(String name, String initials, int x, Integer y, int z, int colorIndex, String dimension) {
@@ -136,11 +146,11 @@ public final class WaypointShare {
 
 	/**
 	 * The chat line, with an "[Add]" link on the end if it carries a shared waypoint. Called for
-	 * every line chat adds.
+	 * every line as it arrives and again as chat adds it, so a line that has its link is left alone.
 	 */
 	public static Component withAddLink(Component message) {
 		Optional<Shared> shared = parse(message.getString());
-		if (shared.isEmpty()) {
+		if (shared.isEmpty() || hasAddLink(message)) {
 			return message;
 		}
 		Minecraft mc = Minecraft.getInstance();
@@ -148,9 +158,48 @@ public final class WaypointShare {
 		return message.copy().append(" ").append(addLink(shared.get(), y));
 	}
 
+	/**
+	 * The line as it arrives from the server or a player, before chat or a chat mod has it, with its
+	 * "[Add]" link. Left as it is beside Xaero's Minimap, which reads the same line, takes it out of
+	 * chat and posts one of its own with its own link: a link added first would end up in the
+	 * waypoint it reads.
+	 */
+	public static Component withAddLinkOnArrival(Component message) {
+		return XaeroInstalled.YES ? message : withAddLink(message);
+	}
+
+	/**
+	 * Looked up at the first chat line, when the loader knows its mods: Xaero's Minimap, its
+	 * Fair-Play edition, and Better PVP in both editions, which has the minimap in it.
+	 */
+	private static final class XaeroInstalled {
+		static final boolean YES = modLoaded("xaerominimap") || modLoaded("xaerominimapfair") || modLoaded("xaerobetterpvp") || modLoaded("xaerobetterpvpfair");
+
+		private static boolean modLoaded(String mod) {
+			//? if fabric {
+			return FabricLoader.getInstance().isModLoaded(mod);
+			//?} else {
+			/*return ModList.get().isLoaded(mod);
+			*///?}
+		}
+	}
+
+	/** Whether part of the line runs the "Add" link's command when clicked. */
+	private static boolean hasAddLink(Component message) {
+		return message.visit((style, text) -> {
+			//? if >=1.21.5 {
+			String command = style.getClickEvent() instanceof ClickEvent.RunCommand run ? run.command() : null;
+			//?} else {
+			/*ClickEvent click = style.getClickEvent();
+			String command = click != null && click.getAction() == ClickEvent.Action.RUN_COMMAND ? click.getValue() : null;
+			*///?}
+			return command != null && command.startsWith(ADD_COMMAND) ? Optional.of(true) : Optional.empty();
+		}, Style.EMPTY).isPresent();
+	}
+
 	/** The command the "Add" link runs for a shared waypoint. */
 	public static String addCommand(Shared shared, int y) {
-		return "/diorama waypoint add " + shared.x() + " " + y + " " + shared.z() + " " + shared.colorIndex()
+		return ADD_COMMAND + shared.x() + " " + y + " " + shared.z() + " " + shared.colorIndex()
 			+ " \"" + shared.dimension() + "\" \"" + shared.initials() + "\" " + shared.name();
 	}
 
