@@ -6,6 +6,8 @@ import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
 import dev.diorama.render.SavedChunkImport;
+import java.util.ArrayList;
+import java.util.List;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
 import net.fabricmc.fabric.api.client.gametest.v1.context.TestSingleplayerContext;
 import net.minecraft.core.BlockPos;
@@ -37,6 +39,8 @@ final class SavedChunksTest {
 		context.waitFor(mc -> MapSession.get() != null && MapSession.get().savedChunks() != null, 200);
 		int ground = farChunksShowUp(context, world);
 		placesPlayedInAreNotDrawnAgain(context, world);
+		chunksWrittenAgainChangeNothing(context, world);
+		sameHeightBlockKeepsTheFog(context, world);
 		settingStopsIt(context);
 		return ground;
 	}
@@ -184,6 +188,109 @@ final class SavedChunksTest {
 		// server made and never sent, are news to the map, and they reach into nearby tiles.
 		if (context.computeOnClient(mc -> MapSession.get().savedChunks().drewChunk(at.getX() >> 4, at.getZ() >> 4))) {
 			throw new AssertionError("The chunk the player stands in was drawn from the save");
+		}
+	}
+
+	/**
+	 * The game writes a chunk again whenever something in it changed, and the chunks the server keeps
+	 * loaded past what the client sees get written every minute or so, mostly with nothing new to
+	 * show. Drawn again, a tile that comes out as it was saved stays on the GPU as it is, and none
+	 * of them has the fog built again. Not every one comes out the same to the last bit: by the
+	 * edge of the client's chunks some colours can be one step off from the last time.
+	 */
+	private static void chunksWrittenAgainChangeNothing(ClientGameTestContext context, TestSingleplayerContext world) {
+		save(context, world);
+		rescanAndWait(context);
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int px = at.getX() >> 4;
+		int pz = at.getZ() >> 4;
+		List<long[]> loaded = world.getServer().computeOnServer(server -> {
+			List<long[]> out = new ArrayList<>();
+			for (int cx = px - 20; cx <= px + 20; cx++) {
+				for (int cz = pz - 20; cz <= pz + 20; cz++) {
+					if (server.overworld().getChunkSource().getChunkNow(cx, cz) != null) {
+						int x = cx * 16 + 8;
+						int z = cz * 16 + 8;
+						out.add(new long[] {cx, cz, server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z)});
+					}
+				}
+			}
+			return out;
+		});
+		// Never sent, drawn from the save, and under a tile the map has.
+		List<long[]> ring = context.computeOnClient(mc -> {
+			List<long[]> out = new ArrayList<>();
+			for (long[] chunk : loaded) {
+				int cx = (int) chunk[0];
+				int cz = (int) chunk[1];
+				if (!mc.level.getChunkSource().hasChunk(cx, cz) && MapSession.get().savedChunks().drewChunk(cx, cz)
+					&& MapSession.get().map().peek(tileAt(cx * 16 + 8, (int) chunk[2], cz * 16 + 8)) != null) {
+					out.add(chunk);
+				}
+			}
+			return out;
+		});
+		if (ring.isEmpty()) {
+			throw new AssertionError("No chunk the server has loaded and the client doesn't is drawn under a tile the map has, of " + loaded.size() + " loaded");
+		}
+		int minY = context.computeOnClient(mc -> MapSession.get().map().minY());
+		int drawnBefore = drawn(context);
+		int shownBefore = context.computeOnClient(mc -> MapSession.get().map().savedTilesShown());
+		int keptBefore = context.computeOnClient(mc -> MapSession.get().map().savedTilesKept());
+		int coverageBefore = context.computeOnClient(mc -> MapSession.get().map().coverageChanges());
+		// A second on, so the save time moves. A block changed and changed back makes the game
+		// write the chunk again as it was.
+		context.waitTicks(30);
+		world.getServer().runOnServer(server -> {
+			for (long[] chunk : ring) {
+				BlockPos bottom = new BlockPos((int) chunk[0] * 16 + 8, minY, (int) chunk[1] * 16 + 8);
+				net.minecraft.world.level.block.state.BlockState was = server.overworld().getBlockState(bottom);
+				server.overworld().setBlockAndUpdate(bottom, was.is(Blocks.STONE) ? Blocks.BEDROCK.defaultBlockState() : Blocks.STONE.defaultBlockState());
+				server.overworld().setBlockAndUpdate(bottom, was);
+			}
+		});
+		save(context, world);
+		rescanAndWait(context);
+		if (drawn(context) <= drawnBefore) {
+			throw new AssertionError("None of the " + ring.size() + " chunks written again was drawn again");
+		}
+		int shown = context.computeOnClient(mc -> MapSession.get().map().savedTilesShown()) - shownBefore;
+		int kept = context.computeOnClient(mc -> MapSession.get().map().savedTilesKept()) - keptBefore;
+		if (kept == 0) {
+			throw new AssertionError("Of the tiles the map shows drawn again from " + ring.size() + " chunks the game wrote again unchanged, none stayed as it was: "
+				+ shown + " went on the GPU again");
+		}
+		int coverage = context.computeOnClient(mc -> MapSession.get().map().coverageChanges()) - coverageBefore;
+		if (coverage > 0) {
+			throw new AssertionError("Chunks the game wrote again unchanged changed the coverage of " + coverage + " tiles, so the fog was built again");
+		}
+	}
+
+	/** A block changed for another the same height is drawn, and leaves the coverage the fog is built from as it was. */
+	private static void sameHeightBlockKeepsTheFog(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		int x = at.getX() + 5;
+		int z = at.getZ();
+		int y = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z)) - 1;
+		BlockPos top = new BlockPos(x, y, z);
+		TileKey tile = tileAt(x, y + 1, z);
+		int pixel = pixelAt(x, y + 1, z);
+		// A full block first, whatever was there, so the change after is one full block for another.
+		int before = savedPixel(context, tile, pixel);
+		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(top,
+			(server.overworld().getBlockState(top).is(Blocks.STONE) ? Blocks.GOLD_BLOCK : Blocks.STONE).defaultBlockState()));
+		context.waitFor(mc -> savedPixelNow(tile, pixel) != before, 1200);
+		DioramaClientTest.settle(context, 40);
+		int stone = savedPixel(context, tile, pixel);
+		if (context.computeOnClient(mc -> MapSession.get().map().peek(tile) == null)) {
+			throw new AssertionError("The map doesn't have tile " + tile + " next to the player");
+		}
+		int coverageBefore = context.computeOnClient(mc -> MapSession.get().map().coverageChanges());
+		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(top, Blocks.DIAMOND_BLOCK.defaultBlockState()));
+		context.waitFor(mc -> savedPixelNow(tile, pixel) != stone, 1200);
+		int coverage = context.computeOnClient(mc -> MapSession.get().map().coverageChanges()) - coverageBefore;
+		if (coverage > 0) {
+			throw new AssertionError("Stone turned to diamond next to the player changed the coverage of " + coverage + " tiles, so the fog was built again");
 		}
 	}
 

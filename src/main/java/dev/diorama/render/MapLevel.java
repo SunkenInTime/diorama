@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -161,6 +162,10 @@ public final class MapLevel implements ChunkSource {
 	/** The tiles {@link SavedChunkImport} is baking, and those a live bake finished for since it started. */
 	private final Set<TileKey> savedTilesBaking = ConcurrentHashMap.newKeySet();
 	private final Set<TileKey> savedTilesRaced = ConcurrentHashMap.newKeySet();
+	/** See {@link #savedTilesShown()}, {@link #savedTilesKept()} and {@link #coverageChanges()}. Render thread. */
+	private int savedTilesShown;
+	private int savedTilesKept;
+	private int coverageChanges;
 	/** Chunks loaded live whose tiles may not be saved yet, while {@link SavedChunkImport} is watching. */
 	private final Set<Long> liveChunks = new HashSet<>();
 	/** Chunks loaded live with their tiles saved, for {@link SavedChunkImport} to take. */
@@ -966,7 +971,7 @@ public final class MapLevel implements ChunkSource {
 		this.takeFinished(Integer.MAX_VALUE);
 		SavedTile savedTile;
 		while ((savedTile = this.fromSave.poll()) != null) {
-			savedTile.taken().complete(this.tileFromSave(savedTile.image(), savedTile.store()));
+			savedTile.taken().complete(this.tileFromSave(savedTile.image(), savedTile.store(), savedTile.asSaved()));
 		}
 		PaintedClaims painted;
 		while ((painted = this.paintedClaims.poll()) != null) {
@@ -1115,9 +1120,11 @@ public final class MapLevel implements ChunkSource {
 			tile.lastDrawn = this.frame;
 			this.tiles.put(image.key(), tile);
 		}
-		tile.upload(image);
+		if (tile.upload(image)) {
+			this.coverageVersion++;
+			this.coverageChanges++;
+		}
 		this.pixelsMoved(image.key());
-		this.coverageVersion++;
 		if (this.store != null && !this.savedOnly && !image.key().isCave() && image.key().lod() == 0) {
 			this.store.baked(image);
 		}
@@ -1129,9 +1136,11 @@ public final class MapLevel implements ChunkSource {
 	 * other would lose what the other drew, and the live one must win. So a tile with a live bake
 	 * running, or one that finished since this one started, goes back to be drawn again after it.
 	 * A live bake that's only due is no reason: it starts from this tile, and re-bakes what changed.
-	 * Render thread.
+	 * One that came out as saved is what the map shows already: the game writes a chunk again
+	 * whenever it's been changed, and in the ring of chunks the server keeps loaded past what the
+	 * client sees that's every minute or so, mostly with nothing to show for it. Render thread.
 	 */
-	private boolean tileFromSave(TileImage image, TileStore drawnFor) {
+	private boolean tileFromSave(TileImage image, TileStore drawnFor, boolean asSaved) {
 		TileKey key = image.key();
 		TileStore store = this.store;
 		// A map turned while this was drawn has another store: the tile looks the old way.
@@ -1139,9 +1148,20 @@ public final class MapLevel implements ChunkSource {
 			return false;
 		}
 		MapTile tile = this.tiles.get(key);
+		if (asSaved) {
+			if (tile != null) {
+				this.savedTilesKept++;
+			}
+			// Its spots can still be news to the store, which writes nothing if they aren't.
+			store.baked(image);
+			return true;
+		}
 		if (tile != null) {
-			tile.upload(image);
-			this.coverageVersion++;
+			this.savedTilesShown++;
+			if (tile.upload(image)) {
+				this.coverageVersion++;
+				this.coverageChanges++;
+			}
 			if (this.overlays != null) {
 				// This bake recorded no overlays, and needs a live one to get them back.
 				int blocks = (Projection.TILE_PIXELS / TileImage.BLOCK) * (Projection.TILE_PIXELS / TileImage.BLOCK);
@@ -1705,8 +1725,26 @@ public final class MapLevel implements ChunkSource {
 		return this.inFlight.size();
 	}
 
-	/** A sky view tile {@link SavedChunkImport} drew, and the answer to whether the map took it. */
-	private record SavedTile(TileImage image, TileStore store, CompletableFuture<Boolean> taken) {
+	/**
+	 * A sky view tile {@link SavedChunkImport} drew, whether it came out the same as saved, and the
+	 * answer to whether the map took it.
+	 */
+	private record SavedTile(TileImage image, TileStore store, boolean asSaved, CompletableFuture<Boolean> taken) {
+	}
+
+	/** For tests: how many tiles drawn from the save went on the GPU over a tile the map was showing. */
+	public int savedTilesShown() {
+		return this.savedTilesShown;
+	}
+
+	/** For tests: how many tiles drawn from the save came out as the map was showing them, and stayed as they were. */
+	public int savedTilesKept() {
+		return this.savedTilesKept;
+	}
+
+	/** For tests: how many bakes changed what a tile's coverage was, each of which has the fog built again. */
+	public int coverageChanges() {
+		return this.coverageChanges;
 	}
 
 	/**
@@ -1803,8 +1841,12 @@ public final class MapLevel implements ChunkSource {
 			TileStore.Saved saved = store.readSaved(key);
 			TileImage image = this.drawFromSave(key, source, looks, saved);
 			image = image.withSpots(TileSpots.pick(image, source, looks, false, store.spots(key))).withGeneration(generation);
+			// Saved is what the map shows: live bakes reach the store as they're shown, and one
+			// finishing from here on has the tile drawn again (see tileFromSave).
+			boolean asSaved = saved != null && image.isFull() && Arrays.equals(image.mips()[0], saved.pixels())
+				&& Arrays.equals(image.blockLight(), saved.blockLight());
 			CompletableFuture<Boolean> taken = new CompletableFuture<>();
-			this.fromSave.add(new SavedTile(image, store, taken));
+			this.fromSave.add(new SavedTile(image, store, asSaved, taken));
 			Boolean accepted = this.awaitWhileOpen(taken);
 			return accepted != null && accepted;
 		} finally {
