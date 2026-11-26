@@ -64,6 +64,8 @@ public final class MapMemory {
 	 */
 	private static final int MAX_KNOWN = 768;
 	private static final int MAX_KNOWN_LOADING = 16;
+	/** Tiles each way {@link #knownKeys} holds keys for, a power of two. */
+	private static final int KEY_EDGE = 64;
 	/** The height memories are fitted at: higher ground lands a little off, which softness hides. */
 	private static final int FIT_Y = 64;
 
@@ -119,6 +121,16 @@ public final class MapMemory {
 	private final ConcurrentLinkedQueue<TileKey> made = new ConcurrentLinkedQueue<>();
 	private @Nullable TileKey lastKnownKey;
 	private byte @Nullable [] lastKnown;
+	/**
+	 * The keys {@link #known} looks tiles up with, kept from one call to the next, at
+	 * {@code (tileU mod KEY_EDGE, tileV mod KEY_EDGE)}: it's called for every texel of every fog mask
+	 * build, and made a key for each, 4 MB a build. A build reads a few dozen tiles, so their keys
+	 * stay put; one wider than {@link #KEY_EDGE} tiles makes some again as it reads. At most
+	 * {@code KEY_EDGE²} keys, 32 bytes each, and the array: 144 KB. Render thread.
+	 */
+	private final @Nullable TileKey[] knownKeys = new TileKey[KEY_EDGE * KEY_EDGE];
+	/** Where {@link #known} works out a point in the old map, for the same reason. Render thread. */
+	private final double[] knownPoint = new double[2];
 	private long version;
 	private long shown;
 	private volatile boolean closed;
@@ -231,6 +243,21 @@ public final class MapMemory {
 		return this.version;
 	}
 
+	/** For fog-mask's check: a point of the map as it's drawn now, in the old map. */
+	public double[] toOldForTests(double u, double v) {
+		return this.toOld(u, v);
+	}
+
+	/** For fog-mask's check: the remembered tiles saved at an overview level, or null if not listed yet. */
+	public @Nullable Set<TileKey> savedForTests(int lod) {
+		return this.savedTiles.get(lod);
+	}
+
+	/** For fog-mask's check: what's known of a remembered tile, or null if it isn't read. Render thread. */
+	public byte @Nullable [] knownForTests(TileKey key) {
+		return this.knownTiles.get(key);
+	}
+
 	/** For tests: how many remembered tiles with something on them are loaded. */
 	public long shownTiles() {
 		return this.shown;
@@ -317,10 +344,16 @@ public final class MapMemory {
 	 */
 	float known(int lod, double u, double v) {
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
-		double[] old = this.toOld(u, v);
+		double[] old = this.knownPoint;
+		this.toOld(u, v, old);
 		int tu = (int) Math.floor(old[0] / units);
 		int tv = (int) Math.floor(old[1] / units);
-		TileKey key = new TileKey(TileKey.SURFACE, tu, tv, lod);
+		int slot = (tv & KEY_EDGE - 1) * KEY_EDGE + (tu & KEY_EDGE - 1);
+		TileKey key = this.knownKeys[slot];
+		if (key == null || key.tileU() != tu || key.tileV() != tv || key.lod() != lod) {
+			key = new TileKey(TileKey.SURFACE, tu, tv, lod);
+			this.knownKeys[slot] = key;
+		}
 		byte[] known;
 		if (key.equals(this.lastKnownKey)) {
 			known = this.lastKnown;
@@ -426,11 +459,19 @@ public final class MapMemory {
 
 	/** A point of the map as it's drawn now, in the old map, for ground at {@link #FIT_Y}. */
 	private double[] toOld(double u, double v) {
+		double[] old = new double[2];
+		this.toOld(u, v, old);
+		return old;
+	}
+
+	/** {@link #toOld(double, double)} into {@code old}. */
+	private void toOld(double u, double v, double[] old) {
 		Facing now = Projection.facing();
 		double z = Projection.zAt(v, FIT_Y);
 		double worldX = now.worldX(u, z);
 		double worldZ = now.worldZ(u, z);
-		return new double[] {this.facing.x(worldX, worldZ), this.facing.z(worldX, worldZ) * this.sin - FIT_Y * this.cos};
+		old[0] = this.facing.x(worldX, worldZ);
+		old[1] = this.facing.z(worldX, worldZ) * this.sin - FIT_Y * this.cos;
 	}
 
 	/** A point of the old map on the map as it's drawn now. */

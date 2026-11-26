@@ -3,12 +3,15 @@ package dev.diorama.test;
 import dev.diorama.Diorama;
 import dev.diorama.MapScreen;
 import dev.diorama.MapSession;
+import dev.diorama.MapStyle;
 import dev.diorama.Projection;
 import dev.diorama.Settings;
 import dev.diorama.bake.TileKey;
 import dev.diorama.render.MapLevel;
+import dev.diorama.render.MapMemory;
 import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
+import dev.diorama.render.SavedChunkImport;
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,6 +33,11 @@ import org.jspecify.annotations.Nullable;
  * 1 under {@link #MOST_LARGE_PANNING_MEDIAN}. In 0.11 a minimap build allocated about 280 KB, all of
  * it lookup keys: each tile was looked up again on every row of the mask it lay on, and for a tile
  * not in memory every overview level above it too.
+ *
+ * <p>Then the same after the map's tilt changes ({@link #tiltChanged}), where builds also read the
+ * map the player had before: what they read of it is checked against 0.11's reading too
+ * ({@link #readRememberedAsBefore}), and what they allocate has budgets of its own. In 0.11 that
+ * reading allocated 2 MB a build.
  *
  * <p>Logs, for each part: the builds, bytes and time a build, builds a second of game time, and what
  * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe).
@@ -56,6 +64,22 @@ final class FogMaskBuildTest {
 	 * them all again, 0.5 to 1.5 MB a build.
 	 */
 	private static final long MOST_LARGE_PANNING_MEDIAN = 64 * 1024;
+	/**
+	 * The most any minimap build may allocate once the map remembers another tilt: the first build
+	 * after the change makes keys for the tiles it reads and lists the remembered ones, a few tens of
+	 * KB. In 0.11 the reading made a key and a point for every one of the mask's 65,536 texels: 2 MB a
+	 * build, 4 MB before the JIT compiled it.
+	 */
+	private static final long MOST_TILT_MINIMAP_BYTES = 256 * 1024;
+	/**
+	 * The most the median minimap build may allocate once the map remembers another tilt. Reading
+	 * what it remembers adds about 1 KB a build (asking for the remembered tiles around the view):
+	 * medians of 1.2 to 1.7 KB measured. Kept apart from {@link #MOST_TILT_MINIMAP_BYTES}, which only
+	 * the first build needs: under it, something new that allocated 100 KB every build would pass.
+	 */
+	private static final long MOST_TILT_MINIMAP_MEDIAN = 8 * 1024;
+	/** Ticks the redraw from the save after the tilt change may take. */
+	private static final int REDRAW_TICKS = 6000;
 	private static final int LARGE_WIDTH = 5120;
 	private static final int LARGE_HEIGHT = 1440;
 	/** The tiles a build read when the lookup table dropped every key: the large view must read more, or it tests nothing. */
@@ -79,6 +103,12 @@ final class FogMaskBuildTest {
 		long mostNanos;
 		int ticks;
 		int caveBuilds;
+		/** Builds that read the remembered map. */
+		int rememberedBuilds;
+		/** Builds whose reading of the remembered map took a texel from a remembered tile it had read. */
+		int rememberedTileBuilds;
+		/** The overview levels the remembered map was read at, a bit each. */
+		int rememberedLods;
 		int mostTiles;
 		long @Nullable [] frames;
 		/** Each build's bytes, for the part's median; made here so keeping them allocates nothing. */
@@ -107,10 +137,41 @@ final class FogMaskBuildTest {
 	/** Set if the allocation counter ever gave -1, which would make every build look free. */
 	private static boolean counterOff;
 	private static final int[] BEFORE = new int[256 * 256];
+	private static final float[] REMEMBERED_BEFORE = new float[256 * 256];
+	private static int rememberedChecked;
+	private static int rememberedMismatches;
+	private static @Nullable String firstRememberedMismatch;
+	/**
+	 * The remembered tile {@code MapMemory.known} last read, and what it holds, as a build starts: it
+	 * keeps them from one build to the next, and reads that tile from them even once the level's
+	 * listing of saved tiles is dropped (when the remembered map makes an overview tile). The reading
+	 * as 0.11 did it starts from them too, or it would differ from 0.11 where 0.11 didn't.
+	 */
+	private static @Nullable MapMemory startMemory;
+	private static @Nullable TileKey startKnownKey;
+	private static byte @Nullable [] startKnown;
+	/**
+	 * What's known of each remembered tile read, copied as the check starts: {@code MapMemory}'s own
+	 * map is in order of reading, and a lookup in it would change which tile it lets go of next.
+	 */
+	private static final Map<TileKey, byte[]> KNOWN_TILES = new java.util.HashMap<>();
+	private static final java.lang.reflect.Field LAST_KNOWN_KEY = memoryField("lastKnownKey");
+	private static final java.lang.reflect.Field LAST_KNOWN = memoryField("lastKnown");
+	private static final java.lang.reflect.Field KNOWN = memoryField("knownTiles");
 	/** The tiles one build reads, as many as it looks up in the map. */
 	private static final java.util.Set<TileKey> READ = new java.util.HashSet<>();
 
 	private FogMaskBuildTest() {
+	}
+
+	private static java.lang.reflect.Field memoryField(String name) {
+		try {
+			java.lang.reflect.Field field = MapMemory.class.getDeclaredField(name);
+			field.setAccessible(true);
+			return field;
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException("fog-mask reads MapMemory." + name + " for its check of the remembered map", e);
+		}
 	}
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
@@ -119,6 +180,9 @@ final class FogMaskBuildTest {
 		checked = 0;
 		mismatches = 0;
 		firstMismatch = null;
+		rememberedChecked = 0;
+		rememberedMismatches = 0;
+		firstRememberedMismatch = null;
 		counterOff = false;
 		// With the JVM's per-thread allocation counting off, every reading is -1 and every build
 		// would count as allocating nothing: the budgets would pass without measuring anything.
@@ -223,6 +287,82 @@ final class FogMaskBuildTest {
 		world.getServer().runCommand("tp @a " + x + " " + FLY_Y + " " + z + " 90 0");
 		context.runOnClient(mc -> mc.player.getAbilities().flying = true);
 		context.waitTicks(40);
+		tiltChanged(context, world, x, z, frames);
+	}
+
+	/**
+	 * After the map's tilt changes: the map shows what it remembers of the old tilt under the new
+	 * tiles while it's drawn again from the save, and the fog mask reads that remembered map for
+	 * every texel of every surface build. The new tiles' folder notes where it remembers from, so a
+	 * singleplayer map that once changed its tilt or facing does this every time it's opened, long
+	 * after the redraw is done.
+	 */
+	private static void tiltChanged(ClientGameTestContext context, TestSingleplayerContext world, int x, int z, boolean frames) {
+		long pitch = context.computeOnClient(mc -> Math.round(MapStyle.get().pitchDegrees()));
+		long other = pitch == 45 ? 50 : 45;
+		setPitch(context, other);
+		try {
+			if (context.computeOnClient(mc -> MapSession.get().map().memory() == null)) {
+				throw new AssertionError("The map remembers nothing after its tilt changed from " + pitch + " to " + other + " degrees, so the tilt-changed parts would test nothing");
+			}
+			measure(context, world, "tilt changed, minimap, standing", frames, 200, null);
+			measure(context, world, "tilt changed, minimap, flying, explored", frames, 300, tick -> new double[] {x - 240 + tick * ELYTRA, FLY_Y, z});
+			world.getServer().runCommand("tp @a " + x + " " + FLY_Y + " " + z + " 90 0");
+			context.waitTicks(20);
+			double u = Projection.u(x, z);
+			double v = Projection.v(x, 64, z);
+			context.setScreen(MapScreen::new);
+			for (double zoom : new double[] {0.4, 0.03}) {
+				String name = "tilt changed, full map, zoom " + zoom;
+				measure(context, world, name, false, 60, null, () -> context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).lookAt(u, v, zoom, TileKey.SURFACE)));
+				context.takeScreenshot("fog-mask-" + name.replace(", ", "-").replace(' ', '-'));
+			}
+			context.setScreen(() -> null);
+			// Drawn again from the save: what's remembered is still read under the new tiles. A map that
+			// remembers another tilt is drawn again from the save in singleplayer, so with no import
+			// running there's no redraw to wait for, and the part after it would test nothing new.
+			if (context.computeOnClient(mc -> MapSession.get().savedChunks() == null)) {
+				throw new AssertionError("Nothing draws the map again from the save after its tilt changed (no saved-chunk import running), so \"tilt changed, redrawn\" would measure a map that was never redrawn");
+			}
+			waitForRedraw(context);
+			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - 160 + tick * ELYTRA, FLY_Y, z});
+			context.takeScreenshot("fog-mask-tilt-changed-minimap");
+		} finally {
+			setPitch(context, pitch);
+			context.waitTicks(20);
+		}
+	}
+
+	/**
+	 * Waits for the map to be drawn again from the save after the tilt changed: everything the
+	 * player went over, a few hundred tiles at about 400 ms each on a VM with no GPU, beside the
+	 * baker. Two minutes wasn't always enough on NeoForge.
+	 */
+	private static void waitForRedraw(ClientGameTestContext context) {
+		for (int waited = 0; ; waited += 20) {
+			String left = context.computeOnClient(mc -> {
+				SavedChunkImport chunks = MapSession.get().savedChunks();
+				if (chunks == null) {
+					return "no saved-chunk import running";
+				}
+				return chunks.idle() ? null : chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done";
+			});
+			if (left == null) {
+				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
+				return;
+			}
+			if (waited >= REDRAW_TICKS) {
+				throw new AssertionError("The map wasn't drawn again from the save within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
+			}
+			context.waitTicks(20);
+		}
+	}
+
+	private static void setPitch(ClientGameTestContext context, double degrees) {
+		context.runOnClient(mc -> {
+			MapStyle.set(MapStyle.get().withPitch(degrees));
+			MapSession.get().map().colorsChanged();
+		});
 	}
 
 	/**
@@ -309,9 +449,12 @@ final class FogMaskBuildTest {
 		StringBuilder text = new StringBuilder(p.name).append(" | ").append(p.builds).append(" builds (").append(p.caveBuilds).append(" of a cave slice) in ").append(p.ticks).append(" ticks (")
 			.append(String.format(Locale.ROOT, "%.1f", p.builds * 20.0 / p.ticks)).append(" a second)");
 		if (p.builds > 0) {
-			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" min ").append(p.leastBytes).append(" max ").append(p.mostBytes)
+			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" median ").append(p.median()).append(" min ").append(p.leastBytes).append(" max ").append(p.mostBytes)
 				.append(" | us a build mean ").append(p.nanos / p.builds / 1000).append(" max ").append(p.mostNanos / 1000)
 				.append(" | most tiles a build reads ").append(p.mostTiles);
+		}
+		if (p.rememberedBuilds > 0) {
+			text.append(" | remembered map read by ").append(p.rememberedBuilds).append(" builds, ").append(p.rememberedTileBuilds).append(" with a remembered tile read, at overview levels ").append(lods(p.rememberedLods));
 		}
 		if (p.frames != null && p.frames.length > 0) {
 			long[] sorted = p.frames.clone();
@@ -328,11 +471,37 @@ final class FogMaskBuildTest {
 
 	private static void report() {
 		Diorama.LOGGER.info("fog-mask | {} builds checked against 0.11's reading, {} differed", checked, mismatches);
+		Diorama.LOGGER.info("fog-mask | {} builds' remembered map checked against 0.11's reading, {} differed", rememberedChecked, rememberedMismatches);
 		if (counterOff) {
 			throw new AssertionError("The JVM's per-thread allocation counter gave -1 during fog-mask: counting was turned off partway, so the bytes measured mean nothing");
 		}
 		if (mismatches > 0) {
 			throw new AssertionError(mismatches + " of " + checked + " fog mask builds read the tiles differently from 0.11; the first: " + firstMismatch);
+		}
+		if (rememberedMismatches > 0) {
+			throw new AssertionError(rememberedMismatches + " of " + rememberedChecked + " fog mask builds read the remembered map differently from 0.11; the first: " + firstRememberedMismatch);
+		}
+		for (String name : TILT_PARTS) {
+			Part p = PARTS.get(name);
+			if (p == null || p.builds == 0) {
+				throw new AssertionError("The fog mask was never built in \"" + name + "\", so nothing was checked there");
+			}
+			if (p.rememberedBuilds == 0) {
+				throw new AssertionError("No build in \"" + name + "\" read the remembered map: the map didn't remember anything after the tilt changed");
+			}
+			// Each part on its own: a tile not read yet counts as all known, so builds that never get a
+			// remembered tile read match 0.11 whatever the reading does with one.
+			if (p.rememberedTileBuilds == 0) {
+				throw new AssertionError("No build in \"" + name + "\" took anything from a remembered tile it had read (" + p.rememberedBuilds + " builds read the remembered map, at overview levels "
+					+ lods(p.rememberedLods) + "): its tiles were never read, so the reading of them wasn't checked there");
+			}
+			// Each on its own: with the remembered map read, every build in 0.11 allocated 2 to 4 MB.
+			if (name.contains("full map")) {
+				check(name, "the median", p.median(), MOST_FULL_MAP_MEDIAN, p);
+			} else {
+				check(name, "a", p.mostBytes, MOST_TILT_MINIMAP_BYTES, p);
+				check(name, "the median", p.median(), MOST_TILT_MINIMAP_MEDIAN, p);
+			}
 		}
 		String largeFar = "full map, " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " at GUI scale 1, zoom 0.07, panning";
 		String largeNear = "full map, " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " at GUI scale 1, zoom 0.3, panning";
@@ -363,7 +532,7 @@ final class FogMaskBuildTest {
 			}
 		}
 		for (Part p : PARTS.values()) {
-			if (!p.name.contains("full map") && p.mostBytes > MOST_MINIMAP_BYTES) {
+			if (!p.name.contains("full map") && !p.name.startsWith("tilt changed") && p.mostBytes > MOST_MINIMAP_BYTES) {
 				throw new AssertionError("A fog mask build in \"" + p.name + "\" allocated " + p.mostBytes + " bytes on the render thread, over " + MOST_MINIMAP_BYTES
 					+ " (mean " + p.bytes / Math.max(1, p.builds) + " over " + p.builds + " builds): is a tile looked up with a new key for every texel row again?");
 			}
@@ -378,9 +547,38 @@ final class FogMaskBuildTest {
 		}
 	}
 
+	private static void check(String name, String which, long bytes, long most, Part p) {
+		if (bytes > most) {
+			throw new AssertionError("After the tilt changed, " + which + " fog mask build in \"" + name + "\" allocated " + bytes + " bytes on the render thread, over " + most
+				+ " (mean " + p.bytes / p.builds + ", median " + p.median() + ", max " + p.mostBytes + " over " + p.builds + " builds): does reading the remembered map allocate for every build, or every texel, again?");
+		}
+	}
+
+	private static String lods(int bits) {
+		StringBuilder text = new StringBuilder();
+		for (int lod = 0; lod < 32; lod++) {
+			if ((bits & 1 << lod) != 0) {
+				text.append(text.isEmpty() ? "" : ", ").append(lod);
+			}
+		}
+		return text.isEmpty() ? "none" : text.toString();
+	}
+
+	/** The parts after the tilt changed, whose builds read the remembered map; each has its own budget. */
+	private static final String[] TILT_PARTS = {"tilt changed, minimap, standing", "tilt changed, minimap, flying, explored", "tilt changed, full map, zoom 0.4", "tilt changed, full map, zoom 0.03", "tilt changed, redrawn, minimap, flying"};
+
 	private static final class Watch implements MapViewport.MaskWatch {
 		@Override
 		public void started() {
+			// Before the build reads anything, and before its bytes are counted: references only.
+			MapMemory memory = MapSession.get().map().memory();
+			startMemory = memory;
+			try {
+				startKnownKey = memory == null ? null : (TileKey) LAST_KNOWN_KEY.get(memory);
+				startKnown = memory == null ? null : (byte[]) LAST_KNOWN.get(memory);
+			} catch (IllegalAccessException e) {
+				throw new IllegalStateException(e);
+			}
 			checkBytes = 0;
 			checkNanos = 0;
 			startNanos = System.nanoTime();
@@ -418,6 +616,51 @@ final class FogMaskBuildTest {
 		}
 
 		@Override
+		public void remembered(MapMemory memory, int lod, double originU, double originV, double texel, float[] remembered) {
+			long bytes = THREADS.getCurrentThreadAllocatedBytes();
+			long nanos = System.nanoTime();
+			if (memory != startMemory) {
+				throw new AssertionError("A fog mask build read a remembered map other than the session map's, which fog-mask took its starting state from");
+			}
+			try {
+				KNOWN_TILES.clear();
+				// A copy walks the map's entries, which leaves their order as it was.
+				@SuppressWarnings("unchecked")
+				Map<TileKey, byte[]> known = (Map<TileKey, byte[]>) KNOWN.get(memory);
+				KNOWN_TILES.putAll(known);
+			} catch (IllegalAccessException e) {
+				throw new IllegalStateException(e);
+			}
+			boolean read = readRememberedAsBefore(memory, lod, originU, originV, texel, startKnownKey, startKnown, KNOWN_TILES, REMEMBERED_BEFORE);
+			rememberedChecked++;
+			if (part != null) {
+				part.rememberedBuilds++;
+				part.rememberedLods |= 1 << lod;
+				if (read) {
+					part.rememberedTileBuilds++;
+				}
+			}
+			int at = -1;
+			for (int k = 0; k < remembered.length; k++) {
+				if (Float.floatToIntBits(remembered[k]) != Float.floatToIntBits(REMEMBERED_BEFORE[k])) {
+					at = k;
+					break;
+				}
+			}
+			if (at >= 0) {
+				rememberedMismatches++;
+				if (firstRememberedMismatch == null) {
+					firstRememberedMismatch = String.format(Locale.ROOT, "in \"%s\", texel %d,%d: %s, before %s (lod %d, origin %.1f,%.1f, texel %.1f)",
+						part == null ? "between parts" : part.name, at % 256, at / 256, remembered[at], REMEMBERED_BEFORE[at], lod, originU, originV, texel);
+				}
+			}
+			checkNanos += System.nanoTime() - nanos;
+			long spent = THREADS.getCurrentThreadAllocatedBytes() - bytes;
+			checkBytes += spent;
+			MinimapAllocTest.excluded += spent;
+		}
+
+		@Override
 		public void finished() {
 			long bytes = THREADS.getCurrentThreadAllocatedBytes() - startBytes - checkBytes;
 			long nanos = System.nanoTime() - startNanos - checkNanos;
@@ -430,7 +673,7 @@ final class FogMaskBuildTest {
 				if (p.builds <= p.each.length) {
 					p.each[p.builds - 1] = bytes;
 				}
-				if (p.name.contains("full map")) {
+				if (p.name.contains("full map") && !p.name.startsWith("tilt changed")) {
 					FULL_MAP_BUILDS.add(bytes);
 				}
 				p.nanos += nanos;
@@ -448,6 +691,55 @@ final class FogMaskBuildTest {
 	private static @Nullable MapTile peek(MapLevel level, TileKey key) {
 		READ.add(key);
 		return level.peek(key);
+	}
+
+	/**
+	 * How much of each mask texel the remembered map has, as {@code MapViewport.buildMask} read it
+	 * through {@code MapMemory.known} up to 0.11: a remembered tile not read yet counts as all known.
+	 * Starts from the tile the memory last read as the build started, {@code lastKey} holding
+	 * {@code last}, which 0.11 also kept from build to build; {@code knownTiles} is a copy of the
+	 * memory's read tiles. True if a texel was taken from a read tile.
+	 */
+	private static boolean readRememberedAsBefore(MapMemory memory, int lod, double originU, double originV, double texel, @Nullable TileKey lastKey, byte @Nullable [] last, Map<TileKey, byte[]> knownTiles,
+		float[] out) {
+		boolean read = false;
+		int edge = Projection.TILE_PIXELS / 4;
+		for (int j = 0; j < MASK; j++) {
+			double v = originV + (j + 0.5) * texel;
+			for (int i = 0; i < MASK; i++) {
+				double u = originU + (i + 0.5) * texel;
+				out[j * MASK + i] = 1;
+				double units = (double) Projection.TILE_UNITS * (1 << lod);
+				double[] old = memory.toOldForTests(u, v);
+				int tu = (int) Math.floor(old[0] / units);
+				int tv = (int) Math.floor(old[1] / units);
+				TileKey key = new TileKey(TileKey.SURFACE, tu, tv, lod);
+				byte[] tile;
+				if (key.equals(lastKey)) {
+					tile = last;
+				} else {
+					java.util.Set<TileKey> saved = memory.savedForTests(lod);
+					if (saved == null) {
+						continue;
+					}
+					if (!saved.contains(key)) {
+						out[j * MASK + i] = 0;
+						continue;
+					}
+					tile = knownTiles.get(key);
+					if (tile == null) {
+						continue;
+					}
+					lastKey = key;
+					last = tile;
+				}
+				read = true;
+				int cx = (int) Math.min(edge - 1L, (long) ((old[0] - tu * units) / units * edge));
+				int cy = (int) Math.min(edge - 1L, (long) ((old[1] - tv * units) / units * edge));
+				out[j * MASK + i] = (tile[cy * edge + cx] & 0xFF) / 255.0F;
+			}
+		}
+		return read;
 	}
 
 	/** The mask's known share read from the tiles as {@code MapViewport.buildMask} read it up to 0.11, unchanged. */
