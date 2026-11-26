@@ -32,6 +32,11 @@ final class SavedChunksTest {
 	private static final int Z = 6000;
 	private static final int CHUNKS = 4;
 	private static final int PILLAR = 30;
+	/**
+	 * How many chunks around a forced one the game finishes: a forced chunk's ticket is two levels
+	 * under the one a chunk is finished at, and each chunk out goes one level up.
+	 */
+	private static final int FINISHED_AROUND_FORCED = 2;
 
 	private SavedChunksTest() {
 	}
@@ -272,9 +277,9 @@ final class SavedChunksTest {
 	 */
 	private static void farTileDrawnAgainAsSaved(ClientGameTestContext context, TestSingleplayerContext world, int ground) {
 		TileKey tile = tileAt(X + 24, ground, Z + 24);
-		// Loaded again, the land around the far chunks can come out further made than the first
-		// time, and some of it is drawn then: new land in the tile. Once first, so the time after
-		// writes everything as it was.
+		// The first load let the far chunks go as soon as they were loaded, so some of the land
+		// around them may have been saved half made, and not drawn. Loaded again until all of it is
+		// finished, so the load after has nothing left to finish and writes everything as it was.
 		loadForAWhile(context, world, X, Z, X + CHUNKS * 16 - 1, Z + CHUNKS * 16 - 1, true, server -> {
 		});
 		save(context, world);
@@ -449,9 +454,15 @@ final class SavedChunksTest {
 		java.util.function.Consumer<MinecraftServer> meanwhile) {
 		try (WorldPause pause = paused ? WorldPause.pause(context) : null) {
 			world.getServer().runCommand("forceload add " + x0 + " " + z0 + " " + x1 + " " + z1);
-			for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, x0 >> 4, z0 >> 4, x1 >> 4, z1 >> 4, true)); i++) {
+			// The chunks two around forced ones are finished too, and drawn once saved: all of them,
+			// so the next load of these chunks has nothing more to finish. Let go before then, one
+			// still being made is saved half made, and finished by the next load, which draws it as
+			// new land in tiles that should come out as they were.
+			int ring = FINISHED_AROUND_FORCED;
+			for (int i = 0; !world.getServer().computeOnServer(server -> allLoaded(server, (x0 >> 4) - ring, (z0 >> 4) - ring, (x1 >> 4) + ring, (z1 >> 4) + ring, true)); i++) {
 				if (i > 2400) {
-					throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " never loaded");
+					String missing = world.getServer().computeOnServer(server -> unloaded(server, (x0 >> 4) - ring, (z0 >> 4) - ring, (x1 >> 4) + ring, (z1 >> 4) + ring));
+					throw new AssertionError("The chunks from " + x0 + "," + z0 + " to " + x1 + "," + z1 + " and the " + ring + " around them never all finished loading: " + missing + " didn't");
 				}
 				context.waitTick();
 			}
@@ -479,6 +490,19 @@ final class SavedChunksTest {
 			}
 		}
 		return true;
+	}
+
+	/** The chunks in the square that aren't loaded, for a failure message. */
+	private static String unloaded(MinecraftServer server, int cx0, int cz0, int cx1, int cz1) {
+		List<String> out = new ArrayList<>();
+		for (int cx = cx0; cx <= cx1; cx++) {
+			for (int cz = cz0; cz <= cz1; cz++) {
+				if (server.overworld().getChunkSource().getChunkNow(cx, cz) == null) {
+					out.add(cx + "," + cz);
+				}
+			}
+		}
+		return out.toString();
 	}
 
 	/** Opens the map on a point, and waits for it to show the tile there. */

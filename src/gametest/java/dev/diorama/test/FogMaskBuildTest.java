@@ -92,6 +92,12 @@ final class FogMaskBuildTest {
 	private static final double WALK = 0.216;
 	private static final double ELYTRA = 1.6;
 	private static final int FLY_Y = 120;
+	/**
+	 * Blocks "cave minimap, walking" walks, more than the 128 map units a side of the squares the
+	 * minimap's mask origin snaps to at its zoom: it crosses into another square, so the mask is
+	 * built again however the walk lines up with them.
+	 */
+	private static final int CAVE_WALK = 140;
 
 	private static final class Part {
 		final String name;
@@ -110,6 +116,8 @@ final class FogMaskBuildTest {
 		/** The overview levels the remembered map was read at, a bit each. */
 		int rememberedLods;
 		int mostTiles;
+		/** Builds at a mask origin other than the build before's, in this part or the one before. */
+		int originMoves;
 		long @Nullable [] frames;
 		/** Each build's bytes, for the part's median; made here so keeping them allocates nothing. */
 		final long[] each = new long[4096];
@@ -132,6 +140,9 @@ final class FogMaskBuildTest {
 	private static long checkBytes;
 	private static long checkNanos;
 	private static int checked;
+	/** Where the last build's mask started, for {@link Part#originMoves}. */
+	private static double lastOriginU = Double.NaN;
+	private static double lastOriginV = Double.NaN;
 	private static int mismatches;
 	private static @Nullable String firstMismatch;
 	/** Set if the allocation counter ever gave -1, which would make every build look free. */
@@ -178,6 +189,8 @@ final class FogMaskBuildTest {
 		PARTS.clear();
 		FULL_MAP_BUILDS.clear();
 		checked = 0;
+		lastOriginU = Double.NaN;
+		lastOriginV = Double.NaN;
 		mismatches = 0;
 		firstMismatch = null;
 		rememberedChecked = 0;
@@ -262,18 +275,26 @@ final class FogMaskBuildTest {
 		large(context, world, x, z);
 		context.setScreen(() -> null);
 
-		// A room dug deep down off the spawn: the minimap shows a cave slice.
+		// A tunnel dug deep down off the spawn: the minimap shows a cave slice. The mask is kept while
+		// the view stays in the square its origin snaps to and nothing it reads changes, so a walk
+		// shorter than a square can rightly build nothing: this one walks further than a square
+		// across, east, along the map's columns.
 		int caveX = x + 300;
 		int caveY = 20;
+		if (Projection.u(caveX + 1, z) - Projection.u(caveX, z) != 1) {
+			throw new AssertionError("The map isn't facing north, so walking east in \"cave minimap, walking\" wouldn't cross the mask's squares");
+		}
+		int half = CAVE_WALK / 2 + 6;
 		world.getServer().runCommand("tp @a " + caveX + " " + FLY_Y + " " + z);
 		DioramaClientTest.settle(context, 40);
-		world.getServer().runCommand("fill " + (caveX - 12) + " " + (caveY - 1) + " " + (z - 4) + " " + (caveX + 12) + " " + (caveY + 4) + " " + (z + 4) + " stone");
-		world.getServer().runCommand("fill " + (caveX - 11) + " " + caveY + " " + (z - 2) + " " + (caveX + 11) + " " + (caveY + 2) + " " + (z + 2) + " air");
-		world.getServer().runCommand("tp @a " + (caveX - 10) + " " + caveY + " " + z + " -90 0");
+		world.getServer().runCommand("fill " + (caveX - half - 1) + " " + (caveY - 1) + " " + (z - 4) + " " + (caveX + half + 1) + " " + (caveY + 4) + " " + (z + 4) + " stone");
+		world.getServer().runCommand("fill " + (caveX - half) + " " + caveY + " " + (z - 2) + " " + (caveX + half) + " " + (caveY + 2) + " " + (z + 2) + " air");
+		int walkFrom = caveX - CAVE_WALK / 2;
+		world.getServer().runCommand("tp @a " + walkFrom + " " + caveY + " " + z + " -90 0");
 		context.runOnClient(mc -> mc.player.getAbilities().flying = false);
 		DioramaClientTest.settle(context, 60);
 		measure(context, world, "cave minimap, standing", frames, 100, null);
-		measure(context, world, "cave minimap, walking", frames, 100, tick -> new double[] {caveX - 10 + tick * WALK, caveY, z});
+		measure(context, world, "cave minimap, walking", frames, (int) Math.ceil(CAVE_WALK / WALK), tick -> new double[] {walkFrom + tick * WALK, caveY, z});
 		double cu = Projection.u(caveX, z);
 		double cv = Projection.v(caveX, caveY, z);
 		// Counted from before the screen opens: its first frame may already build the mask it shows.
@@ -457,7 +478,7 @@ final class FogMaskBuildTest {
 		if (p.builds > 0) {
 			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" median ").append(p.median()).append(" min ").append(p.leastBytes).append(" max ").append(p.mostBytes)
 				.append(" | us a build mean ").append(p.nanos / p.builds / 1000).append(" max ").append(p.mostNanos / 1000)
-				.append(" | most tiles a build reads ").append(p.mostTiles);
+				.append(" | most tiles a build reads ").append(p.mostTiles).append(" | origin moved ").append(p.originMoves).append(" times");
 		}
 		if (p.rememberedBuilds > 0) {
 			text.append(" | remembered map read by ").append(p.rememberedBuilds).append(" builds, ").append(p.rememberedTileBuilds).append(" with a remembered tile read, at overview levels ").append(lods(p.rememberedLods));
@@ -520,6 +541,12 @@ final class FogMaskBuildTest {
 			if (name.startsWith("cave") && p.caveBuilds == 0) {
 				throw new AssertionError("\"" + name + "\" never built a cave slice's mask: the player wasn't underground");
 			}
+		}
+		// What makes the walk build for certain: it crossed from one of the mask's squares into another.
+		Part walk = PARTS.get("cave minimap, walking");
+		if (walk.originMoves == 0) {
+			throw new AssertionError("Walking " + CAVE_WALK + " blocks in \"cave minimap, walking\", the minimap's mask never moved to another origin (" + walk.builds
+				+ " builds): the walk didn't cross into another of the squares the mask snaps to, so a build there wasn't certain");
 		}
 		for (String name : new String[] {largeFar, largeNear}) {
 			Part p = PARTS.get(name);
@@ -603,10 +630,15 @@ final class FogMaskBuildTest {
 			checked++;
 			if (part != null) {
 				part.mostTiles = Math.max(part.mostTiles, READ.size());
+				if (!Double.isNaN(lastOriginU) && (lastOriginU != originU || lastOriginV != originV)) {
+					part.originMoves++;
+				}
 				if (layer != TileKey.SURFACE) {
 					part.caveBuilds++;
 				}
 			}
+			lastOriginU = originU;
+			lastOriginV = originV;
 			if (!Arrays.equals(BEFORE, known)) {
 				mismatches++;
 				if (firstMismatch == null) {
