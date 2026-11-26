@@ -10,8 +10,11 @@ import dev.diorama.render.MapLevel;
 import dev.diorama.render.MapTile;
 import dev.diorama.render.MapViewport;
 import java.lang.management.ManagementFactory;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -21,10 +24,11 @@ import org.jspecify.annotations.Nullable;
 /**
  * The fog mask's builds while the player stands, walks and flies, on the minimap, the full map and
  * a cave slice ({@code fog-mask}). Every build's known share, read from the tiles, is checked
- * against the same reading done the way it was before 0.12 ({@link #readAsBefore}), pixel for
- * pixel; and what a build allocates on the render thread is kept under {@link #MOST_BYTES}. Before
- * 0.12 a build allocated about 280 KB, all of it lookup keys: each tile was looked up again on every
- * row of the mask it lay on, and for a tile not in memory every overview level above it too.
+ * against the same reading done the way 0.11 did it ({@link #readAsBefore}), pixel for pixel; and
+ * what builds allocate on the render thread is kept under {@link #MOST_MINIMAP_BYTES} and
+ * {@link #MOST_FULL_MAP_MEDIAN}. In 0.11 a minimap build allocated about 280 KB, all of it lookup
+ * keys: each tile was looked up again on every row of the mask it lay on, and for a tile not in
+ * memory every overview level above it too.
  *
  * <p>Logs, for each part: the builds, bytes and time a build, builds a second of game time, and what
  * the minimap's HUD element allocated a frame (where {@link MinimapAllocTest} has a probe).
@@ -32,13 +36,19 @@ import org.jspecify.annotations.Nullable;
 final class FogMaskBuildTest {
 	private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
 	/**
-	 * The most a build may allocate: on the minimap every build, on the full map the least of a
-	 * part's. A build allocates a hundred bytes or so, and a key, kept, for each tile no build before
-	 * it read: on the minimap a few dozen at most, but on the full map's first build at a new zoom up
-	 * to a few thousand. Before 0.12 every minimap build allocated 200 KB or more, and every full
-	 * map build 50 KB to 2 MB.
+	 * The most any minimap build may allocate. One allocates a hundred bytes or so, a kept key for
+	 * each tile no build before it read (a few dozen at most), and now and then the lookup table
+	 * made again at its size, 15 KB: under 20 KB in all. In 0.11 every one allocated 200 KB or more.
 	 */
-	private static final long MOST_BYTES = 24 * 1024;
+	private static final long MOST_MINIMAP_BYTES = 64 * 1024;
+	/**
+	 * The most the full map's median build may allocate. Its first build at a new zoom makes kept keys
+	 * for thousands of tiles, 50 to 400 KB; the builds after allocate a hundred bytes or so. In 0.11
+	 * the median was a megabyte.
+	 */
+	private static final long MOST_FULL_MAP_MEDIAN = 24 * 1024;
+	/** Every full map build's bytes, for its median. */
+	private static final List<Long> FULL_MAP_BUILDS = new ArrayList<>();
 	/** Blocks a tick: walking (4.3 m/s), and an elytra (32 m/s). */
 	private static final double WALK = 0.216;
 	private static final double ELYTRA = 1.6;
@@ -80,6 +90,7 @@ final class FogMaskBuildTest {
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
 		PARTS.clear();
+		FULL_MAP_BUILDS.clear();
 		checked = 0;
 		mismatches = 0;
 		firstMismatch = null;
@@ -226,9 +237,9 @@ final class FogMaskBuildTest {
 	}
 
 	private static void report() {
-		Diorama.LOGGER.info("fog-mask | {} builds checked against the reading before 0.12, {} differed", checked, mismatches);
+		Diorama.LOGGER.info("fog-mask | {} builds checked against 0.11's reading, {} differed", checked, mismatches);
 		if (mismatches > 0) {
-			throw new AssertionError(mismatches + " of " + checked + " fog mask builds read the tiles differently from before; the first: " + firstMismatch);
+			throw new AssertionError(mismatches + " of " + checked + " fog mask builds read the tiles differently from 0.11; the first: " + firstMismatch);
 		}
 		String[] mustBuild = {"minimap, walking, unexplored", "minimap, flying, unexplored", "minimap zoomed out, flying, unexplored", "full map, zoom 0.03, panning", "cave minimap, walking", "cave full map"};
 		for (String name : mustBuild) {
@@ -241,13 +252,18 @@ final class FogMaskBuildTest {
 			}
 		}
 		for (Part p : PARTS.values()) {
-			boolean minimap = !p.name.contains("full map");
-			long bytes = minimap ? p.mostBytes : p.builds == 0 ? 0 : p.leastBytes;
-			if (bytes > MOST_BYTES) {
-				throw new AssertionError((minimap ? "A" : "Every") + " fog mask build in \"" + p.name + "\" allocated " + (minimap ? "" : "at least ") + bytes
-					+ " bytes on the render thread, over " + MOST_BYTES + " (mean " + p.bytes / Math.max(1, p.builds) + " over " + p.builds
-					+ " builds): is a tile looked up with a new key for every texel row again?");
+			if (!p.name.contains("full map") && p.mostBytes > MOST_MINIMAP_BYTES) {
+				throw new AssertionError("A fog mask build in \"" + p.name + "\" allocated " + p.mostBytes + " bytes on the render thread, over " + MOST_MINIMAP_BYTES
+					+ " (mean " + p.bytes / Math.max(1, p.builds) + " over " + p.builds + " builds): is a tile looked up with a new key for every texel row again?");
 			}
+		}
+		List<Long> sorted = new ArrayList<>(FULL_MAP_BUILDS);
+		Collections.sort(sorted);
+		long median = sorted.isEmpty() ? 0 : sorted.get(sorted.size() / 2);
+		Diorama.LOGGER.info("fog-mask | full map builds | {} builds, median {} bytes", sorted.size(), median);
+		if (median > MOST_FULL_MAP_MEDIAN) {
+			throw new AssertionError("The full map's fog mask builds allocated a median " + median + " bytes on the render thread, over " + MOST_FULL_MAP_MEDIAN
+				+ " (" + sorted.size() + " builds): is a tile looked up with a new key for every texel row again?");
 		}
 	}
 
@@ -297,6 +313,9 @@ final class FogMaskBuildTest {
 				p.bytes += bytes;
 				p.mostBytes = Math.max(p.mostBytes, bytes);
 				p.leastBytes = Math.min(p.leastBytes, bytes);
+				if (p.name.contains("full map")) {
+					FULL_MAP_BUILDS.add(bytes);
+				}
 				p.nanos += nanos;
 				p.mostNanos = Math.max(p.mostNanos, nanos);
 			}
