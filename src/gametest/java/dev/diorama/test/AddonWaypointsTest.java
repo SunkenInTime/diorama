@@ -431,7 +431,8 @@ final class AddonWaypointsTest {
 		context.runOnClient(mc -> hud.close());
 		results.add("a waystone placed again, read through the API with nothing drawn: " + placedAgain + (placedAgain.equals("revision moved true, in all() true") ? " ok" : " WRONG"));
 		context.runOnClient(mc -> Waystones.clear());
-		// Waystones sends a kind's whole list again, as on every join: the same list moves nothing; one waystone renamed does.
+		// Waystones sends a kind's whole list again, as on every join: the same list moves nothing; one waystone renamed does. Sharestones, as
+		// with the Waystones mod installed Diorama drops ordinary waystones that mod doesn't know of, about once a second.
 		UUID[] listed = new UUID[2];
 		context.runOnClient(mc -> {
 			List<Waypoint> sent = new ArrayList<>();
@@ -440,11 +441,11 @@ final class AddonWaypointsTest {
 				listed[i] = w.id;
 				sent.add(w);
 			}
-			Waystones.listForTests("waystones:waystone", sent);
+			Waystones.listForTests("waystones:white_sharestone", sent);
 		});
-		check(context, results, "a Waystones list sent again as it was", false, mc -> Waystones.listForTests("waystones:waystone", List.of(
+		check(context, results, "a Waystones list sent again as it was", false, mc -> Waystones.listForTests("waystones:white_sharestone", List.of(
 			stoneLike(listed[0], "Listed stone 0", at.getX() - 7, at.getY(), at.getZ() + 9), stoneLike(listed[1], "Listed stone 1", at.getX() - 8, at.getY(), at.getZ() + 9))));
-		check(context, results, "a Waystones list sent again with one renamed", true, mc -> Waystones.listForTests("waystones:waystone", List.of(
+		check(context, results, "a Waystones list sent again with one renamed", true, mc -> Waystones.listForTests("waystones:white_sharestone", List.of(
 			stoneLike(listed[0], "Listed stone renamed", at.getX() - 7, at.getY(), at.getZ() + 9), stoneLike(listed[1], "Listed stone 1", at.getX() - 8, at.getY(), at.getZ() + 9))));
 		context.runOnClient(mc -> Waystones.clear());
 
