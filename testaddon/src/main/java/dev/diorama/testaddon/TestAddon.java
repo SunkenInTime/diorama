@@ -37,6 +37,8 @@ public final class TestAddon implements DioramaAddon {
 	private static final List<String> HEARD = new ArrayList<>();
 	/** What all() gave inside the listener, by the change it was heard in. */
 	private static final List<Integer> SIZES_HEARD = new ArrayList<>();
+	/** What get() gave for the changed waypoint inside the listener, before answering it: its name, or "gone". */
+	private static final List<String> READ_HEARD = new ArrayList<>();
 
 	static {
 		// Read by the scenario that runs the game without Diorama: nothing should load this class there.
@@ -59,6 +61,7 @@ public final class TestAddon implements DioramaAddon {
 					for (WaypointChange change : changes.changes()) {
 						HEARD.add(changes.by().orElse("-") + " " + change.type() + " " + change.before().map(Waypoint::name).orElse("") + " > " + change.after().map(w -> w.name() + (w.visible() ? "" : " (hidden)")).orElse(""));
 						SIZES_HEARD.add(opened.waypoints().all().size());
+						READ_HEARD.add(opened.waypoints().get(change.id()).map(Waypoint::name).orElse("gone"));
 						if (change.type() == WaypointChange.Type.ADDED && change.after().get().name().equals(ECHO)) {
 							opened.waypoints().edit(edits -> edits.update(change.id(), WaypointUpdate.builder().name(ECHOED).build()));
 						}
@@ -133,9 +136,15 @@ public final class TestAddon implements DioramaAddon {
 		return SIZES_HEARD;
 	}
 
+	/** What get() read of each line of {@link #heard}'s waypoint when it was heard, before any answer: its name, or "gone". */
+	public static List<String> readHeard() {
+		return READ_HEARD;
+	}
+
 	/** Forgets what it heard, so a check reads only what follows. */
 	public static void forgetHeard() {
 		HEARD.clear();
 		SIZES_HEARD.clear();
+		READ_HEARD.clear();
 	}
 }

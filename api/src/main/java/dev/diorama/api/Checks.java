@@ -2,14 +2,12 @@ package dev.diorama.api;
 
 import java.util.Objects;
 
-/** The checks {@link DimensionId}, {@link NewWaypoint} and {@link WaypointUpdate} make on what they're given. */
+/** The checks {@link DimensionId}, {@link ResourceId}, {@link NewWaypoint} and {@link WaypointUpdate} make on what they're given. */
 final class Checks {
-	/** The longest name or folder name, as Diorama's editor allows. */
-	static final int MAX_NAME = 32;
-	/** The most letters a pin's initials can have. */
-	static final int MAX_INITIALS = 4;
-	/** A waypoint's colour when none is given: the first of Diorama's palette. */
-	static final int DEFAULT_COLOR = 0xFFE5484D;
+	static final int MAX_NAME = NewWaypoint.MAX_NAME_LENGTH;
+	static final int MAX_INITIALS = NewWaypoint.MAX_INITIALS;
+	/** A waypoint's colour when none is given: the first of Diorama's palette, as 0xRRGGBB. */
+	static final int DEFAULT_RGB = 0xE5484D;
 
 	private Checks() {
 	}
@@ -21,7 +19,7 @@ final class Checks {
 			throw new IllegalArgumentException("A waypoint's name can't be blank");
 		}
 		if (trimmed.length() > MAX_NAME) {
-			throw new IllegalArgumentException("A waypoint's name can be " + MAX_NAME + " characters at most, as in Diorama's editor: \"" + trimmed + "\"");
+			throw new IllegalArgumentException("A waypoint's name can be " + MAX_NAME + " UTF-16 units at most, as in Diorama's editor; this is " + trimmed.length() + ": \"" + trimmed + "\"");
 		}
 		return trimmed;
 	}
@@ -35,28 +33,19 @@ final class Checks {
 		return trimmed;
 	}
 
-	static String icon(String icon) {
-		Objects.requireNonNull(icon, "icon");
-		if (icon.isEmpty()) {
-			return icon;
+	/** 0xRRGGBB: anything in the top byte is a mistake, such as passing ARGB. */
+	static int rgb(int rgb) {
+		if (rgb >>> 24 != 0) {
+			throw new IllegalArgumentException("A waypoint's colour is 0xRRGGBB, with nothing above it: " + String.format("0x%08X", rgb) + " looks like ARGB; drop the alpha");
 		}
-		int colon = icon.indexOf(':');
-		if (colon <= 0 || colon == icon.length() - 1 || !allowed(icon.substring(0, colon), false) || !allowed(icon.substring(colon + 1), true)) {
-			throw new IllegalArgumentException("Not an icon ID: \"" + icon + "\" (namespace:path, such as diorama:home, or empty for none)");
-		}
-		return icon;
-	}
-
-	/** ARGB; an alpha of 0, as a plain 0xRRGGBB has, is taken as opaque. */
-	static int color(int color) {
-		return color >>> 24 == 0 ? color | 0xFF000000 : color;
+		return rgb;
 	}
 
 	static String folder(String folder) {
 		Objects.requireNonNull(folder, "folder");
 		String trimmed = folder.strip();
 		if (trimmed.length() > MAX_NAME) {
-			throw new IllegalArgumentException("A folder's name can be " + MAX_NAME + " characters at most, as in Diorama's folder screen: \"" + trimmed + "\"");
+			throw new IllegalArgumentException("A folder's name can be " + MAX_NAME + " UTF-16 units at most, as in Diorama's folder screen; this is " + trimmed.length() + ": \"" + trimmed + "\"");
 		}
 		return trimmed;
 	}

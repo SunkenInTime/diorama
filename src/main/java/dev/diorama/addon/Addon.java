@@ -67,9 +67,9 @@ final class Addon implements DioramaApi, Hud {
 	}
 
 	/**
-	 * Calls into the addon, its constructor included. If it throws, the addon is switched off and
-	 * its handles closed first; then a {@link #fatal} error goes on up, and anything else is logged
-	 * once and goes no further. Null if it threw, or was already switched off.
+	 * Calls into the addon, its constructor included. If it throws, the addon is switched off
+	 * ({@link #fail}); then a {@link #fatal} error goes on up, and anything else goes no further.
+	 * Null if it threw, or was already switched off.
 	 */
 	<T> @Nullable T call(String what, Callable<T> call) {
 		if (this.failed) {
@@ -78,23 +78,43 @@ final class Addon implements DioramaApi, Hud {
 		try {
 			return call.call();
 		} catch (Throwable thrown) {
-			this.failed = true;
-			for (HudHides.Hold hold : this.holds) {
-				hold.release();
-			}
-			this.holds.clear();
-			for (Held each : List.copyOf(this.held)) {
-				each.release();
-			}
-			this.held.clear();
-			HudHides.changed();
+			this.fail(what, thrown);
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
 				throw fatal;
 			}
-			log(this.modId, what, thrown);
 			return null;
 		}
+	}
+
+	/**
+	 * Switches the addon off: its handles are closed, what it hid shows again, and unless it was a
+	 * {@link #fatal} error, one line is logged. Once only: an addon switched off from inside one of
+	 * its own calls (a refused edit, a batch that threw) isn't logged again when that call throws.
+	 */
+	void fail(String what, Throwable thrown) {
+		if (this.failed) {
+			return;
+		}
+		this.failed = true;
+		for (HudHides.Hold hold : this.holds) {
+			hold.release();
+		}
+		this.holds.clear();
+		for (Held each : List.copyOf(this.held)) {
+			each.release();
+		}
+		this.held.clear();
+		HudHides.changed();
+		if (fatal(thrown) == null) {
+			log(this.modId, what, thrown);
+		}
+	}
+
+	/** Throws {@code thrown} as it is, checked or not, for code that has to pass on what an addon threw. */
+	@SuppressWarnings("unchecked")
+	static <E extends Throwable> RuntimeException rethrow(Throwable thrown) throws E {
+		throw (E) thrown;
 	}
 
 	/**

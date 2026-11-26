@@ -12,6 +12,7 @@ import dev.diorama.Maps;
 import dev.diorama.Settings;
 import dev.diorama.WorldKey;
 import dev.diorama.addon.AddonWorlds;
+import dev.diorama.api.MapId;
 import dev.diorama.api.WaypointChange;
 import dev.diorama.api.WaypointEditor;
 import java.io.IOException;
@@ -50,9 +51,10 @@ import org.jspecify.annotations.Nullable;
  * here, but show with this world's waypoints, and which of them are hidden is saved with the folders.
  * Client thread only.
  *
- * <p>Every change to the waypoints goes out through {@link #committed}, after its save: Diorama's
- * own (the screens, automatic pins, imports) and addons' ({@link #edit}) alike, so an addon
- * listening hears all of them ({@link AddonWorlds}).
+ * <p>Every change to the waypoints goes through {@link #committed}, after its save: Diorama's own
+ * (the screens, automatic pins, imports) and addons' ({@link #edit}) alike. It moves the
+ * {@link #revision} on, which open screens and what addons read ({@link WaypointSnapshots}) follow,
+ * and while an addon listens, compares and queues the change for it ({@link AddonWorlds}).
  */
 public final class WaypointStore {
 	/** How many death markers to keep; older ones are dropped as new deaths come in. */
@@ -76,6 +78,8 @@ public final class WaypointStore {
 	private static @Nullable WaypointStore current;
 	/** How many times any store has written waypoints.json, for tests. */
 	private static int saves;
+	/** How many times any store has written folders.json, for tests. */
+	private static int folderSaves;
 
 	private final String worldKey;
 	private final Path file;
@@ -98,8 +102,12 @@ public final class WaypointStore {
 	private final Map<String, Map<Waypoint, Waypoint>> copies = new HashMap<>();
 	/** What addons read of the waypoints. */
 	private final WaypointSnapshots snapshots = new WaypointSnapshots(this);
-	/** Counts switches of saved map in any dimension, so an addon can be told. */
-	private int mapSwitches;
+	/**
+	 * Goes up with every change to what's listed ({@link #committed}, and a switch of saved map),
+	 * so a screen or a cache can tell it's out of date. Waystones count their own
+	 * ({@link Waystones#changes}).
+	 */
+	private int revision;
 	/** An addon's edit batch is being put together. */
 	private boolean editing;
 
@@ -169,14 +177,45 @@ public final class WaypointStore {
 		return saves;
 	}
 
+	/** How many times folders.json was written since the game started. For tests. */
+	public static int folderSaves() {
+		return folderSaves;
+	}
+
 	/** The world key this store is for. */
 	public String worldKey() {
 		return this.worldKey;
 	}
 
-	/** Goes up each time a dimension switches to another of its saved maps. */
-	public int mapSwitches() {
-		return this.mapSwitches;
+	/** Goes up with every change to the waypoints this store lists; see {@link #revision}. */
+	public int revision() {
+		return this.revision;
+	}
+
+	/**
+	 * Whether this is one of the store's own waypoints, on any map, and not a portal pin the player
+	 * deleted: false for one a screen still holds after it was deleted, by an addon say.
+	 */
+	public boolean holds(Waypoint waypoint) {
+		if (waypoint.kind.isPortal() && waypoint.deleted) {
+			return false;
+		}
+		for (Waypoint each : this.waypoints) {
+			if (each == waypoint) {
+				return true;
+			}
+		}
+		for (Waypoint each : this.elsewhere) {
+			if (each == waypoint) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The ID addons know one of Diorama's map IDs by ({@link Maps}, empty for a dimension's first). */
+	public static MapId mapId(String id) {
+		return WaypointSnapshots.mapId(id);
 	}
 
 	/**
@@ -188,6 +227,8 @@ public final class WaypointStore {
 		if (store == null) {
 			return;
 		}
+		// What changed before the switch is told before it.
+		store.tellPending();
 		String active = Maps.of(store.worldKey).active(dimension);
 		store.waypoints.removeIf(w -> w.dimension.equals(dimension) && w.kind == Waypoint.Kind.TEMPORARY);
 		List<Waypoint> leaving = store.waypoints.stream().filter(w -> w.dimension.equals(dimension) && !Maps.id(w.map).equals(active)).toList();
@@ -198,12 +239,11 @@ public final class WaypointStore {
 		store.waypoints.addAll(coming);
 		// The list is the other map's now, which addons are told as a switch of map, not as
 		// waypoints added and removed: a two-way sync would delete the old map's in its own mod.
-		store.mapSwitches++;
+		store.revision++;
 		if (AddonWorlds.listening(store)) {
 			store.snapshots.rebuild(false);
-		} else {
-			store.snapshots.stale();
 		}
+		AddonWorlds.mapSwitched(store);
 	}
 
 	/** A map was deleted: the waypoints made on it go too. */
@@ -456,6 +496,8 @@ public final class WaypointStore {
 		}
 		this.folders.custom.add(trimmed);
 		this.saveFolders();
+		// A waypoint can already name it (a hand edit, or one put back): it's in it now.
+		this.committed(null);
 		return true;
 	}
 
@@ -626,22 +668,36 @@ public final class WaypointStore {
 	}
 
 	/**
-	 * After a change to the waypoints and its save: tells the addons listening what changed, put down
-	 * to the addon whose edit it was, or to no one for the player's and Diorama's own. With none
-	 * listening, nothing is compared and nothing made: what addons read is made again when they next
-	 * read it.
+	 * After a change to the waypoints and its save: the revision moves on, and if an addon listens,
+	 * what changed is compared and queued for it, put down to the addon whose edit it was, or to no
+	 * one for the player's and Diorama's own. With none listening, nothing is compared and nothing
+	 * made: what addons read is made again when they next read it.
 	 */
 	private void committed(@Nullable String by) {
-		if (this != current) {
-			return;
-		}
-		if (!AddonWorlds.listening(this)) {
-			this.snapshots.stale();
+		this.revision++;
+		this.tell(by);
+	}
+
+	/** Compares and queues what changed for addons, if this is the world's store and one listens. */
+	private void tell(@Nullable String by) {
+		if (this != current || !AddonWorlds.listening(this)) {
 			return;
 		}
 		List<WaypointChange> changes = this.snapshots.rebuild(true);
 		if (changes != null && !changes.isEmpty()) {
-			AddonWorlds.deliver(this, changes, by);
+			AddonWorlds.changed(this, changes, by);
+		}
+	}
+
+	/**
+	 * Anything changed that listening addons weren't told yet (Waystones, the portal pin setting,
+	 * a change made while the world's key wasn't known) is queued for them now, as Diorama's own.
+	 * Done each tick, and before anything that must come after it: a switch of map, a new
+	 * listener, an addon's batch.
+	 */
+	public void tellPending() {
+		if (this.snapshots.pending()) {
+			this.tell(null);
 		}
 	}
 
@@ -657,48 +713,57 @@ public final class WaypointStore {
 	}
 
 	/**
-	 * What addons read ({@link dev.diorama.api.Waypoints#all}): the same list until something
-	 * changes. While addons listen, Waystones and the portal pin setting reach it on the next tick
-	 * ({@link #outsideChanges}), which tells them; otherwise as soon as it's read.
+	 * What addons read ({@link dev.diorama.api.Waypoints#all}): the store as it is now, the same
+	 * list until something changes. Anything listening addons weren't told yet is queued for them
+	 * first ({@link #tellPending}), so what they read and what they hear agree.
 	 */
 	public List<dev.diorama.api.Waypoint> published() {
-		this.snapshots.refresh(!AddonWorlds.listening(this));
+		this.readable();
 		return this.snapshots.all();
 	}
 
-	/** One waypoint of {@link #published()} by its ID. */
+	/** One waypoint of {@link #published()} by its ID: the first with it. */
 	public Optional<dev.diorama.api.Waypoint> published(UUID id) {
-		this.snapshots.refresh(!AddonWorlds.listening(this));
+		this.readable();
 		return this.snapshots.get(id);
 	}
 
-	/** An addon started listening: what it hears is compared with the waypoints as they are now. */
-	public void listenFromNow() {
-		this.snapshots.refresh(true);
+	private void readable() {
+		if (this.snapshots.pending()) {
+			if (AddonWorlds.listening(this)) {
+				this.tell(null);
+			} else {
+				this.snapshots.rebuild(false);
+			}
+		}
 	}
 
-	/** Each tick while addons listen: Waystones or the portal pin setting changed what the list shows. */
-	public void outsideChanges() {
-		if (this.snapshots.outsideChanged()) {
-			this.committed(null);
+	/**
+	 * An addon is about to listen. With others listening already, what they weren't told yet is
+	 * queued for them first; with none, what addons read is just brought up to date, as the new
+	 * listener hears only what comes after.
+	 */
+	public void beforeListen(boolean othersListening) {
+		if (othersListening) {
+			this.tellPending();
+		} else {
+			this.snapshots.refresh();
 		}
 	}
 
 	/**
 	 * An addon's edit batch ({@link dev.diorama.api.Waypoints#edit}): {@code edits} says what, then
-	 * all of it is applied, saved once and told once, put down to {@code by}. If {@code edits} throws,
-	 * nothing is applied.
+	 * all of it is applied, folders.json written once if it made folders, waypoints.json once, and
+	 * one change queued, put down to {@code by}. If {@code edits} throws, nothing has been applied
+	 * yet, and nothing is.
 	 */
 	public void edit(String by, Consumer<WaypointEditor> edits) {
 		if (this.editing) {
 			throw new IllegalStateException("edit() was called from inside another edit()'s batch; make the changes on the editor it was handed");
 		}
-		if (AddonWorlds.listening(this) && this.snapshots.outsideChanged()) {
-			// Waystones or the portal pin setting moved since the last tick: told as Diorama's own
-			// first, so the batch's change holds only what the addon did.
-			this.committed(null);
-		}
-		this.snapshots.refresh(!AddonWorlds.listening(this));
+		// Checked against the waypoints as they are; anything not yet told is told first, as
+		// Diorama's own, so the batch's change holds only what the addon did.
+		this.readable();
 		WaypointEdits batch = new WaypointEdits(this, by);
 		this.editing = true;
 		try {
@@ -711,6 +776,9 @@ public final class WaypointStore {
 			return;
 		}
 		batch.apply();
+		if (batch.madeFolders()) {
+			this.saveFolders();
+		}
 		this.save();
 		this.committed(by);
 	}
@@ -728,19 +796,22 @@ public final class WaypointStore {
 
 	/**
 	 * A waypoint an addon put in one of the player's folders: the folder is made if there's none of
-	 * that name, and the waypoint takes the folder's spelling. Part of {@link #edit}.
+	 * that name, unsaved, and the waypoint takes the folder's spelling. Part of {@link #edit}, which
+	 * writes folders.json once for the batch. True if it made one.
 	 */
-	void useFolder(Waypoint waypoint) {
+	boolean useFolder(Waypoint waypoint) {
 		if (waypoint.folder.isEmpty()) {
-			return;
+			return false;
 		}
-		if (this.folderName(waypoint.folder) == null) {
-			this.addFolder(waypoint.folder);
-		}
+		boolean made = false;
 		String spelled = this.folderName(waypoint.folder);
-		if (spelled != null) {
-			waypoint.folder = spelled;
+		if (spelled == null) {
+			spelled = waypoint.folder.trim();
+			this.folders.custom.add(spelled);
+			made = true;
 		}
+		waypoint.folder = spelled;
+		return made;
 	}
 
 	/**
@@ -853,6 +924,7 @@ public final class WaypointStore {
 				GSON.toJson(this.folders, writer);
 			}
 			Files.move(temp, this.foldersFile, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+			folderSaves++;
 		} catch (IOException | RuntimeException e) {
 			Diorama.LOGGER.error("Couldn't save waypoint folders to {}", this.foldersFile, e);
 		}

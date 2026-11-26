@@ -2,6 +2,7 @@ package dev.diorama.waypoint;
 
 import dev.diorama.addon.AddonWorlds;
 import dev.diorama.api.NewWaypoint;
+import dev.diorama.api.ResourceId;
 import dev.diorama.api.WaypointEditor;
 import dev.diorama.api.WaypointUpdate;
 import java.util.ArrayList;
@@ -18,7 +19,8 @@ import org.jspecify.annotations.Nullable;
  * One addon's edit batch ({@link dev.diorama.api.Waypoints#edit}): each call is checked as the
  * addon makes it, against the waypoints as they are and what the batch did so far, and kept; the
  * store applies them all once the addon's code returns ({@link WaypointStore#edit}), so an addon
- * that throws halfway changes nothing.
+ * that throws halfway changes nothing: no waypoint, folder or order, and no save. The steps run
+ * only Diorama's code and the API's own final classes, never the addon's.
  */
 final class WaypointEdits implements WaypointEditor {
 	private final WaypointStore store;
@@ -28,6 +30,8 @@ final class WaypointEdits implements WaypointEditor {
 	private final Map<UUID, Waypoint> added = new HashMap<>();
 	private final Set<UUID> removed = new HashSet<>();
 	private boolean open = true;
+	/** Applying it made one of the player's folders, so folders.json is written once after. */
+	private boolean madeFolders;
 
 	WaypointEdits(WaypointStore store, String by) {
 		this.store = store;
@@ -41,12 +45,12 @@ final class WaypointEdits implements WaypointEditor {
 		Waypoint made = new Waypoint();
 		made.name = waypoint.name();
 		made.initials = waypoint.initials();
-		made.icon = waypoint.icon();
+		made.icon = waypoint.icon().map(ResourceId::toString).orElse("");
 		made.x = waypoint.pos().x();
 		made.y = waypoint.pos().y();
 		made.z = waypoint.pos().z();
 		made.dimension = waypoint.dimension().toString();
-		made.color = waypoint.color();
+		made.color = 0xFF000000 | waypoint.rgb();
 		made.visible = waypoint.visible();
 		made.folder = waypoint.folder();
 		made.kind = Waypoint.Kind.MANUAL;
@@ -54,7 +58,7 @@ final class WaypointEdits implements WaypointEditor {
 		this.added.put(made.id, made);
 		this.steps.add(() -> {
 			this.store.addEdited(made);
-			this.store.useFolder(made);
+			this.madeFolders |= this.store.useFolder(made);
 		});
 		return made.id;
 	}
@@ -70,13 +74,16 @@ final class WaypointEdits implements WaypointEditor {
 		this.steps.add(() -> {
 			update.name().ifPresent(name -> target.name = name);
 			update.initials().ifPresent(initials -> target.initials = initials);
-			update.icon().ifPresent(icon -> target.icon = icon);
+			update.icon().ifPresent(icon -> target.icon = icon.toString());
+			if (update.removesIcon()) {
+				target.icon = "";
+			}
 			update.pos().ifPresent(pos -> {
 				target.x = pos.x();
 				target.y = pos.y();
 				target.z = pos.z();
 			});
-			update.color().ifPresent(color -> target.color = color);
+			update.rgb().ifPresent(rgb -> target.color = 0xFF000000 | rgb);
 			update.visible().ifPresent(visible -> target.visible = visible);
 			update.dimension().ifPresent(dimension -> {
 				if (!dimension.toString().equals(target.dimension)) {
@@ -86,7 +93,7 @@ final class WaypointEdits implements WaypointEditor {
 			});
 			update.folder().ifPresent(folder -> {
 				target.folder = folder;
-				this.store.useFolder(target);
+				this.madeFolders |= this.store.useFolder(target);
 			});
 		});
 		return true;
@@ -138,6 +145,11 @@ final class WaypointEdits implements WaypointEditor {
 
 	boolean isEmpty() {
 		return this.steps.isEmpty();
+	}
+
+	/** Whether applying it made a folder. */
+	boolean madeFolders() {
+		return this.madeFolders;
 	}
 
 	/** Applies the batch to the store, in the order the addon made its calls. Nothing is saved yet. */

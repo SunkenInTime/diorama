@@ -733,7 +733,10 @@ public final class WaypointEditScreen extends Screen {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
-		if (store == null) {
+		// No world, or the waypoint was deleted while the editor was open (by an addon, say): saving
+		// closes the editor and changes nothing, as with no world, rather than bring it back or
+		// change a waypoint that's gone.
+		if (store == null || !this.isNew && !store.holds(this.waypoint)) {
 			this.onClose();
 			return;
 		}

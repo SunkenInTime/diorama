@@ -73,6 +73,7 @@ public final class Waystones {
 	private static volatile boolean failed;
 	private static @Nullable Method activated;
 	private static long nextCheck;
+	private static long nextPlacedCheck;
 
 	private Waystones() {
 	}
@@ -207,7 +208,11 @@ public final class Waystones {
 		});
 	}
 
-	/** False for a waystone the server still sends from where it stood before it was picked up. */
+	/**
+	 * False for a waystone the server still sends from where it stood before it was picked up. One
+	 * found placed again shows again, which counts as a change: what lists the waystones is out of
+	 * date.
+	 */
 	private static boolean placed(Waypoint waypoint) {
 		String spot = PICKED_UP.get(waypoint.id);
 		if (spot == null) {
@@ -215,6 +220,7 @@ public final class Waystones {
 		}
 		if (!spot.equals(spot(waypoint)) || blockThere(waypoint)) {
 			PICKED_UP.remove(waypoint.id);
+			changes++;
 			return true;
 		}
 		return false;
@@ -222,6 +228,9 @@ public final class Waystones {
 
 	/** Whether the client has the waystone's spot loaded with one of Waystones' blocks on it. */
 	private static boolean blockThere(Waypoint waypoint) {
+		if (BLOCK_BACK_FOR_TESTS.contains(waypoint.id)) {
+			return true;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		BlockPos pos = new BlockPos(waypoint.x, waypoint.y, waypoint.z);
 		if (mc.level == null || !mc.level.dimension().identifier().toString().equals(waypoint.dimension) || !mc.level.hasChunkAt(pos)) {
@@ -358,9 +367,21 @@ public final class Waystones {
 	}
 
 	private static void check() {
+		long now = System.currentTimeMillis();
+		if (!PICKED_UP.isEmpty() && now >= nextPlacedCheck) {
+			// A waystone placed again where it was picked up, which no event says: found here as
+			// well as when something lists it, so what only reads the count of changes sees it too.
+			nextPlacedCheck = now + CHECK_MS;
+			for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+				for (Waypoint waypoint : waystones.values()) {
+					if (PICKED_UP.containsKey(waypoint.id)) {
+						placed(waypoint);
+					}
+				}
+			}
+		}
 		Map<UUID, Waypoint> ordinary = KNOWN.get(WAYSTONE);
 		Method method = activated;
-		long now = System.currentTimeMillis();
 		if (failed || method == null || ordinary == null || ordinary.isEmpty() || now < nextCheck) {
 			return;
 		}
@@ -391,6 +412,35 @@ public final class Waystones {
 	/** The player left the server or joined another; the next one sends its own. */
 	public static void clear() {
 		KNOWN.clear();
+		changes++;
+	}
+
+	/** For the game tests, which have no Waystones mod: waystones whose block the client sees back at their spot. */
+	private static final Set<UUID> BLOCK_BACK_FOR_TESTS = new HashSet<>();
+
+	/** For the game tests: Waystones told the client of this waystone, as a full list of one kind would. */
+	public static void knownForTests(Waypoint waystone) {
+		waystone.kind = Waypoint.Kind.WAYSTONE;
+		KNOWN.computeIfAbsent("diorama:test_waystone", k -> new LinkedHashMap<>()).put(waystone.id, waystone);
+		changes++;
+	}
+
+	/**
+	 * For the game tests: the waystone was picked up with Silk Touch, and the server goes on
+	 * sending it where it stood ({@link #PICKED_UP}); with {@code back}, the client then sees its
+	 * block there again, which no event announces.
+	 */
+	public static void pickedUpForTests(UUID id, boolean back) {
+		if (back) {
+			BLOCK_BACK_FOR_TESTS.add(id);
+			return;
+		}
+		for (Map<UUID, Waypoint> waystones : KNOWN.values()) {
+			Waypoint waypoint = waystones.get(id);
+			if (waypoint != null) {
+				PICKED_UP.put(id, spot(waypoint));
+			}
+		}
 		changes++;
 	}
 }

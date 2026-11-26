@@ -130,7 +130,6 @@ public final class Waypoint {
 		copy.map = this.map;
 		copy.deleted = this.deleted;
 		copy.edited = this.edited;
-		copy.addedBy = this.addedBy;
 		copy.original = this;
 		return copy;
 	}

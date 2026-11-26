@@ -60,6 +60,11 @@ public final class WorldKey {
 	 * which level doesn't depend on how fast the machine runs the game.
 	 */
 	public static volatile boolean waitForIdsForever;
+	/**
+	 * For tests: no world is known, as while a server's level waits for its ID, without the wait.
+	 * Singleplayer never waits, so this is the only way a test there gets one.
+	 */
+	public static volatile boolean unknownForTests;
 	/** In a singleplayer save: the ID that tells it from a world saved under the same name before. */
 	private static final String SAVE_ID = "diorama-world-id.txt";
 	/** In a singleplayer world's folder: the ID of the save it was made for. */
@@ -104,6 +109,9 @@ public final class WorldKey {
 
 	/** The world a level belongs to, or null outside one or while waiting for its name. */
 	public static @Nullable String current(@Nullable ClientLevel level) {
+		if (unknownForTests) {
+			return null;
+		}
 		Minecraft mc = Minecraft.getInstance();
 		IntegratedServer server = mc.getSingleplayerServer();
 		if (server != null) {

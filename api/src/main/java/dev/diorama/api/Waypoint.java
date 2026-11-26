@@ -18,7 +18,7 @@ public interface Waypoint {
 		MANUAL,
 		/** Where the player died. Diorama keeps the last few and removes one the player comes back to. */
 		DEATH,
-		/** The bed the player last slept in, kept up to date by Diorama: one per dimension. */
+		/** The bed the player last slept in, kept up to date by Diorama: one per dimension. Addons can read it, not change it. */
 		BED,
 		/** Set from the map's menu and never saved: it goes when the player leaves the world or switches the saved map. */
 		TEMPORARY,
@@ -34,7 +34,12 @@ public interface Waypoint {
 		OTHER,
 	}
 
-	/** {@return its ID, the same for as long as the waypoint exists, across saves and restarts} */
+	/**
+	 * {@return its ID, the same for as long as the waypoint exists, across saves and restarts}
+	 * Diorama picks it. A hand-edited {@code waypoints.json} can give two waypoints the same ID:
+	 * both are in {@link Waypoints#all}, but {@link Waypoints#get}, the editor and change events
+	 * only know the first of them in {@code all()}'s order.
+	 */
 	UUID id();
 
 	/**
@@ -50,10 +55,10 @@ public interface Waypoint {
 	String initials();
 
 	/**
-	 * {@return the icon its pin shows instead of initials, as a resource ID such as
-	 * {@code diorama:home}, or empty for none}
+	 * {@return the icon its pin shows instead of initials, such as {@code diorama:home}, or empty
+	 * for none} A saved icon that isn't a valid resource ID reads as none.
 	 */
-	String icon();
+	Optional<ResourceId> icon();
 
 	/** {@return the block it marks} */
 	BlockCoord pos();
@@ -61,20 +66,25 @@ public interface Waypoint {
 	/** {@return the dimension it is in} */
 	DimensionId dimension();
 
-	/** {@return its colour, as ARGB} */
-	int color();
+	/** {@return its colour, as 0xRRGGBB: pins are always drawn opaque} */
+	int rgb();
 
 	/**
 	 * {@return whether the player has it shown} This is the waypoint's own switch; a folder the
-	 * player hid hides it too, which this doesn't say.
+	 * player hid hides it too, which this doesn't say, and hiding or showing a whole folder sends
+	 * no change event.
 	 */
 	boolean visible();
 
-	/** {@return the name of the player's folder it is in, or empty for its dimension's own folder} */
+	/** {@return the name of the player's folder it is in, or empty for its dimension's own} */
 	Optional<String> folder();
 
-	/** {@return the ID of the saved map it was made on, as {@link MapWorld#mapId(DimensionId)} gives it} */
-	String mapId();
+	/**
+	 * {@return the saved map it is on, in its {@link #dimension}} Waystones aren't kept on a saved
+	 * map: Waystones' list shows on every one of the dimension's maps, and reports
+	 * {@link MapId#MAIN}.
+	 */
+	MapId mapId();
 
 	/** {@return what made it} */
 	Kind kind();

@@ -5,8 +5,10 @@ import java.util.Optional;
 
 /**
  * One change to a world's waypoints, as a {@link WaypointListener} hears it: one edit batch of an
- * addon's, or one thing the player or Diorama did, such as saving the waypoint editor or a death
- * pin replacing the oldest. Diorama implements this; don't.
+ * addon's, or one thing the player or Diorama did, such as saving the waypoint editor, renaming a
+ * folder (a change to each waypoint in it), or a death pin replacing the oldest. Each
+ * {@link WaypointChange} holds the waypoint as it was just before and just after this change,
+ * whatever has happened since. Diorama implements this; don't.
  */
 public interface WaypointChanges {
 	/**

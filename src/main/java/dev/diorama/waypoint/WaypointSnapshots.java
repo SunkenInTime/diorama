@@ -5,12 +5,19 @@ import dev.diorama.Maps;
 import dev.diorama.Settings;
 import dev.diorama.api.BlockCoord;
 import dev.diorama.api.DimensionId;
+import dev.diorama.api.MapId;
+import dev.diorama.api.ResourceId;
 import dev.diorama.api.WaypointChange;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -21,18 +28,26 @@ import org.jspecify.annotations.Nullable;
  * the waypoint list shows, its waystones included, as snapshots that never change. The list is
  * made again only after something changed, and a waypoint that didn't change keeps its snapshot,
  * so reading it costs nothing and comparing two lists says what changed. Client thread only.
+ *
+ * <p>It's out of date ({@link #pending}) when the store's {@link WaypointStore#revision} moved on
+ * since it was made, or Waystones' count of changes, or the portal pin setting: every change that
+ * can change what the list holds moves one of those three.
  */
 final class WaypointSnapshots {
-	/** Dimension IDs by the string waypoints keep, so the snapshots share them; null for one that isn't valid. */
+	/** Dimension IDs by the string waypoints keep, so the snapshots share them; empty for one that isn't valid. */
 	private static final Map<String, Optional<DimensionId>> DIMENSIONS = new HashMap<>();
+	/** Icons by the string waypoints keep; empty for none, or one that isn't a resource ID. */
+	private static final Map<String, Optional<ResourceId>> ICONS = new HashMap<>();
+	/** Map IDs by Diorama's own, which is empty for the main map. */
+	private static final Map<String, MapId> MAPS = new HashMap<>();
 	private static final Set<String> WARNED = new HashSet<>();
 
 	private final WaypointStore store;
 	private List<dev.diorama.api.Waypoint> list = List.of();
+	/** The first snapshot in the list with each ID. */
 	private Map<UUID, Snapshot> byId = Map.of();
-	/** A change was made without anyone listening, so the list is made again when next read. */
-	private boolean stale = true;
-	/** What the list was made with of what changes outside the store: Waystones' count of changes, and the portal pin setting. */
+	/** What the list was made from: the store's revision, Waystones' count of changes, and the portal pin setting. */
+	private int revision = -1;
 	private int waystoneChanges;
 	private boolean portalPins;
 
@@ -45,7 +60,7 @@ final class WaypointSnapshots {
 		return this.list;
 	}
 
-	/** One waypoint of the list as last made. */
+	/** One waypoint of the list as last made: the first with this ID. */
 	Optional<dev.diorama.api.Waypoint> get(UUID id) {
 		Snapshot snapshot = this.byId.get(id);
 		return snapshot == null ? Optional.empty() : snapshot.self;
@@ -56,22 +71,14 @@ final class WaypointSnapshots {
 		return this.byId.get(id);
 	}
 
-	/** Something changed that the list will show, with no one listening for changes. */
-	void stale() {
-		this.stale = true;
+	/** Whether something changed since the list was made that may change it. */
+	boolean pending() {
+		return this.revision != this.store.revision() || this.waystoneChanges != Waystones.changes() || this.portalPins != Settings.get().portalMarkers;
 	}
 
-	/** Whether Waystones or the portal pin setting changed since the list was made. */
-	boolean outsideChanged() {
-		return this.waystoneChanges != Waystones.changes() || this.portalPins != Settings.get().portalMarkers;
-	}
-
-	/**
-	 * Makes the list again if a change was made since, and with {@code outside} if Waystones or the
-	 * portal pin setting changed too, telling no one.
-	 */
-	void refresh(boolean outside) {
-		if (this.stale || outside && this.outsideChanged()) {
+	/** Makes the list again if it's out of date, telling no one. */
+	void refresh() {
+		if (this.pending()) {
 			this.rebuild(false);
 		}
 	}
@@ -80,22 +87,26 @@ final class WaypointSnapshots {
 	 * Makes the list again from the store. With {@code compare}, returns what changed since it was
 	 * last made, in the list's order, with the removed ones last; otherwise null. A waypoint that
 	 * didn't change keeps its snapshot, and if none did, the list itself stays the same instance.
+	 * A second waypoint with an ID already listed (a hand-edited file can have one) is listed, but
+	 * the ID stays the first's: comparing goes by the first with each ID.
 	 */
 	@Nullable List<WaypointChange> rebuild(boolean compare) {
-		this.waystoneChanges = Waystones.changes();
+		this.revision = this.store.revision();
 		this.portalPins = Settings.get().portalMarkers;
-		this.stale = false;
 		List<Waypoint> listed = this.store.listed();
+		// After listing, which can count a change itself (a waystone placed again).
+		this.waystoneChanges = Waystones.changes();
 		List<Snapshot> next = new ArrayList<>(listed.size());
 		Map<UUID, Snapshot> nextById = new HashMap<>(listed.size() * 4 / 3 + 1);
+		Map<UUID, Snapshot> oldById = this.byId;
 		for (Waypoint waypoint : listed) {
 			DimensionId dimension = dimension(waypoint.dimension);
 			if (dimension == null) {
 				continue;
 			}
 			String folder = waypoint.kind == Waypoint.Kind.WAYSTONE ? null : this.store.folderName(waypoint.folder);
-			Snapshot old = this.byId.get(waypoint.id);
-			Snapshot snapshot = old != null && old.matches(waypoint, folder) ? old : new Snapshot(waypoint, dimension, folder);
+			Snapshot old = oldById.get(waypoint.id);
+			Snapshot snapshot = old != null && old.source == waypoint && old.sameAs(waypoint, folder) ? old : new Snapshot(waypoint, dimension, folder);
 			next.add(snapshot);
 			nextById.putIfAbsent(waypoint.id, snapshot);
 		}
@@ -104,27 +115,28 @@ final class WaypointSnapshots {
 			changes = new ArrayList<>();
 			for (Snapshot now : next) {
 				if (nextById.get(now.id) != now) {
-					// A second waypoint with an ID already listed, as a hand-edited file can have.
 					continue;
 				}
-				Snapshot before = this.byId.get(now.id);
+				Snapshot before = oldById.get(now.id);
 				if (before == null) {
 					changes.add(new Change(WaypointChange.Type.ADDED, now.id, Optional.empty(), now.self));
-				} else if (before != now) {
+				} else if (before != now && !before.sameAs(now.source, now.folderName)) {
+					// The same ID may now be another waypoint (its first went, or the waystone came again): told only if what addons read changed.
 					changes.add(new Change(WaypointChange.Type.CHANGED, now.id, before.self, now.self));
 				}
 			}
 			for (dev.diorama.api.Waypoint was : this.list) {
 				Snapshot before = (Snapshot) was;
-				if (this.byId.get(before.id) == before && !nextById.containsKey(before.id)) {
+				if (oldById.get(before.id) == before && !nextById.containsKey(before.id)) {
 					changes.add(new Change(WaypointChange.Type.REMOVED, before.id, before.self, Optional.empty()));
 				}
 			}
 		}
-		if (!sameAs(next)) {
+		if (!this.sameAs(next)) {
 			this.list = List.copyOf(next);
-			this.byId = nextById;
 		}
+		// Always the new index: the same snapshots in the same order can stand for other waypoints.
+		this.byId = nextById;
 		return changes;
 	}
 
@@ -156,9 +168,51 @@ final class WaypointSnapshots {
 		return known.orElse(null);
 	}
 
-	/** The map ID addons see: {@code main} for a dimension's first map, whose ID is empty. */
-	static String mapId(String id) {
-		return id.isEmpty() ? "main" : id;
+	private static Optional<ResourceId> icon(String icon) {
+		Optional<ResourceId> known = ICONS.get(icon);
+		if (known == null) {
+			try {
+				known = icon.isEmpty() ? Optional.empty() : Optional.of(ResourceId.of(icon));
+			} catch (IllegalArgumentException e) {
+				known = Optional.empty();
+			}
+			ICONS.put(icon, known);
+		}
+		return known;
+	}
+
+	/**
+	 * The map ID addons see for one of Diorama's: {@link MapId#MAIN} for a dimension's first map,
+	 * whose ID is empty. Diorama makes the others from hex digits; one a hand edit left that
+	 * {@link MapId} wouldn't take is given hex digits of its own, the same each time.
+	 */
+	static MapId mapId(String id) {
+		if (id.isEmpty()) {
+			return MapId.MAIN;
+		}
+		MapId known = MAPS.get(id);
+		if (known == null) {
+			try {
+				known = MapId.of(id);
+			} catch (IllegalArgumentException e) {
+				known = MapId.of(hash(id));
+			}
+			if (known.equals(MapId.MAIN)) {
+				// A map Diorama keeps under the name "main" isn't the first one.
+				known = MapId.of(hash(id));
+			}
+			MAPS.put(id, known);
+		}
+		return known;
+	}
+
+	private static String hash(String id) {
+		try {
+			byte[] hash = MessageDigest.getInstance("SHA-256").digest(("map:" + id).getBytes(StandardCharsets.UTF_8));
+			return "x" + HexFormat.of().formatHex(hash, 0, 8);
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
 	}
 
 	private static dev.diorama.api.Waypoint.Kind kind(Waypoint.Kind kind) {
@@ -181,15 +235,17 @@ final class WaypointSnapshots {
 		final UUID id;
 		private final String name;
 		private final String initials;
-		private final String icon;
+		private final String iconName;
+		private final Optional<ResourceId> icon;
 		private final BlockCoord pos;
 		private final String dimensionName;
 		private final DimensionId dimension;
 		private final int color;
 		private final boolean visible;
-		private final @Nullable String folderName;
+		final @Nullable String folderName;
 		private final Optional<String> folder;
 		private final String map;
+		private final MapId mapId;
 		private final Waypoint.Kind internalKind;
 		private final Kind kind;
 		private final @Nullable String addedByName;
@@ -201,7 +257,8 @@ final class WaypointSnapshots {
 			this.id = waypoint.id;
 			this.name = waypoint.name;
 			this.initials = waypoint.initials;
-			this.icon = waypoint.icon;
+			this.iconName = waypoint.icon;
+			this.icon = WaypointSnapshots.icon(waypoint.icon);
 			this.pos = BlockCoord.of(waypoint.x, waypoint.y, waypoint.z);
 			this.dimensionName = waypoint.dimension;
 			this.dimension = dimension;
@@ -209,7 +266,9 @@ final class WaypointSnapshots {
 			this.visible = waypoint.visible;
 			this.folderName = folder;
 			this.folder = Optional.ofNullable(folder);
-			this.map = Maps.id(waypoint.map);
+			// A waystone keeps no map: it's on every one, and reads as the main.
+			this.map = waypoint.kind == Waypoint.Kind.WAYSTONE ? Maps.MAIN : Maps.id(waypoint.map);
+			this.mapId = WaypointSnapshots.mapId(this.map);
 			this.internalKind = waypoint.kind;
 			this.kind = WaypointSnapshots.kind(waypoint.kind);
 			this.addedByName = waypoint.addedBy;
@@ -217,12 +276,13 @@ final class WaypointSnapshots {
 			this.self = Optional.of(this);
 		}
 
-		/** Whether this still says what {@code waypoint} is, in the folder it's in now. */
-		boolean matches(Waypoint waypoint, @Nullable String folder) {
-			return this.id.equals(waypoint.id) && this.name.equals(waypoint.name) && this.initials.equals(waypoint.initials) && this.icon.equals(waypoint.icon)
+		/** Whether this says what {@code waypoint} says, in the folder it's in now: what addons read is the same. */
+		boolean sameAs(Waypoint waypoint, @Nullable String folder) {
+			return this.id.equals(waypoint.id) && this.name.equals(waypoint.name) && this.initials.equals(waypoint.initials) && this.iconName.equals(waypoint.icon)
 				&& this.pos.x() == waypoint.x && this.pos.y() == waypoint.y && this.pos.z() == waypoint.z && this.dimensionName.equals(waypoint.dimension)
-				&& this.color == waypoint.color && this.visible == waypoint.visible && java.util.Objects.equals(this.folderName, folder)
-				&& this.map.equals(Maps.id(waypoint.map)) && this.internalKind == waypoint.kind && java.util.Objects.equals(this.addedByName, waypoint.addedBy);
+				&& this.color == waypoint.color && this.visible == waypoint.visible && Objects.equals(this.folderName, folder)
+				&& this.map.equals(waypoint.kind == Waypoint.Kind.WAYSTONE ? Maps.MAIN : Maps.id(waypoint.map)) && this.internalKind == waypoint.kind
+				&& Objects.equals(this.addedByName, waypoint.addedBy);
 		}
 
 		@Override
@@ -241,7 +301,7 @@ final class WaypointSnapshots {
 		}
 
 		@Override
-		public String icon() {
+		public Optional<ResourceId> icon() {
 			return this.icon;
 		}
 
@@ -256,8 +316,8 @@ final class WaypointSnapshots {
 		}
 
 		@Override
-		public int color() {
-			return this.color;
+		public int rgb() {
+			return this.color & 0xFFFFFF;
 		}
 
 		@Override
@@ -271,8 +331,8 @@ final class WaypointSnapshots {
 		}
 
 		@Override
-		public String mapId() {
-			return WaypointSnapshots.mapId(this.map);
+		public MapId mapId() {
+			return this.mapId;
 		}
 
 		@Override

@@ -3,12 +3,15 @@ package dev.diorama.addon;
 import dev.diorama.Maps;
 import dev.diorama.api.DimensionId;
 import dev.diorama.api.Handle;
+import dev.diorama.api.MapId;
 import dev.diorama.api.MapWorld;
 import dev.diorama.api.Waypoint;
 import dev.diorama.api.WaypointChanges;
 import dev.diorama.api.WaypointEditor;
 import dev.diorama.api.WaypointListener;
 import dev.diorama.api.Waypoints;
+import dev.diorama.api.WorldId;
+import dev.diorama.waypoint.WaypointStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -17,16 +20,25 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * One addon's view of the world open now ({@link AddonWorlds.Context}): what it reads and changes
- * goes to the world's store, and what it changes is put down to it. It closes with the world, or
- * when the addon closes the handle it got it through, or fails.
+ * One addon's view of one opening of a world ({@link AddonWorlds.Context}): what it reads and
+ * changes goes to that world's store, and what it changes is put down to it. Every call checks
+ * first that the world is still open and is still the one Diorama is in, so it can never reach a
+ * store it wasn't opened for. It closes with the world, or when the addon closes the handle it
+ * got it through, or fails.
  */
 final class AddonWorld implements MapWorld, Waypoints {
 	final Addon addon;
 	final AddonWorlds.Context context;
 	final AddonWorlds.Registration registration;
 	private final List<Listen> listeners = new ArrayList<>();
-	private boolean open = true;
+	/** Its world is open, and the addon still holds it. */
+	boolean open = true;
+	/** The addon let go of it, or failed: it's told nothing more, closed included. */
+	boolean stopped;
+	/** Its opened was told; until then nothing else is. */
+	boolean told;
+	/** The number of its opened event: it hears what's queued after. */
+	long since;
 
 	AddonWorld(Addon addon, AddonWorlds.Context context, AddonWorlds.Registration registration) {
 		this.addon = addon;
@@ -34,86 +46,105 @@ final class AddonWorld implements MapWorld, Waypoints {
 		this.registration = registration;
 	}
 
-	private void checkOpen() {
+	private void check() {
 		Addon.checkThread();
-		if (!this.open) {
-			throw new IllegalStateException("This world has closed in Diorama; use the MapWorld the next WorldListener.opened hands over");
+		if (!this.open || !this.context.valid()) {
+			throw new IllegalStateException("This MapWorld is closed: the player left the world, joined it again, or Diorama doesn't know which world they're in yet. "
+				+ "Use the MapWorld the next WorldListener.opened hands over");
 		}
 	}
 
+	private WaypointStore store() {
+		return this.context.store;
+	}
+
 	@Override
-	public String worldId() {
+	public WorldId worldId() {
 		Addon.checkThread();
 		return this.context.worldId;
 	}
 
 	@Override
 	public DimensionId dimension() {
-		this.checkOpen();
+		this.check();
 		return this.context.dimension;
 	}
 
 	@Override
-	public String mapId() {
-		this.checkOpen();
+	public MapId mapId() {
+		this.check();
 		return this.mapId(this.context.dimension);
 	}
 
 	@Override
-	public String mapId(DimensionId dimension) {
-		this.checkOpen();
+	public MapId mapId(DimensionId dimension) {
+		this.check();
 		Objects.requireNonNull(dimension, "dimension");
-		String id = Maps.of(this.context.store.worldKey()).active(dimension.toString());
-		return id.isEmpty() ? "main" : id;
+		return WaypointStore.mapId(Maps.of(this.store().worldKey()).active(dimension.toString()));
 	}
 
 	@Override
 	public Waypoints waypoints() {
-		this.checkOpen();
+		this.check();
 		return this;
 	}
 
 	@Override
 	public boolean isOpen() {
 		Addon.checkThread();
-		return this.open;
+		return this.open && this.context.valid();
 	}
 
 	@Override
 	public List<Waypoint> all() {
-		this.checkOpen();
-		return this.context.store.published();
+		this.check();
+		return this.store().published();
 	}
 
 	@Override
 	public Optional<Waypoint> get(UUID id) {
-		this.checkOpen();
+		this.check();
 		Objects.requireNonNull(id, "id");
-		return this.context.store.published(id);
+		return this.store().published(id);
 	}
 
 	@Override
 	public void edit(Consumer<WaypointEditor> edits) {
-		this.checkOpen();
+		this.check();
 		Objects.requireNonNull(edits, "edits");
 		if (this.addon.failed()) {
 			return;
 		}
-		AddonWorlds.checkRound();
-		this.context.store.edit(this.addon.id(), edits);
+		int depth = AddonWorlds.depth();
+		if (depth > MAX_EDIT_DEPTH) {
+			IllegalStateException refused = new IllegalStateException("This edit would be " + depth + " answers deep, past Waypoints.MAX_EDIT_DEPTH (" + MAX_EDIT_DEPTH
+				+ "): waypoint listeners are answering each other's changes, or their own, for ever. It was refused");
+			this.addon.fail("Waypoints.edit", refused);
+			throw refused;
+		}
+		this.store().edit(this.addon.id(), editor -> {
+			try {
+				edits.accept(editor);
+			} catch (Throwable thrown) {
+				// The addon's own code: it's switched off, and the batch goes nowhere.
+				this.addon.fail("a Waypoints.edit batch", thrown);
+				throw Addon.rethrow(thrown);
+			}
+		});
 	}
 
 	@Override
 	public Handle listen(WaypointListener listener) {
-		this.checkOpen();
+		this.check();
 		Objects.requireNonNull(listener, "listener");
 		Listen listen = new Listen(this, listener);
 		if (this.addon.failed()) {
 			listen.open = false;
 			return listen;
 		}
-		// What it hears from here is compared with the waypoints as they are now.
-		this.context.store.listenFromNow();
+		// Anything changed but not yet queued is queued first, for those listening already; this one hears what comes after.
+		this.store().beforeListen(this.context.listeners > 0);
+		listen.since = AddonWorlds.sequence();
 		this.listeners.add(listen);
 		this.context.listeners++;
 		this.addon.keep(listen);
@@ -128,12 +159,10 @@ final class AddonWorld implements MapWorld, Waypoints {
 	}
 
 	void tellMapChanged() {
-		if (this.open) {
-			this.addon.call("WorldListener.mapChanged", () -> {
-				this.registration.listener.mapChanged(this);
-				return Boolean.TRUE;
-			});
-		}
+		this.addon.call("WorldListener.mapChanged", () -> {
+			this.registration.listener.mapChanged(this);
+			return Boolean.TRUE;
+		});
 	}
 
 	void tellClosed() {
@@ -143,10 +172,10 @@ final class AddonWorld implements MapWorld, Waypoints {
 		});
 	}
 
-	/** Tells each of its listeners still open about a change. */
-	void tell(WaypointChanges changes) {
+	/** Tells each of its listeners that was listening before this change was made, and is still open. */
+	void tell(WaypointChanges changes, long seq) {
 		for (Listen listen : List.copyOf(this.listeners)) {
-			if (listen.open && this.open) {
+			if (listen.open && listen.since < seq && this.open) {
 				this.addon.call("a WaypointListener", () -> {
 					listen.listener.changed(changes);
 					return Boolean.TRUE;
@@ -155,9 +184,20 @@ final class AddonWorld implements MapWorld, Waypoints {
 		}
 	}
 
-	/** Closes it and its listeners: the world closed, or the addon let go of it. */
-	void release() {
+	/** The world closed: it and its listeners close, and its closed is queued. */
+	void worldClosed() {
 		this.open = false;
+		this.releaseListeners();
+	}
+
+	/** The addon let go of the handle it got this through, or failed: closed, and told nothing more. */
+	void stop() {
+		this.open = false;
+		this.stopped = true;
+		this.releaseListeners();
+	}
+
+	private void releaseListeners() {
 		for (Listen listen : List.copyOf(this.listeners)) {
 			if (listen.release()) {
 				this.addon.drop(listen);
@@ -170,6 +210,8 @@ final class AddonWorld implements MapWorld, Waypoints {
 		final AddonWorld world;
 		final WaypointListener listener;
 		boolean open = true;
+		/** The number of the last event queued when it was added: it hears the ones after. */
+		long since;
 
 		Listen(AddonWorld world, WaypointListener listener) {
 			this.world = world;

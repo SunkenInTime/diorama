@@ -1,55 +1,58 @@
 package dev.diorama.api;
 
 /**
- * The world the player is in, as Diorama keeps it: its waypoints and which saved map each
- * dimension is on. Handed to a {@link WorldListener}, and open until its {@link WorldListener#closed}
- * call. Each addon gets its own, so what it changes is put down to it. Diorama implements this;
- * don't.
+ * One world the player is in, as Diorama keeps it: its waypoints and which saved map each
+ * dimension is on. Handed to {@link WorldListener#opened}, and good for that one opening of the
+ * world only, until {@link WorldListener#closed}. Each addon gets its own, so what it changes is
+ * put down to it. Diorama implements this; don't.
  *
- * <p>Once closed, {@link #worldId} and {@link #isOpen} still answer, and every other method
- * throws {@link IllegalStateException}. Every method throws {@link IllegalStateException} off the
- * client thread.
+ * <p>A {@code MapWorld} only ever reads and writes the waypoints it was opened for. As soon as
+ * the player is in another world, or rejoined this one, or Diorama no longer knows which world
+ * they are in (a server that names its worlds can take a moment to name the next one after a
+ * dimension change), every method but {@link #worldId} and {@link #isOpen} throws
+ * {@link IllegalStateException}, even before {@link WorldListener#closed} has been called. When the
+ * world is known again, {@link WorldListener#opened} hands over a new {@code MapWorld}, which may
+ * have the same {@link #worldId}. The same holds for the {@link Waypoints} it hands out. Every
+ * method throws {@link IllegalStateException} off the client thread.
  */
 public interface MapWorld {
 	/**
-	 * {@return an ID for this world, the same each time the player comes back to it} It is
-	 * opaque: letters and digits only, safe in a file name, and not something to take apart. Two
-	 * worlds Diorama keeps apart have different IDs; a world Diorama can't tell from another (two
-	 * servers on one network that share a seed, say) shares its ID.
+	 * {@return which world this is} The same each time the player comes back to the world; see
+	 * {@link WorldId} for what changes it.
 	 */
-	String worldId();
+	WorldId worldId();
 
 	/**
-	 * {@return the dimension the player is in}
+	 * {@return the dimension the player is in, as {@link WorldListener#opened} or the last
+	 * {@link WorldListener#mapChanged} told it}
 	 *
-	 * @throws IllegalStateException once the world has closed
+	 * @throws IllegalStateException once this world has closed
 	 */
 	DimensionId dimension();
 
 	/**
-	 * {@return the saved map the player's dimension is on} Opaque, letters and digits only, and
-	 * the same each time; {@code main} for a dimension's first map.
+	 * {@return the saved map the player's dimension is on now}
 	 *
-	 * @throws IllegalStateException once the world has closed
+	 * @throws IllegalStateException once this world has closed
 	 */
-	String mapId();
+	MapId mapId();
 
 	/**
-	 * The saved map a dimension is on, as for {@link #mapId()}.
+	 * The saved map a dimension is on now, as for {@link #mapId()}.
 	 *
 	 * @param dimension any dimension, visited or not
-	 * @return its saved map's ID; {@code main} for one with a single map or none yet
-	 * @throws IllegalStateException once the world has closed
+	 * @return its saved map's ID; {@link MapId#MAIN} for one with a single map or none yet
+	 * @throws IllegalStateException once this world has closed
 	 */
-	String mapId(DimensionId dimension);
+	MapId mapId(DimensionId dimension);
 
 	/**
 	 * {@return the waypoints of this world}
 	 *
-	 * @throws IllegalStateException once the world has closed
+	 * @throws IllegalStateException once this world has closed
 	 */
 	Waypoints waypoints();
 
-	/** {@return whether the world is still open} */
+	/** {@return whether this opening of the world is still the one Diorama is using} */
 	boolean isOpen();
 }

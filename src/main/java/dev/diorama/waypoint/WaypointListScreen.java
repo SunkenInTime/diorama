@@ -162,6 +162,11 @@ public final class WaypointListScreen extends Screen {
 	 */
 	private int waystoneChanges;
 	private boolean hadWaystones;
+	/**
+	 * The store's {@link WaypointStore#revision} the rows were made from: when it moves on without
+	 * this screen (an addon changed the waypoints), the screen is made again, as for waystones.
+	 */
+	private int storeRevision;
 	/** Set by the add-waypoint key; tick() opens the editor. */
 	private boolean newWaypointPressed;
 	private boolean xaeroRead;
@@ -406,6 +411,7 @@ public final class WaypointListScreen extends Screen {
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
 		this.hadWaystones = store != null && !store.waystones().isEmpty();
+		this.storeRevision = store == null ? 0 : store.revision();
 		this.folderArmed = false;
 		this.folderActions.clear();
 		this.folderMenu = null;
@@ -1453,6 +1459,13 @@ public final class WaypointListScreen extends Screen {
 				this.resort(store);
 			}
 		}
+		// Waypoints changed while the list is open, not by this screen: an addon's edit, say. A row
+		// for one deleted goes, and the selection with it; one changed shows as it is now.
+		WaypointStore store = WaypointStore.get();
+		if (store != null && store.revision() != this.storeRevision) {
+			this.folderMenu = null;
+			this.rebuildWidgets();
+		}
 		if (this.newWaypointPressed) {
 			this.newWaypointPressed = false;
 			this.newWaypoint();
@@ -1495,6 +1508,8 @@ public final class WaypointListScreen extends Screen {
 		} else {
 			store.setVisible(waypoint, !waypoint.visible);
 		}
+		// This screen's own change, followed here and not by making the screen again.
+		this.storeRevision = store.revision();
 		// Hidden waypoints go last, as in Xaero's: the row moves, and the list follows it so the row
 		// and its buttons stay in view.
 		this.resort(store);

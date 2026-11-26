@@ -127,6 +127,12 @@ public final class MapScreen extends Screen {
 	/** The status line as drawn last frame. */
 	private String statusShown = "";
 	private List<WaypointOverlay.Pin> pins = List.of();
+	/**
+	 * The waypoint the open menu is for, and the store's revision when it opened: a menu whose
+	 * waypoint was deleted since (by an addon, say) closes, rather than act on one that's gone.
+	 */
+	private @Nullable Waypoint menuWaypoint;
+	private int menuRevision;
 	private MapViewport.@Nullable View lastView;
 	/** Where the current mouse press started, to tell a click from a drag. */
 	private double pressX;
@@ -394,6 +400,19 @@ public final class MapScreen extends Screen {
 			this.otherMap.map().update();
 		}
 		CreateTrains.tick(true);
+		Waypoint menuFor = this.menuWaypoint;
+		if (menuFor != null) {
+			WaypointStore store = WaypointStore.get();
+			if (this.menu == null || store == null) {
+				this.menuWaypoint = null;
+			} else if (store.revision() != this.menuRevision) {
+				this.menuRevision = store.revision();
+				if (menuFor.kind != Waypoint.Kind.WAYSTONE && !store.holds(menuFor)) {
+					this.menu = null;
+					this.menuWaypoint = null;
+				}
+			}
+		}
 	}
 
 	/** Puts the zoom buttons beside the gauge on the cave map, in the corner otherwise. */
@@ -914,6 +933,9 @@ public final class MapScreen extends Screen {
 		WaypointOverlay.Pin pin = WaypointOverlay.under(this.pins, screenX, screenY);
 		if (pin != null) {
 			this.menu = new MapMenu(this.waypointItems(pin.waypoint()), this.font, screenX, screenY, this.width, this.height);
+			WaypointStore store = WaypointStore.get();
+			this.menuWaypoint = pin.waypoint().source();
+			this.menuRevision = store == null ? 0 : store.revision();
 			return;
 		}
 		CompletableFuture<MapLevel.Spot> spot = this.spotAt(screenX, screenY, true);

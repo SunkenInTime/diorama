@@ -18,8 +18,9 @@ public final class WaypointUpdate {
 	private final @Nullable DimensionId dimension;
 	private final @Nullable BlockCoord pos;
 	private final @Nullable String initials;
-	private final @Nullable String icon;
-	private final @Nullable Integer color;
+	private final @Nullable ResourceId icon;
+	private final boolean removesIcon;
+	private final @Nullable Integer rgb;
 	private final @Nullable Boolean visible;
 	private final @Nullable String folder;
 
@@ -29,7 +30,8 @@ public final class WaypointUpdate {
 		this.pos = builder.pos;
 		this.initials = builder.initials;
 		this.icon = builder.icon;
-		this.color = builder.color;
+		this.removesIcon = builder.removesIcon;
+		this.rgb = builder.rgb;
 		this.visible = builder.visible;
 		this.folder = builder.folder;
 	}
@@ -59,14 +61,19 @@ public final class WaypointUpdate {
 		return Optional.ofNullable(this.initials);
 	}
 
-	/** {@return the new icon, if it changes} */
-	public Optional<String> icon() {
+	/** {@return the new icon, if it gets one; see also {@link #removesIcon}} */
+	public Optional<ResourceId> icon() {
 		return Optional.ofNullable(this.icon);
 	}
 
-	/** {@return the new colour, if it changes} */
-	public OptionalInt color() {
-		return this.color == null ? OptionalInt.empty() : OptionalInt.of(this.color);
+	/** {@return whether it loses its icon, so its pin shows its initials} */
+	public boolean removesIcon() {
+		return this.removesIcon;
+	}
+
+	/** {@return the new colour as 0xRRGGBB, if it changes} */
+	public OptionalInt rgb() {
+		return this.rgb == null ? OptionalInt.empty() : OptionalInt.of(this.rgb);
 	}
 
 	/** {@return whether it will be shown, if that changes} */
@@ -85,8 +92,9 @@ public final class WaypointUpdate {
 		private @Nullable DimensionId dimension;
 		private @Nullable BlockCoord pos;
 		private @Nullable String initials;
-		private @Nullable String icon;
-		private @Nullable Integer color;
+		private @Nullable ResourceId icon;
+		private boolean removesIcon;
+		private @Nullable Integer rgb;
 		private @Nullable Boolean visible;
 		private @Nullable String folder;
 
@@ -145,26 +153,38 @@ public final class WaypointUpdate {
 		}
 
 		/**
-		 * Changes its icon.
+		 * Gives it this icon. Undoes {@link #noIcon}.
 		 *
 		 * @param icon as for {@link NewWaypoint.Builder#icon}
 		 * @return this builder
-		 * @throws IllegalArgumentException if it isn't a resource ID
 		 * @throws NullPointerException if {@code icon} is null
 		 */
-		public Builder icon(String icon) {
-			this.icon = Checks.icon(icon);
+		public Builder icon(ResourceId icon) {
+			this.icon = Objects.requireNonNull(icon, "icon");
+			this.removesIcon = false;
+			return this;
+		}
+
+		/**
+		 * Takes its icon away, so its pin shows its initials. Undoes {@link #icon}.
+		 *
+		 * @return this builder
+		 */
+		public Builder noIcon() {
+			this.icon = null;
+			this.removesIcon = true;
 			return this;
 		}
 
 		/**
 		 * Changes its colour.
 		 *
-		 * @param color as for {@link NewWaypoint.Builder#color}
+		 * @param rgb as for {@link NewWaypoint.Builder#rgb}: {@code 0xRRGGBB}
 		 * @return this builder
+		 * @throws IllegalArgumentException if anything is set above the low 24 bits
 		 */
-		public Builder color(int color) {
-			this.color = Checks.color(color);
+		public Builder rgb(int rgb) {
+			this.rgb = Checks.rgb(rgb);
 			return this;
 		}
 

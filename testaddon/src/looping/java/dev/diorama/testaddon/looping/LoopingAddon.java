@@ -12,8 +12,8 @@ import java.util.UUID;
 
 /**
  * Once started, answers each change it made to its waypoint with another, for ever: Diorama
- * should stop it after a bounded number of rounds, which switches it off, and leave the store as
- * the last allowed round made it.
+ * should refuse the edit past Waypoints.MAX_EDIT_DEPTH answers, which switches it off, and leave
+ * the store as the last allowed answer made it.
  */
 @DioramaEntrypoint
 public final class LoopingAddon implements DioramaAddon {

@@ -1,6 +1,8 @@
 package dev.diorama.api;
 
 import java.util.Objects;
+import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A waypoint for {@link WaypointEditor#add} to add, made with {@link #builder}. Every value is
@@ -9,18 +11,27 @@ import java.util.Objects;
  * <pre>{@code
  * world.waypoints().edit(edits -> edits.add(
  *     NewWaypoint.builder("Village", DimensionId.OVERWORLD, BlockCoord.of(120, 70, -340))
- *         .color(0xFF46A758)
+ *         .rgb(0x46A758)
  *         .folder("Villages")
  *         .build()));
  * }</pre>
  */
 public final class NewWaypoint {
+	/**
+	 * The longest name a waypoint or a folder can have, as Diorama's editor allows: 32, counted in
+	 * UTF-16 units as {@link String#length} counts them, after spaces at the ends are taken off. A
+	 * character outside the Basic Multilingual Plane, such as an emoji, counts two.
+	 */
+	public static final int MAX_NAME_LENGTH = 32;
+	/** The most letters a pin's initials can have: 4, counted in code points. */
+	public static final int MAX_INITIALS = 4;
+
 	private final String name;
 	private final DimensionId dimension;
 	private final BlockCoord pos;
 	private final String initials;
-	private final String icon;
-	private final int color;
+	private final @Nullable ResourceId icon;
+	private final int rgb;
 	private final boolean visible;
 	private final String folder;
 
@@ -30,7 +41,7 @@ public final class NewWaypoint {
 		this.pos = builder.pos;
 		this.initials = builder.initials;
 		this.icon = builder.icon;
-		this.color = builder.color;
+		this.rgb = builder.rgb;
 		this.visible = builder.visible;
 		this.folder = builder.folder;
 	}
@@ -38,7 +49,7 @@ public final class NewWaypoint {
 	/**
 	 * Starts a waypoint with what every one needs.
 	 *
-	 * @param name its name: not blank, and 32 characters at most (as in Diorama's editor) once
+	 * @param name its name: not blank, and {@link #MAX_NAME_LENGTH} UTF-16 units at most once
 	 *     spaces at the ends are taken off
 	 * @param dimension the dimension it is in
 	 * @param pos the block it marks
@@ -71,14 +82,14 @@ public final class NewWaypoint {
 		return this.initials;
 	}
 
-	/** {@return its icon's resource ID, or empty for none} */
-	public String icon() {
-		return this.icon;
+	/** {@return its icon, or empty for none} */
+	public Optional<ResourceId> icon() {
+		return Optional.ofNullable(this.icon);
 	}
 
-	/** {@return its colour, as ARGB} */
-	public int color() {
-		return this.color;
+	/** {@return its colour, as 0xRRGGBB} */
+	public int rgb() {
+		return this.rgb;
 	}
 
 	/** {@return whether it is shown} */
@@ -97,8 +108,8 @@ public final class NewWaypoint {
 		private final DimensionId dimension;
 		private final BlockCoord pos;
 		private String initials = "";
-		private String icon = "";
-		private int color = Checks.DEFAULT_COLOR;
+		private @Nullable ResourceId icon;
+		private int rgb = Checks.DEFAULT_RGB;
 		private boolean visible = true;
 		private String folder = "";
 
@@ -111,8 +122,8 @@ public final class NewWaypoint {
 		/**
 		 * Sets the letters its pin shows.
 		 *
-		 * @param initials up to four letters, or empty for the first letters of the name's first
-		 *     two words
+		 * @param initials up to {@link #MAX_INITIALS} letters, or empty for the first letters of
+		 *     the name's first two words
 		 * @return this builder
 		 * @throws IllegalArgumentException if there are more than four
 		 * @throws NullPointerException if {@code initials} is null
@@ -126,26 +137,26 @@ public final class NewWaypoint {
 		 * Sets the icon its pin shows instead of initials. An ID no resource pack has an icon for
 		 * shows the initials.
 		 *
-		 * @param icon a resource ID, such as {@code diorama:home} for
-		 *     {@code assets/diorama/textures/waypoint_icons/home.png}, or empty for none
+		 * @param icon such as {@code diorama:home} for
+		 *     {@code assets/diorama/textures/waypoint_icons/home.png}
 		 * @return this builder
-		 * @throws IllegalArgumentException if it isn't {@code namespace:path} with the characters
-		 *     the game allows
 		 * @throws NullPointerException if {@code icon} is null
 		 */
-		public Builder icon(String icon) {
-			this.icon = Checks.icon(icon);
+		public Builder icon(ResourceId icon) {
+			this.icon = Objects.requireNonNull(icon, "icon");
 			return this;
 		}
 
 		/**
-		 * Sets its colour.
+		 * Sets its colour. Waypoints are always drawn opaque, so there is no alpha to give.
 		 *
-		 * @param color ARGB; with an alpha of 0, as a plain {@code 0xRRGGBB} has, it is opaque
+		 * @param rgb {@code 0xRRGGBB}, such as {@code 0x46A758}
 		 * @return this builder
+		 * @throws IllegalArgumentException if anything is set above the low 24 bits, as an ARGB
+		 *     colour such as {@code 0xFF46A758} has
 		 */
-		public Builder color(int color) {
-			this.color = Checks.color(color);
+		public Builder rgb(int rgb) {
+			this.rgb = Checks.rgb(rgb);
 			return this;
 		}
 
@@ -164,7 +175,8 @@ public final class NewWaypoint {
 		 * Puts it in one of the player's folders, made if there's none of that name yet. Names
 		 * match whatever their capitals.
 		 *
-		 * @param folder the folder's name, 32 characters at most, or empty for its dimension's own
+		 * @param folder the folder's name, {@link #MAX_NAME_LENGTH} UTF-16 units at most, or empty
+		 *     for its dimension's own
 		 * @return this builder
 		 * @throws IllegalArgumentException if the name is too long
 		 * @throws NullPointerException if {@code folder} is null
