@@ -231,6 +231,21 @@ public final class MapMemory {
 		return this.version;
 	}
 
+	/** For fog-mask's check: a point of the map as it's drawn now, in the old map. */
+	public double[] toOldForTests(double u, double v) {
+		return this.toOld(u, v);
+	}
+
+	/** For fog-mask's check: the remembered tiles saved at an overview level, or null if not listed yet. */
+	public @Nullable Set<TileKey> savedForTests(int lod) {
+		return this.savedTiles.get(lod);
+	}
+
+	/** For fog-mask's check: what's known of a remembered tile, or null if it isn't read. Render thread. */
+	public byte @Nullable [] knownForTests(TileKey key) {
+		return this.knownTiles.get(key);
+	}
+
 	/** For tests: how many remembered tiles with something on them are loaded. */
 	public long shownTiles() {
 		return this.shown;

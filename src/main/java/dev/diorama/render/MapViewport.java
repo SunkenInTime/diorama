@@ -571,6 +571,13 @@ public final class MapViewport {
 		 */
 		void sampled(MapLevel level, int layer, int lod, double originU, double originV, double texel, boolean coarse, boolean drawsNear, int nearU, int nearV, int[] known);
 
+		/**
+		 * The share of each mask texel the map remembers from before its tilt or facing changed, 0 to
+		 * 1, read at overview level {@code lod} for a mask from {@code (originU, originV)} with texels
+		 * {@code texel} wide. Only for a surface mask over a map that remembers one.
+		 */
+		void remembered(MapMemory memory, int lod, double originU, double originV, double texel, float[] remembered);
+
 		/** The build's part on the render thread is done. */
 		void finished();
 	}
@@ -917,6 +924,9 @@ public final class MapViewport {
 						// height until it lands.
 						this.remembered[j * MASK + i] = Float.isNaN(known) ? 1 : known;
 					}
+				}
+				if (watch != null) {
+					watch.remembered(memory, memoryLod, originU, originV, texel, this.remembered);
 				}
 			} else {
 				Arrays.fill(this.remembered, 0);
