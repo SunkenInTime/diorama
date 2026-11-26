@@ -393,8 +393,37 @@ public final class WaypointListScreen extends Screen {
 		return left + ARROW + ACTION_GAP;
 	}
 
+	/**
+	 * A selected row's waypoint as the rows are made again: the same one, if it's still listed. A
+	 * waystone is a new object each time the server sends it, so it's found again among the
+	 * waystones by its ID; only Hide, Show and Teleport act on one.
+	 */
+	private static @Nullable Waypoint again(Waypoint waypoint, java.util.Set<Waypoint> listed, java.util.Map<UUID, Waypoint> waystones) {
+		if (listed.contains(waypoint)) {
+			return waypoint;
+		}
+		return waypoint.kind == Waypoint.Kind.WAYSTONE ? waystones.get(waypoint.id) : null;
+	}
+
+	/** What the Delete waiting for its second click deletes: the selected rows but waystones, or the one row. */
+	private List<Waypoint> deleting() {
+		return this.marked.size() > 1 ? this.movable() : this.selected == null ? List.of() : List.of(this.selected);
+	}
+
+	/** Whether two lists hold the same waypoints, the objects themselves, in any order. */
+	private static boolean sameWaypoints(List<Waypoint> one, List<Waypoint> two) {
+		if (one.size() != two.size()) {
+			return false;
+		}
+		java.util.Set<Waypoint> set = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+		set.addAll(one);
+		return set.containsAll(two);
+	}
+
 	@Override
 	protected void init() {
+		// A Delete waiting for its second click stays so only while the rows made again leave it the same waypoints to delete.
+		List<Waypoint> armedFor = this.armed ? this.deleting() : null;
 		this.all.clear();
 		this.others.clear();
 		WaypointStore store = WaypointStore.get();
@@ -418,16 +447,27 @@ public final class WaypointListScreen extends Screen {
 		this.folderArmed = false;
 		this.folderActions.clear();
 		this.folderMenu = null;
-		if (this.selected != null && !this.all.contains(this.selected) && !this.others.contains(this.selected)) {
-			// A waystone is a new object each time the server sends it: find it again by its id.
-			UUID id = this.selected.id;
-			this.selected = java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> w.id.equals(id)).findFirst().orElse(null);
-		}
-		if (!this.marked.isEmpty()) {
-			java.util.Set<UUID> ids = new java.util.HashSet<>();
-			this.marked.forEach(w -> ids.add(w.id));
+		// The selection is kept as the same waypoints, not the same IDs: a file can hold two waypoints
+		// with one ID, and the one not selected must not join the selection or take a selected one's place.
+		if (this.selected != null || !this.marked.isEmpty()) {
+			java.util.Set<Waypoint> listed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+			listed.addAll(this.all);
+			listed.addAll(this.others);
+			java.util.Map<UUID, Waypoint> waystones = new java.util.HashMap<>();
+			for (Waypoint waypoint : listed) {
+				if (waypoint.kind == Waypoint.Kind.WAYSTONE) {
+					waystones.putIfAbsent(waypoint.id, waypoint);
+				}
+			}
+			this.selected = this.selected == null ? null : again(this.selected, listed, waystones);
+			List<Waypoint> wasMarked = List.copyOf(this.marked);
 			this.marked.clear();
-			java.util.stream.Stream.concat(this.all.stream(), this.others.stream()).filter(w -> ids.contains(w.id)).forEach(this.marked::add);
+			for (Waypoint waypoint : wasMarked) {
+				Waypoint now = again(waypoint, listed, waystones);
+				if (now != null) {
+					this.marked.add(now);
+				}
+			}
 		}
 		if (!this.xaeroRead) {
 			this.xaeroRead = true;
@@ -484,6 +524,7 @@ public final class WaypointListScreen extends Screen {
 			this.sortDirection = null;
 			this.actions.clear();
 			this.marked.clear();
+			this.armed = false;
 			this.move = null;
 			this.visibility = null;
 			this.confirm = null;
@@ -591,6 +632,11 @@ public final class WaypointListScreen extends Screen {
 			}
 		}).size(20, 20).build());
 		this.filter();
+		if (armedFor != null && this.armed && !sameWaypoints(armedFor, this.deleting())) {
+			// The rows made again would have it delete other waypoints than the player clicked it for: it's asked again.
+			this.armed = false;
+			this.placeRowButtons();
+		}
 		this.setInitialFocus(box);
 	}
 
@@ -1493,8 +1539,10 @@ public final class WaypointListScreen extends Screen {
 	/**
 	 * Makes the rows again after the waypoints changed, keeping what the player had in hand: the
 	 * search box's text, whether it had the focus, and where its caret was; and the row at the top
-	 * of the list, if it's still there. What's lost: an open list of folders, a folder's Delete
-	 * waiting for its second click, and a selection of text in the search box.
+	 * of the list, if it's still there; and the selected rows still there, as the same waypoints
+	 * ({@link #init}). What's lost: an open list of folders, a folder's Delete waiting for its
+	 * second click, a row's Delete waiting for its second click if it would now delete other
+	 * waypoints than it was clicked for, and a selection of text in the search box.
 	 */
 	private void refreshRows() {
 		EditBox box = this.search;

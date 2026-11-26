@@ -28,15 +28,23 @@ import java.util.UUID;
  * {@link Waypoints#revision}, and the other mod's version; while none moved, it does nothing and
  * allocates nothing. When one moved, it compares both sides with what they were after its last
  * sync, carries each change across (Diorama's side wins when both changed one waypoint), and hands
- * Diorama one {@link WaypointBatch} with everything, together with the world it read. Then it reads
- * the revision again, so its own edit isn't taken for a change on the next tick: no echo.
+ * Diorama one {@link WaypointBatch} with everything, together with the world and the revision it
+ * read. Then it reads the revision again, so its own edit isn't taken for a change on the next
+ * tick: no echo.
+ *
+ * <p>It hands the batch over with the revision it read before reading {@link Waypoints#all}, and
+ * changes the other mod only once Diorama applied the batch. If Diorama didn't (the player or an
+ * automatic pin changed something meanwhile), neither side changed, and the next tick works it out
+ * again from what's there then.
  *
  * <p>Only the player's own waypoints are synced. Each link is kept under the dimension and saved
- * map its Diorama waypoint is on, as well as its ID: one missing from {@link Waypoints#all} is
- * taken as deleted only while that map is the one in use, and a waypoint with the same ID on
- * another saved map is another waypoint. A link whose saved map is no longer in
- * {@link World#mapIds} went with that map, so its other side is removed. A real sync also files its
- * links under {@link World#worldId}; this one is for a single world.
+ * map its Diorama waypoint is on, as well as its ID, and matches only a waypoint with all three: one
+ * missing from {@link Waypoints#all} is taken as deleted only while that map is the one in use, and
+ * a waypoint with the same ID in another dimension or on another saved map is another waypoint. So
+ * a waypoint the player moves to another dimension in Diorama gets a new copy in the other mod, in
+ * place of the old one. A link whose saved map is no longer in {@link World#mapIds} went with that
+ * map, so its other side is removed. A real sync also files its links under
+ * {@link World#worldId}; this one is for a single world.
  *
  * <p>What the other mod has that Diorama would refuse is made to fit (a name longer than Diorama
  * takes is cut) or left out (a blank name, a dimension Diorama can't name), so one bad pin can't
@@ -107,37 +115,47 @@ public final class PollingSync {
 		}
 		World now = open.get();
 		Waypoints waypoints = this.api.waypoints();
-		if (now.equals(this.world) && waypoints.revision() == this.revision && this.other.version() == this.otherVersion) {
+		long revision = waypoints.revision();
+		if (now.equals(this.world) && revision == this.revision && this.other.version() == this.otherVersion) {
 			return;
 		}
 		this.passes++;
-		if (this.sync(now, waypoints)) {
+		if (this.sync(now, revision, waypoints)) {
 			this.world = now;
 		}
 	}
 
-	/** One comparison of the two sides; false if Diorama's world moved before the batch got there, so the next tick tries again. */
-	private boolean sync(World now, Waypoints waypoints) {
-		Map<UUID, Waypoint> diorama = new LinkedHashMap<>();
+	/**
+	 * One comparison of the two sides, from the world and the revision read just before; false if
+	 * Diorama didn't apply the batch because one of them moved on, so nothing changed on either side
+	 * and the next tick tries again.
+	 */
+	private boolean sync(World now, long revision, Waypoints waypoints) {
+		// Diorama's side by where each waypoint is, so a link only ever matches its own waypoint.
+		Map<Key, Waypoint> diorama = new LinkedHashMap<>();
 		for (Waypoint waypoint : waypoints.all()) {
 			if (waypoint.kind() == Waypoint.Kind.MANUAL) {
-				diorama.put(waypoint.id(), waypoint);
+				diorama.put(key(waypoint), waypoint);
 			}
 		}
 		Map<String, OtherMod.Pin> theirs = new LinkedHashMap<>(this.other.pins());
 		Map<Key, OtherMod.Pin> updates = new LinkedHashMap<>();
 		List<Key> removals = new ArrayList<>();
+		// What to change on the other mod's side, and the links that go with it: done only once Diorama took the batch.
+		List<Runnable> toOther = new ArrayList<>();
 		// Links whose Diorama side is on a saved map not in use: their other side keeps its baseline until it's back.
 		Set<String> skipped = new HashSet<>();
 
-		for (Map.Entry<Key, String> link : new ArrayList<>(this.links.entrySet())) {
+		for (Map.Entry<Key, String> link : this.links.entrySet()) {
 			Key key = link.getKey();
 			String otherId = link.getValue();
 			if (!now.mapIds(key.dimension()).contains(key.map())) {
 				// Its saved map was deleted, and the waypoint with it.
 				theirs.remove(otherId);
-				this.other.remove(otherId);
-				this.unlink(key);
+				toOther.add(() -> {
+					this.other.remove(otherId);
+					this.unlink(key);
+				});
 				continue;
 			}
 			if (!now.mapId(key.dimension()).equals(key.map())) {
@@ -146,13 +164,15 @@ public final class PollingSync {
 				skipped.add(otherId);
 				continue;
 			}
-			Waypoint mine = diorama.remove(key.id());
+			Waypoint mine = diorama.remove(key);
 			OtherMod.Pin their = theirs.remove(otherId);
 			if (mine == null && their == null) {
-				this.unlink(key);
+				toOther.add(() -> this.unlink(key));
 			} else if (mine == null) {
-				this.other.remove(otherId);
-				this.unlink(key);
+				toOther.add(() -> {
+					this.other.remove(otherId);
+					this.unlink(key);
+				});
 			} else if (their == null) {
 				OtherMod.Pin seen = pin(mine);
 				if (seen.equals(this.lastDiorama.get(key))) {
@@ -160,20 +180,21 @@ public final class PollingSync {
 					removals.add(key);
 				} else {
 					// Changed in Diorama while deleted in the other mod: Diorama's side wins, so it goes back.
-					this.links.put(key, this.other.add(seen));
+					toOther.add(() -> this.links.put(key, this.other.add(seen)));
 				}
 			} else {
 				OtherMod.Pin seen = pin(mine);
 				if (!seen.equals(this.lastDiorama.get(key))) {
-					this.other.put(otherId, seen);
+					toOther.add(() -> this.other.put(otherId, seen));
 				} else if (!their.equals(this.lastOther.get(otherId))) {
 					updates.put(key, their);
 				}
 			}
 		}
 		// What's left on either side is new there.
-		for (Waypoint mine : diorama.values()) {
-			this.links.put(key(mine), this.other.add(pin(mine)));
+		for (Map.Entry<Key, Waypoint> mine : diorama.entrySet()) {
+			OtherMod.Pin seen = pin(mine.getValue());
+			toOther.add(() -> this.links.put(mine.getKey(), this.other.add(seen)));
 		}
 		WaypointBatch.Builder batch = WaypointBatch.builder();
 		List<String> adding = new ArrayList<>();
@@ -185,10 +206,13 @@ public final class PollingSync {
 				adding.add(pin.getKey());
 			}
 		}
+		// The updates that move a waypoint to another dimension, so onto that dimension's saved map in use.
+		Map<Key, DimensionId> moving = new HashMap<>();
 		for (Map.Entry<Key, OtherMod.Pin> update : updates.entrySet()) {
 			WaypointUpdate made = this.toUpdate(update.getValue(), dimensions);
 			if (made != null) {
 				batch.update(update.getKey().id(), made);
+				made.dimension().filter(d -> !d.equals(update.getKey().dimension())).ifPresent(d -> moving.put(update.getKey(), d));
 			}
 		}
 		for (Key removal : removals) {
@@ -198,10 +222,10 @@ public final class PollingSync {
 		if (!batch.isEmpty()) {
 			WaypointBatch built = batch.build();
 			this.beforeEdit.run();
-			EditResult result = waypoints.edit(now, built);
+			EditResult result = waypoints.edit(now, revision, built);
 			if (!result.applied()) {
-				// Nothing of it was applied: keep every link and baseline as they were, and work it out again next tick.
-				this.lastProblem = "Diorama's world moved before the batch was applied; trying again";
+				// Nothing of it was applied, and nothing changed on the other side: keep every link and baseline as they were, and work it out again next tick.
+				this.lastProblem = "Diorama's waypoints or world changed before the batch was applied; trying again";
 				return false;
 			}
 			if (result.changed()) {
@@ -218,30 +242,33 @@ public final class PollingSync {
 			for (Key removal : removals) {
 				this.unlink(removal);
 			}
+			for (Map.Entry<Key, DimensionId> move : moving.entrySet()) {
+				Key from = move.getKey();
+				String otherId = this.links.remove(from);
+				this.lastDiorama.remove(from);
+				if (otherId != null) {
+					this.links.put(new Key(move.getValue(), now.mapId(move.getValue()), from.id()), otherId);
+				}
+			}
 			if (!result.saved()) {
 				this.lastProblem = "Diorama couldn't save the batch yet; it's in Diorama's memory and Diorama tries again at its next save";
 			}
 		}
+		toOther.forEach(Runnable::run);
 
 		// Both sides as they are now, this sync's own changes included, so the next tick doesn't take them for news.
 		this.revision = waypoints.revision();
 		this.otherVersion = this.other.version();
-		Map<UUID, Waypoint> listed = new HashMap<>();
+		Map<Key, Waypoint> listed = new HashMap<>();
 		for (Waypoint waypoint : waypoints.all()) {
-			listed.put(waypoint.id(), waypoint);
+			if (waypoint.kind() == Waypoint.Kind.MANUAL) {
+				listed.put(key(waypoint), waypoint);
+			}
 		}
-		for (Map.Entry<Key, String> link : new ArrayList<>(this.links.entrySet())) {
-			Key key = link.getKey();
-			Waypoint waypoint = now.mapId(key.dimension()).equals(key.map()) ? listed.get(key.id()) : null;
+		for (Key key : this.links.keySet()) {
+			Waypoint waypoint = listed.get(key);
 			if (waypoint != null) {
-				// It may have moved to another dimension, so onto that one's map.
-				Key moved = key(waypoint);
-				if (!moved.equals(key)) {
-					this.links.remove(key);
-					this.lastDiorama.remove(key);
-					this.links.put(moved, link.getValue());
-				}
-				this.lastDiorama.put(moved, pin(waypoint));
+				this.lastDiorama.put(key, pin(waypoint));
 			}
 		}
 		for (Map.Entry<String, OtherMod.Pin> pin : this.other.pins().entrySet()) {

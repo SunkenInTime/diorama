@@ -24,11 +24,25 @@ import java.util.UUID;
  * <li>Otherwise read {@link #all} and the other mod's waypoints, compare each with what you had,
  *     and work out what to carry across.</li>
  * <li>To change Diorama's side, build one {@link WaypointBatch} with everything and hand it to
- *     {@link #edit} with the world you read in step 1. If it wasn't applied, the world moved on:
- *     keep what you had and start again on the next tick. Otherwise link your waypoints to the IDs
- *     in {@link EditResult#added} at once, then read {@code revision()} again and keep that
- *     number, so your next tick doesn't take your own change for the player's.</li>
+ *     {@link #edit} with the world from step 1 and the revision from step 2. Change nothing on the
+ *     other mod's side yet.</li>
+ * <li>If the batch wasn't applied ({@link EditResult#applied}), something changed since step 1:
+ *     change nothing on either side, keep what you had, and start again on the next tick.
+ *     Otherwise link your waypoints to the IDs in {@link EditResult#added} at once, make your
+ *     changes to the other mod, then read {@code revision()} again and keep that number, so your
+ *     next tick doesn't take your own change for the player's.</li>
  * </ol>
+ *
+ * <pre>{@code
+ * Optional<World> world = api.world();
+ * long revision = waypoints.revision();
+ * List<Waypoint> now = waypoints.all();
+ * WaypointBatch batch = ...; // worked out from now and the other mod's waypoints
+ * EditResult result = waypoints.edit(world.get(), revision, batch);
+ * if (result.applied()) {
+ *     // link result.added(), change the other mod, then keep waypoints.revision()
+ * }
+ * }</pre>
  * Reading {@code world()}, {@code revision()} and {@code all()} when nothing changed costs no
  * allocation, so doing it every tick is fine. Keep links between the two mods' waypoints by
  * {@link Waypoint#id}, and file them under {@link World#worldId} (stable across restarts; see
@@ -73,34 +87,40 @@ public interface Waypoints {
 	long revision();
 
 	/**
-	 * Applies a batch of waypoint changes all at once, if the world is still the one it was
-	 * prepared for, and writes {@code waypoints.json} once (and {@code folders.json} once, if the
-	 * batch made folders). When this returns, {@link #all} and {@link #revision} already show it.
-	 * None of the addon's code runs meanwhile.
+	 * Applies a batch of waypoint changes all at once, if nothing changed since the addon read what
+	 * it worked the batch out from, and writes {@code waypoints.json} once (and {@code folders.json}
+	 * once, if the batch made folders). When this returns, {@link #all} and {@link #revision}
+	 * already show it. None of the addon's code runs meanwhile.
 	 *
-	 * <p>{@code preparedFor} is the {@link DioramaApi#world} the batch was worked out from. Unless
-	 * {@code world()} still {@linkplain World#equals equals} it (the same world, dimension and saved
-	 * maps), nothing is applied and the result says so ({@link EditResult#applied}): read again and
-	 * retry on the next poll. So a batch never lands in waypoints it wasn't worked out from, or on
-	 * another saved map.
+	 * <p>{@code preparedFor} and {@code revision} are the {@link DioramaApi#world} and the
+	 * {@link #revision} the addon read before it read {@link #all} and worked the batch out. Unless
+	 * {@code world()} still {@linkplain World#equals equals} {@code preparedFor} (the same world,
+	 * dimension and saved maps) and {@code revision()} still returns {@code revision}, nothing is
+	 * applied and the result says so ({@link EditResult#applied}): read again and retry on the next
+	 * poll. So a batch only lands in the waypoints it was worked out from. A waypoint the player
+	 * deleted or changed since can't be reached by a step meant for how it was, and neither can
+	 * another waypoint that has taken its place in {@code all()}.
 	 *
-	 * <p>Only player-made waypoints ({@link Waypoint.Kind#MANUAL}) can be changed or removed: the
-	 * others are Diorama's or another mod's, and kept up to date by them. A step that names one of
-	 * them throws, and nothing of the batch is applied. A step whose waypoint isn't there (the
-	 * player may just have deleted it) is skipped, and {@link EditResult#missing} names it. A batch
-	 * that, once all its steps are applied, changes nothing (a waypoint renamed and back, say)
-	 * writes nothing and doesn't move the revision.
+	 * <p>Once both match, every step is checked before anything changes. An update or a removal
+	 * must name a waypoint {@code all()} lists, that is {@link Waypoint.Kind#MANUAL} (the others
+	 * are Diorama's or another mod's, and kept up to date by them), and that no earlier step of the
+	 * batch removes. Any other step is a mistake in the addon: it throws
+	 * {@link IllegalArgumentException}, and nothing of the batch is applied. A batch that, once all
+	 * its steps are applied, changes nothing (a waypoint renamed and back, say) writes nothing and
+	 * doesn't move the revision.
 	 *
 	 * <p>The player unticking the addon in Diorama's Addons settings stops only what it hides; its
 	 * edits still go through. An addon Diorama switched off gets a result that applied nothing.
 	 *
 	 * @param preparedFor the world the batch was worked out for
+	 * @param revision the {@link #revision} read with it, before reading {@link #all}
 	 * @param batch what to change
-	 * @return what the batch did: whether it was applied, the IDs of the waypoints it added, the
-	 *     steps that found no waypoint, whether it changed anything, and whether that was saved
-	 * @throws IllegalArgumentException if a step names a waypoint that isn't
-	 *     {@link Waypoint.Kind#MANUAL}; nothing was applied
+	 * @return what the batch did: whether it was applied, the IDs of the waypoints it added,
+	 *     whether it changed anything, and whether that was saved
+	 * @throws IllegalArgumentException if the world and the revision match and an update or a
+	 *     removal names a waypoint {@code all()} doesn't list, one that isn't
+	 *     {@link Waypoint.Kind#MANUAL}, or one an earlier step removes; nothing was applied
 	 * @throws NullPointerException if an argument is null
 	 */
-	EditResult edit(World preparedFor, WaypointBatch batch);
+	EditResult edit(World preparedFor, long revision, WaypointBatch batch);
 }

@@ -9,7 +9,7 @@ import java.util.UUID;
  * Waypoint changes for {@link Waypoints#edit} to make together: adds, changes and removals, in the
  * order they were given. A plain value that never changes, made with {@link #builder} in the
  * addon's own code. Every value in it was checked when it was given, so a bad one throws there,
- * before Diorama sees the batch; that a waypoint exists, and is one addons may change, is checked
+ * before Diorama sees the batch; that a waypoint is listed, and is one addons may change, is checked
  * when the batch is applied.
  *
  * <pre>{@code
@@ -18,7 +18,7 @@ import java.util.UUID;
  *     .update(mineId, WaypointUpdate.builder().name("Old mine").visible(false).build())
  *     .remove(oldId)
  *     .build();
- * EditResult result = api.waypoints().edit(world, batch);
+ * EditResult result = api.waypoints().edit(world, revision, batch);
  * }</pre>
  */
 public final class WaypointBatch {

@@ -8,12 +8,13 @@ import java.util.UUID;
  */
 public interface EditResult {
 	/**
-	 * {@return false if nothing of the batch was applied, because {@link DioramaApi#world} wasn't
-	 * the world it was prepared for} The player went to another world or dimension, or a saved map
-	 * was made, switched or deleted, since that world was read (or no world is open, or Diorama
-	 * switched this addon off). Then {@link #added} is empty and {@link #changed} false: read the
-	 * world and the waypoints again and make the batch again, on the next poll. True otherwise, a
-	 * batch that changed nothing included.
+	 * {@return false if nothing of the batch was applied, because {@link DioramaApi#world} or
+	 * {@link Waypoints#revision} moved on since the addon read them} The player went to another
+	 * world or dimension, a saved map was made, switched or deleted, or a waypoint changed (the
+	 * player's, an automatic pin, another addon's edit) since then; or no world is open, or Diorama
+	 * switched this addon off. Then {@link #added} is empty and {@link #changed} false: change
+	 * nothing on the other mod's side, read the world and the waypoints again, and make the batch
+	 * again on the next poll. True otherwise, a batch that changed nothing included.
 	 */
 	boolean applied();
 
@@ -25,18 +26,12 @@ public interface EditResult {
 	List<UUID> added();
 
 	/**
-	 * {@return the IDs of the batch's updates and removals that found no such waypoint, in the order
-	 * of their steps} Those steps were skipped, and the rest applied: the player may just have
-	 * deleted the waypoint, or an earlier step of the batch removed it. Empty if every one was
-	 * found, or the batch wasn't applied. The list can't be changed.
-	 */
-	List<UUID> missing();
-
-	/**
-	 * {@return whether the batch changed anything} False for a batch that wasn't applied, or asked
-	 * for nothing, or only for what was so already once all its steps were applied (a rename to the
-	 * name a waypoint has, or one renamed and then back): then nothing was written, and
-	 * {@link Waypoints#revision} didn't move. When true, the revision moved.
+	 * {@return whether the batch changed anything Diorama keeps} False for a batch that wasn't
+	 * applied, or asked for nothing, or only for what was so already once all its steps were applied
+	 * (a rename to the name a waypoint has, or one renamed and then back): then nothing was written,
+	 * and {@link Waypoints#revision} didn't move. When true, it was written ({@link #saved}), and
+	 * the revision moved if {@link Waypoints#all} reads differently now. It may not: a waypoint
+	 * taken out of a folder that no longer exists was in none for {@code all()} already.
 	 */
 	boolean changed();
 

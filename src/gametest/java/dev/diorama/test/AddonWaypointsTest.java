@@ -64,15 +64,20 @@ import net.minecraft.world.level.levelgen.Heightmap;
  * Waystones change, not for a Waystones list sent again as it was, and not for a batch that
  * changes nothing; a waystone placed again shows through the API with nothing drawn;
  * {@code world()} moves with the dimension and the saved maps, and lists them; a batch prepared
- * for another world or saved map applies nothing; bad values throw while the batch is built; a
- * disk that refuses the write reports {@code saved() == false}, and a refused folders.json is
- * written by the next save; automatic pins are read-only; a file with two waypoints of one ID
- * shows only the first; every call from another thread throws; Diorama's list drops a row an
- * addon deleted, even after the player clicked another row first, the map's menu refuses a
- * waypoint or waystone that's gone, and the editor saves only what the player changed in it; and
- * the test addon's polling sync keeps a pretend map mod in step both ways without echoes, through
- * a failed save, a waypoint ID on two saved maps, a saved map deleted and names too long for
- * Diorama. Everything the section adds it takes away again, as the waypoints section runs in this
+ * for another world or saved map, or for a revision gone, applies nothing (two waypoints of one
+ * ID, the first deleted before the batch arrives, included), and {@code revision()} moves as
+ * automatic pins appear, move, hide and show; a step naming a waypoint {@code all()} doesn't list
+ * throws; bad values throw while the batch is built; a disk that refuses the write reports
+ * {@code saved() == false}, and a refused folders.json is written by the next save; a folder
+ * folders.json doesn't have is made only by a step that names it, and taking a waypoint out of
+ * one is saved; automatic pins are read-only; a file with two waypoints of one ID shows only the
+ * first; every call from another thread throws; Diorama's list drops a row an addon deleted, even
+ * after the player clicked another row first, and its Delete never moves to a twin with the same
+ * ID; the map's menu refuses a waypoint or waystone that's gone, and the editor saves only what
+ * the player changed in it, each coordinate on its own; and the test addon's polling sync keeps a
+ * pretend map mod in step both ways without echoes, through a failed save, a waypoint ID on two
+ * saved maps or two dimensions, a refused batch, automatic pins appearing mid-pass, a saved map
+ * deleted and names too long for Diorama. Everything the section adds it takes away again, as the waypoints section runs in this
  * world next. After leaving ({@link #left}) and
  * in the world opened again ({@link #reopened}) the ID is the same. {@link #measure} and
  * {@link #frames} measure what it costs.
@@ -98,9 +103,9 @@ final class AddonWaypointsTest {
 		return context.computeOnClient(mc -> waypoints().revision());
 	}
 
-	/** Applies a batch for the world open now, as an addon that read it and built the batch in one tick does. Client thread. */
+	/** Applies a batch for the world and revision open now, as an addon that read them and built the batch in one tick does. Client thread. */
 	private static EditResult apply(WaypointBatch.Builder batch) {
-		return waypoints().edit(api().world().orElseThrow(), batch.build());
+		return waypoints().edit(api().world().orElseThrow(), waypoints().revision(), batch.build());
 	}
 
 	private static WaypointBatch.Builder batch() {
@@ -115,7 +120,7 @@ final class AddonWaypointsTest {
 	/** At the title screen: no world, no waypoints, revision 0, and a batch for any world applies nothing. */
 	static void titleScreen(ClientGameTestContext context) {
 		String read = context.computeOnClient(mc -> {
-			EditResult result = waypoints().edit(nowhere(), batch().add(NewWaypoint.builder("Nowhere", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
+			EditResult result = waypoints().edit(nowhere(), 0, batch().add(NewWaypoint.builder("Nowhere", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
 			return api().world() + " " + waypoints().all() + " " + waypoints().revision() + " applied " + result.applied() + " changed " + result.changed() + " added "
 				+ result.added();
 		});
@@ -137,18 +142,23 @@ final class AddonWaypointsTest {
 		otherChanges(context, wrong);
 		sameList(context, wrong);
 		staleWorlds(context, wrong);
+		staleRevision(context, wrong);
 		badValues(context, wrong);
 		diskFull(context, wrong);
 		foldersOwed(context, wrong);
+		danglingFolders(context, wrong);
 		readOnly(context, wrong);
 		duplicates(context, wrong);
 		threads(context, wrong);
 		listScreen(context, wrong);
+		listTwins(context, wrong);
 		mapMenu(context, wrong);
 		editor(context, wrong);
 		sync(context, wrong);
 		syncFailedSave(context, wrong);
 		syncSavedMaps(context, wrong);
+		syncSameIdElsewhere(context, wrong);
+		syncAutomaticPins(context, wrong);
 		syncTooLong(context, wrong);
 		cleanUp(context, wrong);
 		if (!wrong.isEmpty()) {
@@ -567,10 +577,11 @@ final class AddonWaypointsTest {
 		UUID known = addOne(context, "Known before", 2, 9);
 		String unknown = context.computeOnClient(mc -> {
 			World before = api().world().orElseThrow();
+			long revisionBefore = waypoints().revision();
 			boolean foundBefore = waypoints().get(known).isPresent();
 			WorldKey.unknownForTests = true;
 			try {
-				EditResult result = waypoints().edit(before, batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
+				EditResult result = waypoints().edit(before, revisionBefore, batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
 				return api().world().isPresent() + " " + waypoints().all().size() + " " + waypoints().revision() + " " + foundBefore + ">" + waypoints().get(known).isPresent() + " "
 					+ result.applied();
 			} finally {
@@ -585,7 +596,7 @@ final class AddonWaypointsTest {
 		removeIds(context, List.of(known));
 
 		String elsewhere = context.computeOnClient(mc -> {
-			EditResult result = waypoints().edit(nowhere(), batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
+			EditResult result = waypoints().edit(nowhere(), waypoints().revision(), batch().add(NewWaypoint.builder("Ghost", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ())).build()).build());
 			return result.applied() + " " + result.changed() + " " + result.added();
 		});
 
@@ -593,13 +604,14 @@ final class AddonWaypointsTest {
 		UUID onMain = addOne(context, "On the main map", 1, 9);
 		String key = context.computeOnClient(mc -> WorldKey.current());
 		World prepared = context.computeOnClient(mc -> api().world().orElseThrow());
+		long preparedRevision = revision(context);
 		WaypointBatch batch = batch().remove(onMain).add(NewWaypoint.builder("Replacement", DimensionId.OVERWORLD, BlockCoord.of(at.getX() + 1, at.getY(), at.getZ() + 9)).build()).build();
 		String other = context.computeOnClient(mc -> Maps.of(key).create("minecraft:overworld", "Stale batch map"));
 		context.waitFor(mc -> MapSession.get() != null, 2400);
 		context.waitTicks(2);
 		int savesSwitch = context.computeOnClient(mc -> WaypointStore.saves());
 		String late = context.computeOnClient(mc -> {
-			EditResult result = waypoints().edit(prepared, batch);
+			EditResult result = waypoints().edit(prepared, preparedRevision, batch);
 			return "applied " + result.applied() + ", changed " + result.changed() + ", added " + result.added() + ", saved " + result.saved();
 		});
 		int lateSaves = context.computeOnClient(mc -> WaypointStore.saves()) - savesSwitch;
@@ -623,6 +635,119 @@ final class AddonWaypointsTest {
 	}
 
 	/**
+	 * A batch is applied only for the revision it was worked out from. Two stored waypoints share
+	 * an ID, as some players' files have, so all() shows the first. The addon reads it and prepares
+	 * its removal; the player deletes it; all() now shows the second, with the world unchanged. The
+	 * batch applies nothing, and the second is still in waypoints.json, read back from disk and
+	 * when the store is read again. Then: revision() moves when an automatic pin appears, moves,
+	 * is hidden or shown (portal pins switched off and on, one deleted by the player), and a
+	 * step naming a waypoint all() never listed, or one an earlier step removes, throws and applies
+	 * nothing.
+	 */
+	private static void staleRevision(ClientGameTestContext context, List<String> wrong) {
+		Path file = context.computeOnClient(mc -> WorldKey.folder(WorldKey.current()).resolve("waypoints.json"));
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		Waypoint[] twins = context.computeOnClient(mc -> {
+			Waypoint one = new Waypoint("Stale twin A", at.getX() + 13, at.getY(), at.getZ(), "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint two = new Waypoint("Stale twin B", at.getX() + 14, at.getY(), at.getZ(), "minecraft:overworld", Waypoint.PALETTE[2]);
+			two.id = one.id;
+			WaypointStore.get().add(one);
+			WaypointStore.get().add(two);
+			return new Waypoint[] {one, two};
+		});
+		UUID id = twins[0].id;
+		// The addon's tick: it reads the world, the revision and the waypoint, and works out the removal.
+		World read = context.computeOnClient(mc -> api().world().orElseThrow());
+		long revision = revision(context);
+		String seen = context.computeOnClient(mc -> waypoints().get(id).map(dev.diorama.api.Waypoint::name).orElse("none"));
+		WaypointBatch removal = batch().remove(id).build();
+		// Meanwhile the player deletes the one the addon saw.
+		context.runOnClient(mc -> WaypointStore.get().remove(twins[0]));
+		String result = context.computeOnClient(mc -> {
+			boolean worldSame = api().world().orElseThrow().equals(read);
+			String shownNow = waypoints().get(id).map(dev.diorama.api.Waypoint::name).orElse("none");
+			EditResult edit = waypoints().edit(read, revision, removal);
+			return "world still equal " + worldSame + ", all() shows " + shownNow + " now; applied " + edit.applied() + ", changed " + edit.changed();
+		});
+		boolean onDisk = text(file).contains("\"Stale twin B\"");
+		String reread = context.computeOnClient(mc -> {
+			WaypointStore.onLeave();
+			return WaypointStore.get().all().stream().filter(w -> w.id.equals(id)).map(w -> w.name).toList().toString();
+		});
+		String expected = "world still equal true, all() shows Stale twin B now; applied false, changed false";
+		if (!seen.equals("Stale twin A") || !result.equals(expected) || !onDisk || !reread.equals("[Stale twin B]")) {
+			wrong.add("A removal prepared for one of two waypoints with one ID, handed over after the player deleted it: the addon saw " + seen + "; " + result + " (expected "
+				+ expected + "); the other in waypoints.json " + onDisk + ", after reading it again " + reread + " (expected true, [Stale twin B])");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: a batch for a revision gone: saw {}, {}; on disk {}, read again {}", seen, result, onDisk, reread);
+		removeNamed(context, "Stale twin");
+
+		// Automatic pins, far off so no chunk the player sees takes them away.
+		List<String> results = new ArrayList<>();
+		Waypoint[] pins = new Waypoint[3];
+		check(context, results, "a death pin added", true, mc -> {
+			pins[0] = new Waypoint("Stale death", at.getX() + 5000, at.getY(), at.getZ(), "minecraft:overworld", 0xFFFFFFFF);
+			pins[0].kind = Waypoint.Kind.DEATH;
+			WaypointStore.get().add(pins[0]);
+		});
+		check(context, results, "a death pin hidden", true, mc -> WaypointStore.get().setVisible(pins[0], false));
+		check(context, results, "a death pin shown", true, mc -> WaypointStore.get().setVisible(pins[0], true));
+		check(context, results, "a bed pin added", true, mc -> {
+			pins[1] = new Waypoint(Waypoint.BED_NAME, at.getX() + 5001, at.getY(), at.getZ(), "minecraft:overworld", 0xFFE5484D);
+			pins[1].kind = Waypoint.Kind.BED;
+			WaypointStore.get().add(pins[1]);
+		});
+		check(context, results, "a bed pin moved", true, mc -> {
+			pins[1].x++;
+			WaypointStore.get().changed();
+		});
+		check(context, results, "a portal pin added", true, mc -> {
+			pins[2] = new Waypoint("Nether Portal", at.getX() + 5002, at.getY(), at.getZ(), "minecraft:overworld", 0xFF8E4EC6);
+			pins[2].kind = Waypoint.Kind.NETHER_PORTAL;
+			WaypointStore.get().add(pins[2]);
+		});
+		boolean portalPins = context.computeOnClient(mc -> dev.diorama.Settings.get().portalMarkers);
+		try {
+			check(context, results, "portal pins switched off", true, mc -> dev.diorama.Settings.get().portalMarkers = false);
+			check(context, results, "portal pins switched on", true, mc -> dev.diorama.Settings.get().portalMarkers = true);
+		} finally {
+			context.runOnClient(mc -> dev.diorama.Settings.get().portalMarkers = portalPins);
+		}
+		check(context, results, "a portal pin deleted by the player", true, mc -> WaypointStore.get().remove(pins[2]));
+		for (String each : results) {
+			if (!each.endsWith(" ok")) {
+				wrong.add("revision() when " + each);
+			}
+		}
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			store.remove(pins[0]);
+			store.remove(pins[1]);
+			// A deleted portal pin stays in the file, hidden; this one goes for good, as the waypoints section runs here next.
+			pins[2].kind = Waypoint.Kind.MANUAL;
+			pins[2].deleted = false;
+			store.remove(pins[2]);
+		});
+
+		// Mistakes in the addon: a waypoint all() never listed, and one an earlier step removed. The add before them doesn't happen either.
+		UUID mine = addOne(context, "Stale mine", 1, 12);
+		int saves = context.computeOnClient(mc -> WaypointStore.saves());
+		String refused = context.computeOnClient(mc -> {
+			NewWaypoint first = NewWaypoint.builder("Stale never added", DimensionId.OVERWORLD, BlockCoord.of(at.getX(), at.getY(), at.getZ() + 12)).build();
+			String never = thrown(() -> apply(batch().add(first).update(UUID.randomUUID(), WaypointUpdate.builder().name("No such").build())));
+			String twice = thrown(() -> apply(batch().add(first).remove(mine).update(mine, WaypointUpdate.builder().name("After removal").build())));
+			return never.split(":")[0] + " " + twice.split(":")[0];
+		});
+		boolean untouched = context.computeOnClient(mc -> WaypointStore.saves() == saves && waypoints().get(mine).isPresent()
+			&& waypoints().all().stream().noneMatch(w -> w.name().equals("Stale never added")));
+		if (!refused.equals("IllegalArgumentException IllegalArgumentException") || !untouched) {
+			wrong.add("A step naming a waypoint all() never listed, and one an earlier step removed: threw " + refused
+				+ " (expected IllegalArgumentException twice); nothing applied " + untouched);
+		}
+		removeIds(context, List.of(mine));
+	}
+
+	/**
 	 * A value Diorama would refuse throws where the addon gives it, before any batch: a name too
 	 * long or blank, an ARGB colour, a null. Nothing reaches Diorama, and the addon stays on.
 	 */
@@ -632,7 +757,7 @@ final class AddonWaypointsTest {
 			thrown(() -> NewWaypoint.builder("  ", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0))).split(":")[0],
 			thrown(() -> WaypointUpdate.builder().rgb(0xFF46A758)).split(":")[0],
 			thrown(() -> batch().remove(null)).split(":")[0],
-			thrown(() -> waypoints().edit(api().world().orElseThrow(), null)).split(":")[0])));
+			thrown(() -> waypoints().edit(api().world().orElseThrow(), waypoints().revision(), null)).split(":")[0])));
 		boolean on = context.computeOnClient(mc -> running("diorama_test_addon"));
 		String expected = "IllegalArgumentException; IllegalArgumentException; IllegalArgumentException; NullPointerException; NullPointerException";
 		if (!thrown.equals(expected) || !on) {
@@ -698,6 +823,61 @@ final class AddonWaypointsTest {
 		context.runOnClient(mc -> {
 			apply(batch().remove(id));
 			WaypointStore.get().deleteFolder("Owed folder");
+		});
+	}
+
+	/**
+	 * A folder a waypoint names that folders.json doesn't have, as a refused folders.json write and
+	 * a restart leave: an update that doesn't name a folder doesn't make it, so the other waypoint
+	 * naming it doesn't move into it; and an update that takes the first out of it is a change,
+	 * saved, so it's out of it on disk too.
+	 */
+	private static void danglingFolders(ClientGameTestContext context, List<String> wrong) {
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		String folder = "Dangling folder";
+		Waypoint[] both = context.computeOnClient(mc -> {
+			Waypoint one = new Waypoint("Dangling one", at.getX() + 1, at.getY(), at.getZ() + 14, "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint two = new Waypoint("Dangling two", at.getX() + 2, at.getY(), at.getZ() + 14, "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint three = new Waypoint("Dangling three", at.getX() + 3, at.getY(), at.getZ() + 14, "minecraft:overworld", Waypoint.PALETTE[2]);
+			one.folder = folder;
+			two.folder = folder;
+			three.folder = "Another dangling folder";
+			// Added as a file read at the start brings them: in folders folders.json doesn't have.
+			WaypointStore.get().add(one);
+			WaypointStore.get().add(two);
+			WaypointStore.get().add(three);
+			return new Waypoint[] {one, two, three};
+		});
+		UUID one = both[0].id;
+		UUID two = both[1].id;
+		UUID three = both[2].id;
+		String renamed = context.computeOnClient(mc -> {
+			EditResult result = apply(batch().update(one, WaypointUpdate.builder().name("Dangling renamed").build()));
+			return "changed " + result.changed() + ", folder made " + (WaypointStore.get().folderName(folder) != null) + ", the other's folder "
+				+ waypoints().get(two).flatMap(dev.diorama.api.Waypoint::folder).orElse("none");
+		});
+		if (!renamed.equals("changed true, folder made false, the other's folder none")) {
+			wrong.add("A rename of a waypoint in a folder folders.json doesn't have: " + renamed + " (expected changed true, folder made false, the other's folder none)");
+		}
+		int saves = context.computeOnClient(mc -> WaypointStore.saves());
+		String cleared = context.computeOnClient(mc -> {
+			EditResult result = apply(batch().update(three, WaypointUpdate.builder().folder("").build()));
+			return "changed " + result.changed() + ", saved " + result.saved();
+		});
+		int clearSaves = context.computeOnClient(mc -> WaypointStore.saves()) - saves;
+		String reread = context.computeOnClient(mc -> {
+			WaypointStore.onLeave();
+			return WaypointStore.get().all().stream().filter(w -> w.id.equals(three)).map(w -> w.name + " in \"" + w.folder + "\"").toList().toString();
+		});
+		String expected = "[Dangling three in \"\"]";
+		if (!cleared.equals("changed true, saved true") || clearSaves != 1 || !reread.equals(expected)) {
+			wrong.add("Taking a waypoint out of a folder folders.json doesn't have: " + cleared + ", " + clearSaves + " saves (expected changed true, saved true, 1 save); read"
+				+ " again from disk " + reread + " (expected " + expected + ")");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: a folder folders.json doesn't have: renamed {}; cleared {}; read again {}", renamed, cleared, reread);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			store.all().stream().filter(w -> w.id.equals(one) || w.id.equals(two) || w.id.equals(three)).toList().forEach(store::remove);
 		});
 	}
 
@@ -781,7 +961,7 @@ final class AddonWaypointsTest {
 			apply(batch().update(id, WaypointUpdate.builder().name("Twin renamed").build()));
 			String stored = WaypointStore.get().all().stream().filter(w -> w.id.equals(id)).map(w -> w.name).toList().toString();
 			boolean[] removed = new boolean[1];
-			removed[0] = apply(batch().remove(id)).missing().isEmpty();
+			removed[0] = apply(batch().remove(id)).changed();
 			String left = WaypointStore.get().all().stream().filter(w -> w.id.equals(id)).map(w -> w.name + "@" + (w.x - at.getX())).toList().toString();
 			String shownNow = waypoints().get(id).map(w -> w.name() + "@" + (w.pos().x() - at.getX())).orElse("gone");
 			return "listed " + listed + ", get() at +" + x + ", stored after a rename " + stored + ", removed " + removed[0] + ", left " + left + ", get() then " + shownNow;
@@ -811,7 +991,7 @@ final class AddonWaypointsTest {
 			calls[1] = thrown(waypoints::all);
 			calls[2] = thrown(() -> waypoints.get(UUID.randomUUID()));
 			calls[3] = thrown(waypoints::revision);
-			calls[4] = thrown(() -> waypoints.edit(world, WaypointBatch.empty()));
+			calls[4] = thrown(() -> waypoints.edit(world, 1, WaypointBatch.empty()));
 		}, "Diorama test, not the client thread");
 		other.start();
 		try {
@@ -878,6 +1058,121 @@ final class AddonWaypointsTest {
 		}
 		context.setScreen(() -> null);
 		removeIds(context, List.of(other));
+	}
+
+	/**
+	 * The list's Delete, clicked once, deletes on the second click only what it was clicked for,
+	 * when the rows are made again in between and two stored waypoints share an ID. With two rows
+	 * selected, one of the twins among them, an automatic pin appearing (a death) makes the rows
+	 * again: the confirming click deletes the two rows, not the twin left out. With one twin
+	 * selected alone, deleted elsewhere (from the map, say) before the second click: the Delete is
+	 * asked again, rather than moving to the other twin.
+	 */
+	private static void listTwins(ClientGameTestContext context, List<String> wrong) {
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		Waypoint[] made = context.computeOnClient(mc -> {
+			Waypoint one = new Waypoint("Twin row A", at.getX() + 2, at.getY(), at.getZ() - 6, "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint two = new Waypoint("Twin row B", at.getX() + 3, at.getY(), at.getZ() - 6, "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint third = new Waypoint("Twin row C", at.getX() + 4, at.getY(), at.getZ() - 6, "minecraft:overworld", Waypoint.PALETTE[2]);
+			two.id = one.id;
+			WaypointStore.get().add(one);
+			WaypointStore.get().add(two);
+			WaypointStore.get().add(third);
+			return new Waypoint[] {one, two, third};
+		});
+		context.setScreen(() -> new WaypointListScreen(null));
+		context.waitTicks(3);
+		// Twin A, then Twin C with Ctrl, then Delete once.
+		select(context, made[0]);
+		context.waitTicks(2);
+		context.getInput().holdControl();
+		context.waitTicks(1);
+		select(context, made[2]);
+		context.getInput().releaseControl();
+		context.waitTicks(2);
+		clickDelete(context);
+		boolean armed = context.computeOnClient(mc -> confirmButton(mc.gui.screen()) != null);
+		Waypoint[] death = new Waypoint[1];
+		context.runOnClient(mc -> {
+			death[0] = new Waypoint("Twin death", at.getX() + 5003, at.getY(), at.getZ(), "minecraft:overworld", 0xFFFFFFFF);
+			death[0].kind = Waypoint.Kind.DEATH;
+			WaypointStore.get().add(death[0]);
+		});
+		context.waitTicks(3);
+		String selected = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selection().stream().map(w -> w.name).sorted().toList().toString());
+		var confirm = context.computeOnClient(mc -> confirmButton(mc.gui.screen()));
+		if (confirm != null) {
+			DioramaClientTest.clickAt(context, confirm);
+			context.waitTicks(2);
+		}
+		String left = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.name.startsWith("Twin row")).map(w -> w.name).sorted().toList().toString());
+		if (!armed || !selected.equals("[Twin row A, Twin row C]") || !left.equals("[Twin row B]")) {
+			wrong.add("The list's Delete for two rows, a twin among them, as an automatic pin appears before the second click: armed " + armed + ", selected then " + selected
+				+ " (expected [Twin row A, Twin row C]); left after the second click " + left + " (expected [Twin row B])");
+		}
+
+		// Two more twins: the first selected alone, Delete clicked once, then it's deleted from elsewhere.
+		Waypoint[] pair = context.computeOnClient(mc -> {
+			Waypoint one = new Waypoint("Twin row E", at.getX() + 5, at.getY(), at.getZ() - 6, "minecraft:overworld", Waypoint.PALETTE[2]);
+			Waypoint two = new Waypoint("Twin row F", at.getX() + 6, at.getY(), at.getZ() - 6, "minecraft:overworld", Waypoint.PALETTE[2]);
+			two.id = one.id;
+			WaypointStore.get().add(one);
+			WaypointStore.get().add(two);
+			return new Waypoint[] {one, two};
+		});
+		context.waitTicks(3);
+		select(context, pair[0]);
+		context.waitTicks(2);
+		clickDelete(context);
+		boolean armedOne = context.computeOnClient(mc -> confirmButton(mc.gui.screen()) != null);
+		// Deleted from the map's menu, say, while the list waits for the second click.
+		context.runOnClient(mc -> WaypointStore.get().remove(pair[0]));
+		context.waitTicks(3);
+		var confirmOne = context.computeOnClient(mc -> confirmButton(mc.gui.screen()));
+		String selectedOne = context.computeOnClient(mc -> ((WaypointListScreen) mc.gui.screen()).selection().stream().map(w -> w.name).toList().toString());
+		context.takeScreenshot("addon-api-17-list-twin-deleted-elsewhere");
+		if (confirmOne != null) {
+			DioramaClientTest.clickAt(context, confirmOne);
+			context.waitTicks(2);
+		}
+		String leftOne = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.name.startsWith("Twin row E") || w.name.startsWith("Twin row F"))
+			.map(w -> w.name).toList().toString());
+		if (!armedOne || confirmOne != null || !selectedOne.equals("[]") || !leftOne.equals("[Twin row F]")) {
+			wrong.add("The list's Delete for one twin, deleted elsewhere before the second click: armed " + armedOne + ", still armed after " + (confirmOne != null)
+				+ " (expected false), selected then " + selectedOne + " (expected []); left " + leftOne + " (expected [Twin row F])");
+		}
+		context.setScreen(() -> null);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			store.all().stream().filter(w -> w.name.startsWith("Twin row")).toList().forEach(store::remove);
+			store.remove(death[0]);
+		});
+		Diorama.LOGGER.info("addon-api waypoints: the list's Delete with twins: {} > {}; one twin deleted elsewhere: {} > {}", selected, left, selectedOne, leftOne);
+	}
+
+	/** Clicks the selected rows' Delete once. */
+	private static void clickDelete(ClientGameTestContext context) {
+		String delete = net.minecraft.network.chat.Component.translatable("diorama.waypoint.delete").getString();
+		DioramaClientTest.clickAt(context, context.computeOnClient(mc -> {
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof net.minecraft.client.gui.components.Button button && button.visible && button.getMessage().getString().equals(delete)) {
+					return button;
+				}
+			}
+			throw new AssertionError("No Delete button on the selected rows");
+		}));
+		context.waitTicks(2);
+	}
+
+	/** The red Click again to delete showing on the selected rows, for one or several, or null if Delete isn't waiting for its second click. */
+	private static net.minecraft.client.gui.components.@org.jspecify.annotations.Nullable Button confirmButton(net.minecraft.client.gui.screens.Screen screen) {
+		String once = net.minecraft.network.chat.Component.translatable("diorama.menu.delete_confirm").getString();
+		for (var child : screen.children()) {
+			if (child instanceof net.minecraft.client.gui.components.Button button && button.visible && button.getMessage().getString().startsWith(once)) {
+				return button;
+			}
+		}
+		return null;
 	}
 
 	/**
@@ -1012,6 +1307,56 @@ final class AddonWaypointsTest {
 		Diorama.LOGGER.info("addon-api waypoints: editor saved over an addon's move: {}", after);
 		context.setScreen(() -> null);
 		removeIds(context, List.of(shared));
+
+		// The player types a new Y while the addon moves the waypoint along X and Z: Save keeps both.
+		UUID axes = addOne(context, "Edited on two axes", 5, -5);
+		Waypoint axesWaypoint = context.computeOnClient(mc -> WaypointStore.get().all().stream().filter(w -> w.id.equals(axes)).findFirst().orElseThrow());
+		BlockPos start = context.computeOnClient(mc -> new BlockPos(axesWaypoint.x, axesWaypoint.y, axesWaypoint.z));
+		context.setScreen(() -> new WaypointEditScreen(null, axesWaypoint, false));
+		context.waitTicks(3);
+		DioramaClientTest.typeInto(context, 3, Integer.toString(start.getY() + 7));
+		context.runOnClient(mc -> apply(batch().update(axes, WaypointUpdate.builder().pos(BlockCoord.of(start.getX() + 30, start.getY(), start.getZ() - 20)).build())));
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		String axesAfter = context.computeOnClient(mc -> waypoints().get(axes).map(w -> (w.pos().x() - start.getX()) + "," + (w.pos().y() - start.getY()) + ","
+			+ (w.pos().z() - start.getZ())).orElse("gone"));
+		if (!axesAfter.equals("30,7,-20")) {
+			wrong.add("The editor's Save after the player typed a new Y while an addon moved the waypoint along X and Z: moved by " + axesAfter
+				+ " (expected 30,7,-20: the addon's X and Z, the player's Y)");
+		}
+		context.setScreen(() -> null);
+
+		// The player types a new X while the addon moves the waypoint to the Nether: the player's place, Overworld and all three coordinates, wins.
+		BlockPos home = context.computeOnClient(mc -> new BlockPos(axesWaypoint.x, axesWaypoint.y, axesWaypoint.z));
+		context.setScreen(() -> new WaypointEditScreen(null, axesWaypoint, false));
+		context.waitTicks(3);
+		DioramaClientTest.typeInto(context, 2, Integer.toString(home.getX() + 3));
+		context.runOnClient(mc -> apply(batch().update(axes, WaypointUpdate.builder().dimension(DimensionId.NETHER).pos(BlockCoord.of(home.getX() / 8, 70, home.getZ() / 8)).build())));
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		String dimensionAfter = context.computeOnClient(mc -> waypoints().get(axes).map(w -> w.dimension() + " " + (w.pos().x() - home.getX()) + "," + (w.pos().y() - home.getY())
+			+ "," + (w.pos().z() - home.getZ())).orElse("gone"));
+		if (!dimensionAfter.equals("minecraft:overworld 3,0,0")) {
+			wrong.add("The editor's Save after the player typed a new X while an addon moved the waypoint to the Nether: " + dimensionAfter
+				+ " (expected minecraft:overworld 3,0,0: where the editor showed it, with the player's X)");
+		}
+		context.setScreen(() -> null);
+
+		// The player only renames it while the addon moves it to the Nether: the addon's place stays.
+		context.setScreen(() -> new WaypointEditScreen(null, axesWaypoint, false));
+		context.waitTicks(3);
+		DioramaClientTest.typeInto(context, 0, "Renamed, not moved");
+		context.runOnClient(mc -> apply(batch().update(axes, WaypointUpdate.builder().dimension(DimensionId.NETHER).pos(BlockCoord.of(11, 70, 12)).build())));
+		DioramaClientTest.clickButton(context, "diorama.waypoint.save");
+		context.waitTicks(3);
+		String renamedOnly = context.computeOnClient(mc -> waypoints().get(axes).map(w -> w.name() + " " + w.dimension() + " " + w.pos().x() + "," + w.pos().y() + "," + w.pos().z())
+			.orElse("gone"));
+		if (!renamedOnly.equals("Renamed, not moved minecraft:the_nether 11,70,12")) {
+			wrong.add("The editor's Save after the player renamed a waypoint an addon moved to the Nether: " + renamedOnly + " (expected Renamed, not moved minecraft:the_nether 11,70,12)");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: editor with an addon's move: Y typed {}; X typed, moved to the Nether {}; renamed {}", axesAfter, dimensionAfter, renamedOnly);
+		context.setScreen(() -> null);
+		removeIds(context, List.of(axes));
 	}
 
 	/**
@@ -1164,13 +1509,18 @@ final class AddonWaypointsTest {
 		String sameId = (copy == null ? "no copy" : other.pins().containsKey(copy) ? other.pins().get(copy).name() : "copy deleted") + ", the other map's own copy "
 			+ (other.named("Same ID elsewhere") != null);
 
-		// Worked out on the second map, handed over after the player switched back to the main one.
+		// Worked out on the second map, handed over after the player switched back to the main one. A waypoint new on Diorama's side
+		// too, which the refused pass must not copy to the other mod.
 		context.runOnClient(mc -> other.add(new OtherMod.Pin("Raced", at.getX() + 9, at.getY(), at.getZ() - 9, "minecraft:overworld", 0x3E63DD, true, "")));
+		context.runOnClient(mc -> WaypointStore.get().add(new Waypoint("Raced here", at.getX() + 10, at.getY(), at.getZ() - 9, "minecraft:overworld", Waypoint.PALETTE[3])));
+		long versionBefore = context.computeOnClient(mc -> other.version());
+		int linksBefore = context.computeOnClient(mc -> sync.linkCount());
 		context.runOnClient(mc -> sync.beforeEdit(() -> Maps.of(key).use("minecraft:overworld", Maps.MAIN)));
 		context.runOnClient(mc -> sync.tick());
 		context.runOnClient(mc -> sync.beforeEdit(() -> {
 		}));
-		String raced = context.computeOnClient(mc -> sync.lastProblem() + "; links " + sync.linkCount() + "; Raced in Diorama "
+		String raced = context.computeOnClient(mc -> sync.lastProblem() + "; links " + sync.linkCount() + " (before " + linksBefore + "); the other mod changed "
+			+ (other.version() != versionBefore) + ", has Raced here " + (other.named("Raced here") != null) + "; Raced in Diorama "
 			+ waypoints().all().stream().filter(w -> w.name().equals("Raced")).count());
 		context.waitFor(mc -> MapSession.get() != null, 2400);
 		tick(context, sync, 3);
@@ -1182,16 +1532,117 @@ final class AddonWaypointsTest {
 		context.waitFor(mc -> MapSession.get() != null && MapSession.get().map().chunkCount() > 400, 2400);
 		tick(context, sync, 3);
 		String deleted = "the other map's copy " + (other.named("Same ID elsewhere") != null) + ", the main map's " + (copy != null && other.pins().containsKey(copy));
-		if (!sameId.equals("Linked on main, the other map's own copy true") || !raced.startsWith("Diorama's world moved before the batch was applied")
-			|| !raced.endsWith("Raced in Diorama 0") || !retried.equals("Raced in Diorama 1, in the other mod 1") || !deleted.equals("the other map's copy false, the main map's true")) {
+		String refusedTail = "; links " + linksBefore + " (before " + linksBefore + "); the other mod changed false, has Raced here false; Raced in Diorama 0";
+		if (!sameId.equals("Linked on main, the other map's own copy true") || !raced.startsWith("Diorama's waypoints or world changed before the batch was applied")
+			|| !raced.endsWith(refusedTail) || !retried.equals("Raced in Diorama 1, in the other mod 1") || !deleted.equals("the other map's copy false, the main map's true")) {
 			wrong.add("The polling sync and saved maps: a waypoint with a linked one's ID on another map: the linked copy " + sameId
-				+ " (expected Linked on main, the other map's own copy true); a batch handed over after a switch: " + raced + " (expected the world moved, nothing applied);"
+				+ " (expected Linked on main, the other map's own copy true); a batch handed over after a switch: " + raced + " (expected the world moved, nothing applied, "
+				+ "nothing changed on either side: ..." + refusedTail + ");"
 				+ " on the next ticks " + retried + " (expected 1 and 1); after the second map was deleted, " + deleted + " (expected the other map's copy false, the main map's true)");
 		}
 		Diorama.LOGGER.info("addon-api waypoints: sync and saved maps: {}; {}; {}; {}", sameId, raced, retried, deleted);
 		removeNamed(context, "Linked on main");
 		removeNamed(context, "Raced");
 		tick(context, sync, 3);
+	}
+
+	/**
+	 * A link matches its waypoint by dimension, saved map and ID together. A linked waypoint in the
+	 * Overworld has a twin with its ID in the Nether, stored after it, so all() shows only the
+	 * first. The player deletes the first: its copy in the other mod goes, and the twin, which
+	 * all() shows now, gets a copy of its own rather than taking over the link (after which the
+	 * other mod deleting that copy would delete the twin).
+	 */
+	private static void syncSameIdElsewhere(ClientGameTestContext context, List<String> wrong) {
+		PollingSync sync = context.computeOnClient(mc -> new PollingSync(TestAddon.api()));
+		OtherMod other = sync.other();
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		tick(context, sync, 3);
+		Waypoint linked = context.computeOnClient(mc -> {
+			Waypoint w = new Waypoint("Linked here", at.getX() + 7, at.getY(), at.getZ() - 13, "minecraft:overworld", Waypoint.PALETTE[1]);
+			WaypointStore.get().add(w);
+			return w;
+		});
+		tick(context, sync, 3);
+		String copy = other.named("Linked here");
+		context.runOnClient(mc -> {
+			Waypoint twin = new Waypoint("Same ID in the Nether", 30, 70, 40, "minecraft:the_nether", Waypoint.PALETTE[3]);
+			twin.id = linked.id;
+			WaypointStore.get().add(twin);
+		});
+		tick(context, sync, 3);
+		context.runOnClient(mc -> WaypointStore.get().remove(linked));
+		tick(context, sync, 3);
+		String twinCopy = other.named("Same ID in the Nether");
+		String after = "the linked copy gone " + (copy != null && !other.pins().containsKey(copy)) + ", the twin's own copy " + (twinCopy != null && !twinCopy.equals(copy))
+			+ ", the twin in Diorama " + context.computeOnClient(mc -> waypoints().get(linked.id).map(dev.diorama.api.Waypoint::name).orElse("none"));
+		String expected = "the linked copy gone true, the twin's own copy true, the twin in Diorama Same ID in the Nether";
+		if (copy == null || !after.equals(expected)) {
+			wrong.add("The polling sync and a twin with a linked waypoint's ID in another dimension, after the linked one was deleted: copied first " + (copy != null) + "; "
+				+ after + " (expected " + expected + ")");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: sync and a twin in another dimension: {}", after);
+		removeNamed(context, "Same ID in the Nether");
+		tick(context, sync, 3);
+	}
+
+	/**
+	 * The sync while automatic pins appear. A death pin appears between the sync working out its
+	 * batch and handing it over: the batch isn't applied, the next pass applies it, and then it
+	 * settles. A bed pin appearing while it's idle makes one pass and no edit.
+	 */
+	private static void syncAutomaticPins(ClientGameTestContext context, List<String> wrong) {
+		PollingSync sync = context.computeOnClient(mc -> new PollingSync(TestAddon.api()));
+		OtherMod other = sync.other();
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		tick(context, sync, 3);
+		Waypoint[] pins = new Waypoint[2];
+		context.runOnClient(mc -> other.add(new OtherMod.Pin("Mid-sync pin", at.getX() - 7, at.getY(), at.getZ() - 13, "minecraft:overworld", 0x3E63DD, true, "")));
+		context.runOnClient(mc -> sync.beforeEdit(() -> {
+			if (pins[0] == null) {
+				pins[0] = new Waypoint("Mid-sync death", at.getX() + 5004, at.getY(), at.getZ(), "minecraft:overworld", 0xFFFFFFFF);
+				pins[0].kind = Waypoint.Kind.DEATH;
+				WaypointStore.get().add(pins[0]);
+			}
+		}));
+		int edits = context.computeOnClient(mc -> sync.edits());
+		int passes = context.computeOnClient(mc -> sync.passes());
+		context.runOnClient(mc -> sync.tick());
+		String refused = context.computeOnClient(mc -> sync.lastProblem() + "; in Diorama " + waypoints().all().stream().filter(w -> w.name().equals("Mid-sync pin")).count());
+		tick(context, sync, 3);
+		String retried = context.computeOnClient(mc -> "in Diorama " + waypoints().all().stream().filter(w -> w.name().equals("Mid-sync pin")).count() + ", edits "
+			+ (sync.edits() - edits) + ", passes " + (sync.passes() - passes));
+		context.runOnClient(mc -> sync.beforeEdit(() -> {
+		}));
+		int idleEdits = context.computeOnClient(mc -> sync.edits());
+		int idlePasses = context.computeOnClient(mc -> sync.passes());
+		long version = context.computeOnClient(mc -> other.version());
+		tick(context, sync, 20);
+		context.runOnClient(mc -> {
+			pins[1] = new Waypoint(Waypoint.BED_NAME, at.getX() + 5005, at.getY(), at.getZ(), "minecraft:overworld", 0xFFE5484D);
+			pins[1].kind = Waypoint.Kind.BED;
+			WaypointStore.get().add(pins[1]);
+		});
+		tick(context, sync, 5);
+		String idle = context.computeOnClient(mc -> "edits " + (sync.edits() - idleEdits) + ", passes " + (sync.passes() - idlePasses) + ", the other mod changed "
+			+ (other.version() != version));
+		String expectedRetry = "in Diorama 1, edits 1, passes 2";
+		String expectedIdle = "edits 0, passes 1, the other mod changed false";
+		if (!refused.startsWith("Diorama's waypoints or world changed before the batch was applied") || !refused.endsWith("in Diorama 0") || !retried.equals(expectedRetry)
+			|| !idle.equals(expectedIdle)) {
+			wrong.add("The polling sync with a death pin appearing mid-pass: " + refused + " (expected refused, in Diorama 0); then " + retried + " (expected " + expectedRetry
+				+ "); 20 idle ticks and a bed pin appearing: " + idle + " (expected " + expectedIdle + ")");
+		}
+		Diorama.LOGGER.info("addon-api waypoints: sync with automatic pins: {}; {}; idle {}", refused, retried, idle);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			for (Waypoint pin : pins) {
+				if (pin != null) {
+					store.remove(pin);
+				}
+			}
+		});
+		removeNamed(context, "Mid-sync pin");
 	}
 
 	/**
@@ -1247,7 +1698,7 @@ final class AddonWaypointsTest {
 	static void left(ClientGameTestContext context) {
 		String read = context.computeOnClient(mc -> {
 			World gone = new World(worldId, DimensionId.OVERWORLD, Map.of(), Map.of());
-			EditResult result = waypoints().edit(gone, batch().add(NewWaypoint.builder("After leaving", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
+			EditResult result = waypoints().edit(gone, 1, batch().add(NewWaypoint.builder("After leaving", DimensionId.OVERWORLD, BlockCoord.of(0, 64, 0)).build()).build());
 			return api().world() + " " + waypoints().all().size() + " " + waypoints().revision() + " applied " + result.applied();
 		});
 		if (!read.equals("Optional.empty 0 0 applied false")) {
@@ -1426,7 +1877,7 @@ final class AddonWaypointsTest {
 				for (int i = 0; i < 10; i++) {
 					batch.update(ids.get(r * 10 + i), WaypointUpdate.builder().name("Renamed " + r + " " + i).build());
 				}
-				waypoints.edit(api().world().orElseThrow(), batch.build());
+				waypoints.edit(api().world().orElseThrow(), waypoints.revision(), batch.build());
 				// What a sync does next: reads the list again.
 				waypoints.all();
 				nanos[round] = System.nanoTime() - start;

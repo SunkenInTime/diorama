@@ -88,7 +88,7 @@ public final class WaypointEditScreen extends Screen {
 	 */
 	private final Opened opened;
 
-	private record Opened(String name, String shownName, String initials, int x, int y, int z, int color, boolean visible, String icon, String folder) {
+	private record Opened(String name, String shownName, String initials, String dimension, int x, int y, int z, int color, boolean visible, String icon, String folder) {
 	}
 
 	public WaypointEditScreen(@Nullable Screen parent, Waypoint waypoint, boolean isNew) {
@@ -102,7 +102,7 @@ public final class WaypointEditScreen extends Screen {
 		WaypointStore store = WaypointStore.get();
 		String known = store == null ? null : store.folderName(waypoint.folder);
 		this.folder = known == null ? "" : known;
-		this.opened = new Opened(waypoint.name, waypoint.shownName(), waypoint.initials, waypoint.x, waypoint.y, waypoint.z, this.color, this.visible, this.icon,
+		this.opened = new Opened(waypoint.name, waypoint.shownName(), waypoint.initials, waypoint.dimension, waypoint.x, waypoint.y, waypoint.z, this.color, this.visible, this.icon,
 			this.folder);
 		this.matchBars();
 	}
@@ -753,9 +753,18 @@ public final class WaypointEditScreen extends Screen {
 		// A new waypoint takes everything; one already saved takes only what the player changed here.
 		boolean all = this.isNew;
 		boolean renamed = all || this.renamed();
-		boolean moved = all || shown.x != this.opened.x() || shown.y != this.opened.y() || shown.z != this.opened.z();
+		// Each coordinate on its own: the player's Y and an addon's move along X both stay.
+		boolean movedX = all || shown.x != this.opened.x();
+		boolean movedY = all || shown.y != this.opened.y();
+		boolean movedZ = all || shown.z != this.opened.z();
+		// Moved to another dimension meanwhile: coordinates typed for the one the editor shows go there
+		// with all three, so none of them lands in a dimension it wasn't typed for.
+		boolean otherDimension = !all && !this.waypoint.dimension.equals(this.opened.dimension()) && (movedX || movedY || movedZ);
+		if (otherDimension) {
+			movedX = movedY = movedZ = true;
+		}
 		this.waypoint.edited |= this.waypoint.kind.isPortal() && (renamed && !shown.name.equals(this.waypoint.name)
-			|| moved && (shown.x != this.waypoint.x || shown.y != this.waypoint.y || shown.z != this.waypoint.z));
+			|| movedX && shown.x != this.waypoint.x || movedY && shown.y != this.waypoint.y || movedZ && shown.z != this.waypoint.z);
 		if (renamed) {
 			this.waypoint.name = shown.name;
 		}
@@ -763,9 +772,17 @@ public final class WaypointEditScreen extends Screen {
 		if (all || !initials.equals(this.opened.initials())) {
 			this.waypoint.initials = initials;
 		}
-		if (moved) {
+		if (otherDimension) {
+			this.waypoint.dimension = this.opened.dimension();
+			store.onMapInUse(this.waypoint);
+		}
+		if (movedX) {
 			this.waypoint.x = shown.x;
+		}
+		if (movedY) {
 			this.waypoint.y = shown.y;
+		}
+		if (movedZ) {
 			this.waypoint.z = shown.z;
 		}
 		if (all || this.color != this.opened.color()) {

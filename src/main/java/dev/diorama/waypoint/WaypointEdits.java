@@ -7,6 +7,7 @@ import dev.diorama.api.ResourceId;
 import dev.diorama.api.WaypointBatch;
 import dev.diorama.api.WaypointUpdate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -17,18 +18,20 @@ import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Applies one addon's {@link WaypointBatch} to a store ({@link WaypointStore#apply}). Only
- * Diorama's code and the API's own final classes run here, never the addon's. Every step is
- * checked first, against the waypoints addons read, so a batch that names a waypoint addons may
- * not change changes nothing. Whether the batch changed anything is told from the waypoints as
- * they end up, against how they were before it: a waypoint renamed and back is no change. A
- * folder is made only for where a waypoint ends up.
+ * Applies one addon's {@link WaypointBatch} to a store ({@link WaypointStore#apply}), once the
+ * addon's world and revision were found to be the ones open now, so the waypoints addons read are
+ * the ones the batch was worked out from. Only Diorama's code and the API's own final classes run
+ * here, never the addon's. Every step is checked first, against those waypoints, so a batch that
+ * names one addons may not change, or one they don't see, changes nothing. Whether the batch
+ * changed anything is told from the waypoints as they end up, against how they were before it,
+ * as they're kept: a waypoint renamed and back is no change. Folders are looked up, and made,
+ * only for the waypoints a step put in one, and for where they end up.
  */
 final class WaypointEdits {
 	/** What a batch that changed nothing did. */
-	static final EditResult UNCHANGED = new Result(true, List.of(), List.of(), false, true);
+	static final EditResult UNCHANGED = new Result(true, List.of(), false, true);
 	/** What a batch that wasn't applied did. */
-	static final EditResult NOT_APPLIED = new Result(false, List.of(), List.of(), false, true);
+	static final EditResult NOT_APPLIED = new Result(false, List.of(), false, true);
 
 	private WaypointEdits() {
 	}
@@ -39,16 +42,16 @@ final class WaypointEdits {
 
 	/**
 	 * Applies the batch: checks every step, then makes the changes, then the folders the waypoints
-	 * ended up in. Nothing is saved here.
+	 * a step put in one ended up in. Nothing is saved here.
 	 *
-	 * @throws IllegalArgumentException if a step names a waypoint that isn't MANUAL; nothing changed
+	 * @throws IllegalArgumentException if a step names a waypoint addons don't see, one that isn't
+	 *     MANUAL, or one an earlier step removes; nothing changed
 	 */
 	static Applied apply(WaypointStore store, String by, WaypointBatch batch) {
 		WaypointSnapshots snapshots = store.snapshots();
 		snapshots.refresh();
 		// First every step is checked and its waypoint found, so a refusal changes nothing.
 		List<Planned> plan = new ArrayList<>(batch.steps().size());
-		List<UUID> missing = new ArrayList<>();
 		Set<UUID> removed = new HashSet<>();
 		// Every ID in use, made only for a batch that adds: a new waypoint's random ID is checked against them.
 		Set<UUID> taken = null;
@@ -65,10 +68,15 @@ final class WaypointEdits {
 				continue;
 			}
 			UUID id = step instanceof WaypointBatch.Update update ? update.id() : ((WaypointBatch.Remove) step).id();
-			WaypointSnapshots.Snapshot snapshot = removed.contains(id) ? null : snapshots.snapshot(id);
+			if (removed.contains(id)) {
+				throw new IllegalArgumentException("An earlier step of the batch removes waypoint " + id + ", so a later one can't change or remove it. Nothing of the"
+					+ " batch was applied");
+			}
+			WaypointSnapshots.Snapshot snapshot = snapshots.snapshot(id);
 			if (snapshot == null) {
-				missing.add(id);
-				continue;
+				// The revision matched, so the addon read the waypoints as they are: it never saw this one.
+				throw new IllegalArgumentException("Waypoint " + id + " isn't one of the waypoints all() lists, so no step can change or remove it. Nothing of the"
+					+ " batch was applied");
 			}
 			if (snapshot.source.kind != Waypoint.Kind.MANUAL) {
 				throw new IllegalArgumentException("Waypoint " + id + " is a " + snapshot.kind() + " waypoint, which addons can read but not change: only MANUAL ones are"
@@ -84,22 +92,26 @@ final class WaypointEdits {
 		Map<Waypoint, Before> before = new IdentityHashMap<>();
 		for (Planned planned : plan) {
 			if (planned.step() instanceof WaypointBatch.Update && !before.containsKey(planned.target())) {
-				before.put(planned.target(), new Before(planned.target(), store));
+				before.put(planned.target(), new Before(planned.target()));
 			}
 		}
 		List<UUID> added = new ArrayList<>();
-		List<Waypoint> placed = new ArrayList<>();
-		Set<Waypoint> gone = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+		// The waypoints a step put in a folder: only theirs is looked up, and made if there's none.
+		Set<Waypoint> foldered = Collections.newSetFromMap(new IdentityHashMap<>());
+		Set<Waypoint> gone = Collections.newSetFromMap(new IdentityHashMap<>());
 		boolean changed = false;
 		for (Planned planned : plan) {
 			if (planned.made() != null) {
 				store.addEdited(planned.made());
 				added.add(planned.made().id);
-				placed.add(planned.made());
+				foldered.add(planned.made());
 				changed = true;
 			} else if (planned.step() instanceof WaypointBatch.Update update) {
-				update(store, Objects.requireNonNull(planned.target()), update.update());
-				placed.add(planned.target());
+				Waypoint target = Objects.requireNonNull(planned.target());
+				update(store, target, update.update());
+				if (update.update().folder().isPresent()) {
+					foldered.add(target);
+				}
 			} else {
 				store.removeEdited(Objects.requireNonNull(planned.target()));
 				gone.add(planned.target());
@@ -108,19 +120,19 @@ final class WaypointEdits {
 		}
 		// Folders last, for where the waypoints ended up: one an update moved through isn't made.
 		boolean madeFolders = false;
-		for (Waypoint waypoint : placed) {
+		for (Waypoint waypoint : foldered) {
 			if (!gone.contains(waypoint)) {
 				madeFolders |= store.useFolder(waypoint);
 			}
 		}
 		for (Map.Entry<Waypoint, Before> each : before.entrySet()) {
-			if (!gone.contains(each.getKey()) && !each.getValue().same(each.getKey(), store)) {
+			if (!gone.contains(each.getKey()) && !each.getValue().same(each.getKey())) {
 				changed = true;
 			}
 		}
 		// A made folder is a change too, though only a waypoint that changed folders can make one.
 		changed |= madeFolders;
-		return new Applied(changed, List.copyOf(added), List.copyOf(missing), madeFolders);
+		return new Applied(changed, List.copyOf(added), madeFolders);
 	}
 
 	private static Waypoint made(NewWaypoint waypoint, String by) {
@@ -165,30 +177,30 @@ final class WaypointEdits {
 		update.folder().ifPresent(folder -> target.folder = folder);
 	}
 
-	/** What addons read of a waypoint, before a batch. */
-	private record Before(String name, String initials, String icon, int x, int y, int z, int color, boolean visible, @Nullable String folder, String dimension,
-		String map) {
-		Before(Waypoint waypoint, WaypointStore store) {
+	/**
+	 * A waypoint as the store keeps it, before a batch: its folder as written in the file, not as
+	 * the folders resolve it, so taking a waypoint out of a folder that no longer exists is a change
+	 * that's saved.
+	 */
+	private record Before(String name, String initials, String icon, int x, int y, int z, int color, boolean visible, String folder, String dimension, String map) {
+		Before(Waypoint waypoint) {
 			this(waypoint.name, waypoint.initials, waypoint.icon == null ? "" : waypoint.icon, waypoint.x, waypoint.y, waypoint.z, waypoint.color, waypoint.visible,
-				store.folderName(waypoint.folder), waypoint.dimension, Maps.id(waypoint.map));
+				waypoint.folder == null ? "" : waypoint.folder, waypoint.dimension, Maps.id(waypoint.map));
 		}
 
-		boolean same(Waypoint waypoint, WaypointStore store) {
-			return this.equals(new Before(waypoint, store));
+		boolean same(Waypoint waypoint) {
+			return this.equals(new Before(waypoint));
 		}
 	}
 
 	/** A batch applied, before its save: whether it changed anything, and what it reports. */
-	record Applied(boolean changed, List<UUID> added, List<UUID> missing, boolean madeFolders) {
+	record Applied(boolean changed, List<UUID> added, boolean madeFolders) {
 		/** What it reports once saved, or with nothing to save. */
 		EditResult result(boolean saved) {
-			if (!this.changed) {
-				return this.missing.isEmpty() ? UNCHANGED : new Result(true, List.of(), this.missing, false, true);
-			}
-			return new Result(true, this.added, this.missing, true, saved);
+			return this.changed ? new Result(true, this.added, true, saved) : UNCHANGED;
 		}
 	}
 
-	private record Result(boolean applied, List<UUID> added, List<UUID> missing, boolean changed, boolean saved) implements EditResult {
+	private record Result(boolean applied, List<UUID> added, boolean changed, boolean saved) implements EditResult {
 	}
 }

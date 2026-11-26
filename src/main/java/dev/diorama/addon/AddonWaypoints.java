@@ -46,12 +46,13 @@ final class AddonWaypoints implements Waypoints {
 	}
 
 	@Override
-	public EditResult edit(World preparedFor, WaypointBatch batch) {
+	public EditResult edit(World preparedFor, long revision, WaypointBatch batch) {
 		Addon.checkThread();
 		Objects.requireNonNull(preparedFor, "preparedFor");
 		Objects.requireNonNull(batch, "batch");
 		WaypointStore store = CurrentWorld.storeIfStill(preparedFor);
-		if (store == null || this.addon.failed()) {
+		// The waypoints the batch was worked out from, or it would land on whatever took their place.
+		if (store == null || this.addon.failed() || store.publishedRevision() != revision) {
 			return WaypointStore.notApplied();
 		}
 		// No addon code runs from here on: the world can't move under the batch.
