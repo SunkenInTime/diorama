@@ -482,11 +482,12 @@ public final class ModelFaces {
 					vBottom = corners.at[o + 4];
 				}
 			}
-			// A grown box (a hat layer) is bigger than its texture rectangle by the same on every side.
+			// A grown box (a hat layer) is bigger than its texture rectangle by the same on every side,
+			// and a shrunk one (a snow golem's head) smaller by the same.
 			// A turned one (a hat's brim) shows another of its faces at the front.
 			float grownX = maxX - minX - w;
 			float grownY = maxY - minY - h;
-			boolean straight = !back && Math.abs(grownX - grownY) < 0.01F && grownX > -0.01F && grownX < 2;
+			boolean straight = !back && Math.abs(grownX - grownY) < 0.01F && grownX > -2 && grownX < 2;
 			// The far side goes under the near one.
 			out.add(new Front((minX + maxX) / 2, (minY + maxY) / 2, back ? z + 0.01F : z, w, h, straight, uLeft, vTop, uRight, vBottom));
 			if (!anyFace) {
