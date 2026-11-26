@@ -186,6 +186,8 @@ public final class MapScreen extends Screen {
 	private EditBox goBox;
 	/** Whether the box is open; it stays open through a resize. */
 	private boolean goOpen;
+	/** Whether this screen is the one on screen: false once closed, and while another screen is over it. */
+	private boolean shown;
 	/** Why the box couldn't act on what's in it, said above it; null with nothing to say. */
 	private @Nullable Component goProblem;
 	/** The place the box last went to, marked on the map for a while. */
@@ -208,17 +210,22 @@ public final class MapScreen extends Screen {
 		private final int z;
 		private boolean heightKnown;
 		private final String dimension;
+		/** The slice and facing the height is looked up on: a look-up answered after either changed is dropped. */
+		private final int layer;
+		private final Facing facing;
 		private final long until;
 		/** The view's middle as this mark set it: a later correction moves the view only if the player hasn't. */
 		private double centerU;
 		private double centerV;
 
-		private GoMark(int x, int y, int z, boolean heightKnown, String dimension, long until) {
+		private GoMark(int x, int y, int z, boolean heightKnown, String dimension, int layer, Facing facing, long until) {
 			this.x = x;
 			this.y = y;
 			this.z = z;
 			this.heightKnown = heightKnown;
 			this.dimension = dimension;
+			this.layer = layer;
+			this.facing = facing;
 			this.until = until;
 		}
 	}
@@ -228,6 +235,11 @@ public final class MapScreen extends Screen {
 	private static final long GO_MARK_FADE_MS = 2_000;
 	/** How many times the ground is looked up for a place without a height: each look corrects the last one's guess. */
 	private static final int GROUND_TRIES = 4;
+	/**
+	 * Where else the ground is looked for when nothing shows at the first guess: high ground at the
+	 * edge of what's mapped is drawn rows above where Y 64 would be, over land the map hasn't seen.
+	 */
+	private static final int[] OTHER_GROUND = {96, 128, 32, 160, 0, 192, 224, -32};
 	private static final int GO_BOX_WIDTH = 140;
 	/** The longest chat line, which a shared waypoint can fill. */
 	private static final int GO_BOX_LENGTH = 256;
@@ -328,6 +340,7 @@ public final class MapScreen extends Screen {
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.draw.button")).build());
 		this.draw.init(this.font, this::addRenderableWidget, this::setFocused, (x, y) -> this.spotAt(x, y, false).thenApply(MapLevel.Spot::pos),
 			(u, v) -> this.spotAtMap(u, v, false).thenApply(MapLevel.Spot::pos), this::dimension);
+		this.shown = true;
 		this.goButton = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.toggleGo())
 			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.go_to")).build());
 		// A resize builds the screen again: what was typed stays.
@@ -368,7 +381,11 @@ public final class MapScreen extends Screen {
 			return;
 		}
 		int step = DrawMode.shiftDown() ? -1 : 1;
-		String next = dimensions.get(Math.floorMod(dimensions.indexOf(this.dimension()) + step, dimensions.size()));
+		this.showDimension(dimensions.get(Math.floorMod(dimensions.indexOf(this.dimension()) + step, dimensions.size())));
+	}
+
+	/** Shows the map of {@code next}, one of {@link #dimensions}. */
+	private void showDimension(String next) {
 		this.draw.leaveDimension();
 		this.closeOtherMap();
 		this.otherDimension = next.equals(this.minecraft.level.dimension().identifier().toString()) ? null : next;
@@ -382,6 +399,8 @@ public final class MapScreen extends Screen {
 		this.following = true;
 		this.layerPicked = false;
 		this.followHoldStart = -1;
+		// A mark is a place in the dimension that was shown.
+		this.goMark = null;
 		this.layer = this.otherDimension == null ? this.layerOnOpening() : TileKey.SURFACE;
 		this.spotU = Integer.MIN_VALUE;
 		this.spot = null;
@@ -871,6 +890,11 @@ public final class MapScreen extends Screen {
 			|| (button == InputConstants.MOUSE_BUTTON_MIDDLE && this.draw.active())) {
 			return false;
 		}
+		if (this.goOpen) {
+			// Typing coordinates: a binding on a mouse button waits, as one on a key does, or it would
+			// close the map over what's typed or change the dimension the coordinates are for.
+			return true;
+		}
 		return this.bindingPressed(waypointListKey, mapKey, dimensionKey, turnKey);
 	}
 
@@ -897,6 +921,10 @@ public final class MapScreen extends Screen {
 		// A press anywhere else puts the box away, as it would take the keys from it.
 		if (this.goOpen && !on(this.goBox, x, y) && !on(this.goButton, x, y)) {
 			this.closeGo();
+		}
+		// The game gives the keys to the button just clicked, after the click opened the box.
+		if (this.goOpen && this.getFocused() != this.goBox) {
+			this.setFocused(this.goBox);
 		}
 		if (!widgetTook && button == InputConstants.MOUSE_BUTTON_LEFT) {
 			int tab = this.tabAt(x, y);
@@ -1435,20 +1463,18 @@ public final class MapScreen extends Screen {
 				this.goProblem = Component.translatable("diorama.map.go_to.no_map", Waypoints.dimensionName(dimension));
 				return false;
 			}
-			this.draw.leaveDimension();
-			this.closeOtherMap();
-			this.otherDimension = dimension.equals(this.minecraft.level.dimension().identifier().toString()) ? null : dimension;
-			this.viewChanged();
+			this.showDimension(dimension);
 		}
 		this.closeGo();
 		this.menu = null;
 		// Without a height, where most ground is, or on a cave slice the slice: the map corrects it where it knows better.
 		int y = place.y() != null ? place.y() : this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
-		GoMark mark = new GoMark(place.x(), y, place.z(), place.y() != null, this.dimension(), System.currentTimeMillis() + GO_MARK_MS);
+		GoMark mark = new GoMark(place.x(), y, place.z(), place.y() != null, this.dimension(), this.layer, Projection.facing(), System.currentTimeMillis() + GO_MARK_MS);
 		this.goMark = mark;
 		this.centreOn(mark);
 		if (!mark.heightKnown) {
-			this.findGround(mark, GROUND_TRIES);
+			// A cave slice shows one height: there's nowhere else to look.
+			this.findGround(mark, y, GROUND_TRIES, this.layer == TileKey.SURFACE ? 0 : OTHER_GROUND.length);
 		}
 		return true;
 	}
@@ -1463,19 +1489,27 @@ public final class MapScreen extends Screen {
 
 	/**
 	 * Corrects the height of a mark that came without one. The map says which block shows at the
-	 * point the mark is drawn at: in the mark's own column, that's its ground. In another column, the
-	 * guess was off, that block's height is a better one, and the next look starts from it. Land the
-	 * map has never seen answers nothing, and the mark keeps its guess.
+	 * point a block of height {@code y} in the mark's column would be drawn at: in the mark's own
+	 * column, that's its ground. In another column, the guess was off, that block's height is a
+	 * better one, and the next look starts from it. Where nothing shows, the ground may still be
+	 * mapped higher or lower, so a few other heights are tried ({@link #OTHER_GROUND}); land the map
+	 * has never seen answers nothing at any of them, and the mark keeps its guess.
 	 */
-	private void findGround(GoMark mark, int tries) {
-		this.spotAtMap(Projection.u(mark.x + 0.5, mark.z + 0.5), Projection.v(mark.x + 0.5, mark.y, mark.z + 0.5), false).thenAcceptAsync(spot -> {
-			BlockPos ground = spot.pos();
-			// Another place since, or the map was closed.
-			if (this.goMark != mark || ground == null) {
+	private void findGround(GoMark mark, int y, int tries, int other) {
+		this.spotAtMap(Projection.u(mark.x + 0.5, mark.z + 0.5), Projection.v(mark.x + 0.5, y, mark.z + 0.5), false).thenAcceptAsync(spot -> {
+			// Another place since, the map was closed or is behind another screen, or it shows another
+			// slice or facing than the look-up was made on.
+			if (this.goMark != mark || !this.shown || this.layer != mark.layer || Projection.facing() != mark.facing || !mark.dimension.equals(this.dimension())) {
 				return;
 			}
-			boolean moved = ground.getY() != mark.y;
-			if (moved) {
+			BlockPos ground = spot.pos();
+			if (ground == null) {
+				if (other < OTHER_GROUND.length) {
+					this.findGround(mark, OTHER_GROUND[other], tries, other + 1);
+				}
+				return;
+			}
+			if (ground.getY() != mark.y) {
 				boolean viewLeft = !this.following && this.centerU == mark.centerU && this.centerV == mark.centerV;
 				mark.y = ground.getY();
 				if (viewLeft) {
@@ -1484,8 +1518,9 @@ public final class MapScreen extends Screen {
 			}
 			if (ground.getX() == mark.x && ground.getZ() == mark.z) {
 				mark.heightKnown = true;
-			} else if (moved && tries > 1) {
-				this.findGround(mark, tries - 1);
+			} else if (ground.getY() != y && tries > 1) {
+				// From here on the look-ups follow the ground found, not the list of heights.
+				this.findGround(mark, ground.getY(), tries - 1, OTHER_GROUND.length);
 			}
 		}, this.minecraft);
 	}
@@ -2053,8 +2088,8 @@ public final class MapScreen extends Screen {
 		this.viewport.close();
 		this.draw.close();
 		this.closeOtherMap();
-		// A look-up for it still under way finds it gone.
-		this.goMark = null;
+		// A look-up for the mark's height still under way is dropped.
+		this.shown = false;
 	}
 
 	/** The dimension the map shows. */

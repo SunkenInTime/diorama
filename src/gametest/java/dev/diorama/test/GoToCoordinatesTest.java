@@ -149,12 +149,35 @@ final class GoToCoordinatesTest {
 			}
 		});
 
-		// A place in a dimension with no map: said, and the view stays.
-		boolean went = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).goTo("/execute in diorama:nowhere run tp @s 1.5 70.0 2.5 0.0 0.0"));
-		String noMap = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).goProblem());
+		// A place in a dimension with no map: said above the open box, and the view stays.
+		clickGoButton(context);
+		context.getInput().typeChars("/execute in diorama:nowhere run tp @s 1.5 70.0 2.5 0.0 0.0");
+		context.getInput().pressKey(InputConstants.KEY_RETURN);
+		context.waitTicks(3);
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("go-to-08-no-map");
+		String noMap = context.computeOnClient(mc -> {
+			MapScreen map = (MapScreen) mc.gui.screen();
+			return map.goBox().visible ? map.goProblem() : "box closed";
+		});
 		after = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).centre());
-		if (went || noMap == null || !noMap.startsWith("No map of") || after[0] != before[0] || after[1] != before[1]) {
-			throw new AssertionError("Going to a dimension that has no map: went " + went + ", said " + noMap);
+		if (noMap == null || !noMap.startsWith("No map of") || after[0] != before[0] || after[1] != before[1]) {
+			throw new AssertionError("Going to a dimension that has no map said: " + noMap);
+		}
+		pressEscape(context);
+
+		// The mark is still there after a visit to another screen and back.
+		context.runOnClient(mc -> ((MapScreen) mc.gui.screen()).goTo("300 70 300"));
+		context.runOnClient(mc -> {
+			MapScreen map = (MapScreen) mc.gui.screen();
+			mc.gui.setScreen(new dev.diorama.SettingsScreen(map));
+			mc.gui.setScreen(map);
+		});
+		context.waitTicks(3);
+		mark = context.computeOnClient(mc -> ((MapScreen) mc.gui.screen()).goMark());
+		if (mark == null || mark[0] != 300) {
+			throw new AssertionError("The mark was gone after opening Settings over the map and coming back");
 		}
 		context.setScreen(() -> null);
 	}
@@ -167,7 +190,7 @@ final class GoToCoordinatesTest {
 		});
 		DioramaClientTest.moveCursor(context, at[0], at[1]);
 		context.getInput().pressMouse(InputConstants.MOUSE_BUTTON_LEFT);
-		context.waitTicks(3);
+		// At once, before a frame is drawn: the first key after the click is the box's.
 		context.runOnClient(mc -> {
 			MapScreen map = (MapScreen) mc.gui.screen();
 			if (!map.goBox().visible || map.getFocused() != map.goBox()) {
@@ -211,7 +234,13 @@ final class GoToCoordinatesTest {
 		read("<Alex> xaero-waypoint:Base:B:120:64:-340:5:false:0:Internal-the-nether-waypoints", 120, 64, -340, "minecraft:the_nether");
 		read("xaero-waypoint:Base:B:120:~:-340:5:false:0:Internal-overworld-waypoints", 120, null, -340, "minecraft:overworld");
 		read("120.9 -0.5", 120, null, -1, null);
-		for (String none : new String[] {"", "   ", "my base", "120", "1 2 3 4", "40000000 0", "0 99999 0", "minecraft:overworld", "x: 5"}) {
+		// A name in quotes is no place to look for coordinates.
+		read("[name:\"Base x:200\", x:120, y:80, z:-340, dim:minecraft:the_nether]", 120, 80, -340, "minecraft:the_nether");
+		read("[name:\"Y64 Base 7\", x:120, y:80, z:-340]", 120, 80, -340, null);
+		// The game reads a dimension without a namespace as its own.
+		read("/execute in the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
+		for (String none : new String[] {"", "   ", "my base", "120", "1 2 3 4", "40000000 0", "0 99999 0", "minecraft:overworld", "x: 5",
+			"/tp @s ~ 64 -340", "/tp @s ^1 ^2 ^3", "/tp Alex 12 40", "/teleport ~5 ~ ~-5"}) {
 			MapCoordinates.Place place = MapCoordinates.parse(none);
 			if (place != null) {
 				throw new AssertionError("\"" + none + "\" was read as " + place);

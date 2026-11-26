@@ -20,7 +20,8 @@ import org.jspecify.annotations.Nullable;
  * <li>{@code x: 120, z: -340}, {@code X=120 Y=64 Z=-340}, and JourneyMap's
  * {@code [x:120, y:64, z:-340, dim:minecraft:overworld]};
  * <li>{@code /tp 120 64 -340}, and the line F3+C copies,
- * {@code /execute in minecraft:overworld run tp @s 120.50 64.00 -340.50 90.00 0.00};
+ * {@code /execute in minecraft:overworld run tp @s 120.50 64.00 -340.50 90.00 0.00}; not a teleport
+ * with {@code ~} or {@code ^}, which counts from wherever its sender stood;
  * <li>a waypoint shared in chat, in Xaero's format ({@link WaypointShare}).
  * </ul>
  */
@@ -34,7 +35,12 @@ public final class MapCoordinates {
 	private static final String NUMBER = "(-?\\d{1,9}(?:\\.\\d{1,9})?)";
 	/** {@code tp} or {@code teleport}, a target that isn't a number if there is one, then three numbers. */
 	private static final Pattern TELEPORT = Pattern.compile("(?:^|[\\s/])(?:tp|teleport)\\s+(?:[^\\s\\d~-]\\S*\\s+)?" + NUMBER + "\\s+" + NUMBER + "\\s+" + NUMBER + "(?![\\w.])");
-	private static final Pattern IN_DIMENSION = Pattern.compile("execute\\s+in\\s+([a-z0-9_.-]+:[a-z0-9_./-]+)");
+	/** Any teleport command, the ones {@link #TELEPORT} can't read included: relative coordinates, a player as the destination. */
+	private static final Pattern TELEPORT_COMMAND = Pattern.compile("(?:^|[\\s/])(?:tp|teleport)(?:\\s|$)");
+	/** The dimension a command runs in; the game reads a name without a namespace as its own. */
+	private static final Pattern IN_DIMENSION = Pattern.compile("execute\\s+in\\s+((?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)");
+	/** A quoted name, which can hold anything, numbers and "x:" included. */
+	private static final Pattern QUOTED = Pattern.compile("\"[^\"]*\"");
 	private static final Pattern NAMED_DIMENSION = Pattern.compile("dim(?:ension)?\\s*[:=]\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)");
 	private static final Pattern X = labelled('x');
 	private static final Pattern Y = labelled('y');
@@ -62,11 +68,17 @@ public final class MapCoordinates {
 		if (shared.isPresent()) {
 			return new Place(shared.get().x(), shared.get().y(), shared.get().z(), shared.get().dimension());
 		}
-		String lower = text.toLowerCase(Locale.ROOT);
+		String lower = QUOTED.matcher(text.toLowerCase(Locale.ROOT)).replaceAll(" ");
 		Matcher teleport = TELEPORT.matcher(lower);
 		if (teleport.find()) {
 			Matcher in = IN_DIMENSION.matcher(lower);
-			return place(teleport.group(1), teleport.group(2), teleport.group(3), in.find() ? in.group(1) : null);
+			String dimension = in.find() ? in.group(1) : null;
+			return place(teleport.group(1), teleport.group(2), teleport.group(3), dimension == null || dimension.indexOf(':') >= 0 ? dimension : "minecraft:" + dimension);
+		}
+		if (TELEPORT_COMMAND.matcher(lower).find()) {
+			// A teleport that isn't to three plain numbers (~ and ^ count from wherever its sender stood):
+			// the numbers left in it aren't a place.
+			return null;
 		}
 		Matcher x = X.matcher(lower);
 		Matcher z = Z.matcher(lower);
