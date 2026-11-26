@@ -33,12 +33,14 @@ import net.minecraft.world.level.levelgen.Heightmap;
 final class MinimapAllocTest {
 	private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
 	private static final int FRAMES = 400;
-	/** Each frame's bytes, kept in place so counting them allocates nothing. */
-	private static final long[] SAMPLES = new long[FRAMES];
+	/** Each frame's bytes, kept in place so counting them allocates nothing; room for {@link FogMaskBuildTest}'s longer counts too. */
+	private static final long[] SAMPLES = new long[8192];
 	private static boolean registered;
 	private static boolean counting;
 	private static long before = -1;
 	private static int frames;
+	/** Bytes a test allocated inside this frame's minimap for its own checks, which aren't the minimap's: taken off. Render thread. */
+	static long excluded;
 
 	private MinimapAllocTest() {
 	}
@@ -170,15 +172,29 @@ final class MinimapAllocTest {
 		});
 	}
 
+	/** From the next frame on, counts what each frame's minimap allocates, for {@link #stopCounting}. Render thread. */
+	static void startCounting() {
+		frames = 0;
+		before = -1;
+		counting = true;
+	}
+
+	/** Each frame's bytes since {@link #startCounting}, at most as many as there's room for. Render thread. */
+	static long[] stopCounting() {
+		counting = false;
+		return Arrays.copyOf(SAMPLES, Math.min(frames, SAMPLES.length));
+	}
+
 	private static void start() {
 		if (counting) {
+			excluded = 0;
 			before = THREADS.getCurrentThreadAllocatedBytes();
 		}
 	}
 
 	private static void end() {
 		if (counting && before >= 0) {
-			long bytes = THREADS.getCurrentThreadAllocatedBytes() - before;
+			long bytes = THREADS.getCurrentThreadAllocatedBytes() - before - excluded;
 			if (frames < SAMPLES.length) {
 				SAMPLES[frames] = bytes;
 			}
@@ -202,7 +218,7 @@ final class MinimapAllocTest {
 	}
 
 	/** Puts the two probes round the minimap's HUD element, once. False where there's no way to. */
-	private static boolean register(ClientGameTestContext context) {
+	static boolean register(ClientGameTestContext context) {
 		return context.computeOnClient(mc -> {
 			if (registered) {
 				return true;
