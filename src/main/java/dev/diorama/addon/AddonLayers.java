@@ -3,6 +3,7 @@ package dev.diorama.addon;
 import dev.diorama.api.LayerContent;
 import dev.diorama.api.MapLayer;
 import dev.diorama.waypoint.WaypointStore;
+import net.minecraft.client.Minecraft;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -36,6 +37,10 @@ public final class AddonLayers {
 	 * {@link dev.diorama.api.World#worldId}). Asked each client tick, before a map draws the
 	 * layers, and before a layer takes new content, so content handed over in the new world is
 	 * never emptied for the old one's sake. With no layer open, nothing to do.
+	 *
+	 * <p>While the player is in a level whose world Diorama can't name yet, nothing happens: that
+	 * is a dimension change on a server that names its worlds for Xaero's mods, and the world is
+	 * known again a moment later, the same one or another.
 	 */
 	public static void sync() {
 		if (OPEN.isEmpty()) {
@@ -43,6 +48,9 @@ public final class AddonLayers {
 		}
 		WaypointStore store = CurrentWorld.store();
 		if (store == seenStore) {
+			return;
+		}
+		if (store == null && Minecraft.getInstance().level != null) {
 			return;
 		}
 		seenStore = store;

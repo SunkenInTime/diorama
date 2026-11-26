@@ -98,7 +98,6 @@ final class MarkersMeasure {
 			table.add(row(context, "layer open, empty", 100, 200));
 			context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
 			table.add(row(context, "layer open, empty, round minimap", 100, 200));
-			layers.clear();
 
 			// The worst lines the limits allow, on the round minimap: first, how big its circle is in blocks.
 			context.runOnClient(mc -> {
@@ -109,6 +108,7 @@ final class MarkersMeasure {
 			context.waitTicks(10);
 			double[] circle = context.computeOnClient(mc -> circleOnMinimap(py));
 			context.runOnClient(mc -> layer.close());
+			layers.clear();
 			context.runOnClient(mc -> {
 				LayerContent worst = worstLines(px, py, pz, circle);
 				for (int i = 0; i < MapLayer.MAX_OPEN; i++) {
@@ -154,6 +154,7 @@ final class MarkersMeasure {
 					LayerContent content = rings(px, py, pz, 1000, i, false);
 					long t1 = System.nanoTime();
 					long b = threads.getCurrentThreadAllocatedBytes();
+					long t1b = System.nanoTime();
 					timed.replace(content);
 					long t2 = System.nanoTime();
 					long c = threads.getCurrentThreadAllocatedBytes();
@@ -162,7 +163,7 @@ final class MarkersMeasure {
 						buildBytes += b - a;
 						buildNanos += t1 - t0;
 						takeBytes += c - b;
-						takeNanos += t2 - t1;
+						takeNanos += t2 - t1b;
 					}
 				}
 				return new long[] {buildBytes / 200, buildNanos / 200, takeBytes / 200, takeNanos / 200};

@@ -334,6 +334,11 @@ public final class AddonOverlay {
 					|| circle != null && Math.hypot(x - circle.cx, y - circle.cy) - reach * Math.sqrt(2) > circle.r) {
 					continue;
 				}
+				boolean iconFits = icon.isPresent() && fits(x, y, iconHalf, left, top, right, bottom, circle);
+				boolean dotFits = fits(x, y, dotHalf, left, top, right, bottom, circle);
+				if (!iconFits && !dotFits) {
+					continue;
+				}
 				if (drawn == MapLayer.MAX_DRAWN_MARKERS) {
 					if (!markersOverSaid) {
 						markersOverSaid = true;
@@ -342,18 +347,20 @@ public final class AddonOverlay {
 					}
 					break all;
 				}
-				int tile = icon.isPresent() ? MarkerAtlas.tile(icon.get()) : MarkerAtlas.NONE;
+				// Only an icon that is drawn takes a tile. One that wouldn't fit here isn't drawn as a dot
+				// instead, unless no pack has it, as then it is a dot wherever it is.
+				int tile = MarkerAtlas.NONE;
+				if (icon.isPresent()) {
+					if (iconFits) {
+						tile = MarkerAtlas.tile(icon.get());
+					} else if (!MarkerAtlas.missing(icon.get())) {
+						continue;
+					}
+					if (tile == MarkerAtlas.NONE && !dotFits) {
+						continue;
+					}
+				}
 				double half = tile != MarkerAtlas.NONE ? iconHalf : dotHalf;
-				if (x + half < left || x - half > right || y + half < top || y - half > bottom) {
-					continue;
-				}
-				float x0 = (float) (x - half);
-				float y0 = (float) (y - half);
-				float x1 = (float) (x + half);
-				float y1 = (float) (y + half);
-				if (circle != null && !(circle.contains(x0, y0) && circle.contains(x1, y0) && circle.contains(x0, y1) && circle.contains(x1, y1))) {
-					continue;
-				}
 				float fx = (float) x;
 				float fy = (float) y;
 				this.marker(quads, marker, tile, fx, fy, (float) half, gui);
@@ -391,6 +398,21 @@ public final class AddonOverlay {
 			graphics.disableScissor();
 		}
 		quads.settle();
+	}
+
+	/** Whether a square reaching {@code half} from (x, y) is wholly in the view, a round one's circle included. */
+	private static boolean fits(double x, double y, double half, double left, double top, double right, double bottom, @Nullable Circle circle) {
+		if (x - half < left || x + half > right || y - half < top || y + half > bottom) {
+			return false;
+		}
+		if (circle == null) {
+			return true;
+		}
+		float x0 = (float) (x - half);
+		float y0 = (float) (y - half);
+		float x1 = (float) (x + half);
+		float y1 = (float) (y + half);
+		return circle.contains(x0, y0) && circle.contains(x1, y0) && circle.contains(x0, y1) && circle.contains(x1, y1);
 	}
 
 	/** One marker's quads, reaching {@code half} from (x, y): its icon, or its dot over a dark outline. */

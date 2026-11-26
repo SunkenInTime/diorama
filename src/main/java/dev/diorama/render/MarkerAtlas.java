@@ -19,9 +19,11 @@ import org.jspecify.annotations.Nullable;
  * shows it, and keeps it while markers go on showing it. When every tile is taken, a new icon
  * takes the tile of the icon drawn longest ago, as long as no draw still waiting to reach the
  * screen uses it: the last {@link AddonOverlay#RING} draws may be, since the GUI holds on to them
- * until the end of the frame. With none free, the marker shows as a dot that frame. Icons no
- * resource pack has are remembered, up to {@link #MAX_MISSING} of them, so they aren't looked for
- * every frame. A resource reload drops it all.
+ * until the end of the frame. With none free, the marker shows as a dot that frame, and its
+ * image isn't even read. Icons no resource pack has are remembered, up to {@link #MAX_MISSING}
+ * of them, so they aren't looked for every frame, and a draw looks up at most
+ * {@link #LOOKUPS_PER_DRAW} icons it doesn't know yet: the rest show as dots and are looked up in
+ * the draws after. A resource reload drops it all.
  */
 public final class MarkerAtlas {
 	static final int SIZE = 256;
@@ -31,8 +33,13 @@ public final class MarkerAtlas {
 	private static final int ROWS = SIZE / 2 / CELL;
 	/** How many icons the texture holds at once: 210. */
 	public static final int SLOTS = COLUMNS * ROWS;
-	/** How many icon IDs with no image are remembered: the ones asked for longest ago are forgotten first. */
-	static final int MAX_MISSING = 256;
+	/**
+	 * How many icon IDs with no image are remembered, the ones asked for longest ago forgotten
+	 * first: more than a map draws markers a frame, so a still crowd of missing icons stays known.
+	 */
+	static final int MAX_MISSING = 16384;
+	/** How many icons a draw looks up that it doesn't know yet, found or missing. */
+	static final int LOOKUPS_PER_DRAW = 64;
 	/** Where the dots are, and how big. */
 	static final int SMALL_DOT = 32;
 	static final int BIG_DOT = 128;
@@ -60,6 +67,8 @@ public final class MarkerAtlas {
 	private static int used;
 	/** The draw of markers going on now, counted from 1. */
 	private static long draw;
+	/** Icons this draw has looked up so far. */
+	private static int lookups;
 	private static boolean fullSaid;
 
 	private MarkerAtlas() {
@@ -81,6 +90,7 @@ public final class MarkerAtlas {
 	/** A map starts a draw of markers: the tiles it asks for from now on are this draw's. */
 	static void startDraw() {
 		draw++;
+		lookups = 0;
 	}
 
 	/**
@@ -96,11 +106,6 @@ public final class MarkerAtlas {
 		if (MISSING.get(icon) != null) {
 			return NONE;
 		}
-		PinArt.Image image = WaypointIcons.image(icon.toString());
-		if (image == null) {
-			MISSING.put(icon, Boolean.TRUE);
-			return NONE;
-		}
 		int tile = free();
 		if (tile == NONE) {
 			if (!fullSaid) {
@@ -108,6 +113,18 @@ public final class MarkerAtlas {
 				Diorama.LOGGER.warn("Addon markers show more than {} different icons at once; {} and others show as dots while there's no room", SLOTS, icon);
 			}
 			return NONE;
+		}
+		if (lookups == LOOKUPS_PER_DRAW) {
+			return NONE;
+		}
+		lookups++;
+		PinArt.Image image = WaypointIcons.image(icon.toString());
+		if (image == null) {
+			MISSING.put(icon, Boolean.TRUE);
+			return NONE;
+		}
+		if (tile == used) {
+			used++;
 		}
 		ResourceId was = ICONS[tile];
 		if (was != null) {
@@ -121,12 +138,36 @@ public final class MarkerAtlas {
 	}
 
 	/**
-	 * A tile for a new icon: one never used, or else the one drawn longest ago that none of the
-	 * last {@link AddonOverlay#RING} draws used, as those may not have reached the screen yet.
+	 * Whether no resource pack has this icon, looking it up if it isn't known yet and this draw
+	 * may look up more, without giving it a tile: for a marker whose icon wouldn't fit where it is,
+	 * which is drawn as a dot only if it has no icon.
+	 */
+	static boolean missing(ResourceId icon) {
+		if (TILES.containsKey(icon)) {
+			return false;
+		}
+		if (MISSING.get(icon) != null) {
+			return true;
+		}
+		if (lookups == LOOKUPS_PER_DRAW) {
+			return false;
+		}
+		lookups++;
+		if (WaypointIcons.image(icon.toString()) == null) {
+			MISSING.put(icon, Boolean.TRUE);
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * A tile a new icon could take, without taking it: one never used, or else the one drawn
+	 * longest ago that none of the last {@link AddonOverlay#RING} draws used, as those may not have
+	 * reached the screen yet.
 	 */
 	private static int free() {
 		if (used < SLOTS) {
-			return used++;
+			return used;
 		}
 		long before = draw - AddonOverlay.RING;
 		int best = NONE;

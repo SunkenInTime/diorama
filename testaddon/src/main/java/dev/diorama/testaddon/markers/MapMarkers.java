@@ -68,10 +68,16 @@ public final class MapMarkers implements AutoCloseable {
 		this.tick();
 	}
 
-	/** Hands the places and roads over again if the world changed since they last were: Diorama emptied them. */
+	/**
+	 * Hands the places and roads over again if the world changed since they last were: Diorama
+	 * emptied them. With no world it forgets the last, so coming back to the same one hands them
+	 * over again too.
+	 */
 	private void followWorld() {
 		WorldId now = this.api.world().map(World::worldId).orElse(null);
-		if (now != null && !Objects.equals(now, this.shownFor)) {
+		if (now == null) {
+			this.shownFor = null;
+		} else if (!Objects.equals(now, this.shownFor)) {
 			this.shownFor = now;
 			this.placeLayer.replace(this.placeContent());
 			this.roadLayer.replace(this.roadContent());

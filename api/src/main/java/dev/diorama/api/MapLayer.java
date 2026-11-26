@@ -18,15 +18,19 @@ package dev.diorama.api;
  * dimension, and show whenever a map of it does.
  *
  * <p><b>A new world empties it.</b> When the world open changes, Diorama empties every layer, as
- * if each was handed {@link LayerContent#EMPTY}: when the player leaves a world, so that
- * {@link DioramaApi#world} is empty, and when they join another, so that its
- * {@link World#worldId} is a different one. The layer stays open, and the addon hands it the new
- * world's content with {@link #replace}. {@link DioramaApi#world} returns the same instance until
- * the world changes, so an addon can check it every tick for nothing:
+ * if each was handed {@link LayerContent#EMPTY}: when the player leaves a world for the title
+ * screen or another server, and when they join a world whose {@link World#worldId} is a different
+ * one. The layer stays open, and the addon hands it the world's content again with
+ * {@link #replace}, the same world's too if the player comes back to it. {@link DioramaApi#world}
+ * returns the same instance until the world changes, so an addon can check it every tick for
+ * nothing; forgetting the world whenever there is none makes a return to the same one hand the
+ * content over again:
  *
  * <pre>{@code
  * WorldId now = api.world().map(World::worldId).orElse(null);
- * if (now != null && !now.equals(this.shownFor)) {
+ * if (now == null) {
+ *     this.shownFor = null;
+ * } else if (!now.equals(this.shownFor)) {
  *     this.shownFor = now;
  *     towns.replace(this.townsIn(now));
  * }
@@ -34,7 +38,8 @@ package dev.diorama.api;
  *
  * Content handed over while there is no world, such as at the title screen, is emptied when one
  * opens. So nothing an addon showed in one world shows in another, whichever server the player
- * goes to next.
+ * goes to next. The moment {@link DioramaApi#world} can be empty during a dimension change, on a
+ * server that names its worlds for Xaero's mods, isn't leaving: the layers keep their content.
  *
  * <p>While the player has unticked the addon in the Addons tab of Diorama's settings, its
  * layers stay open and keep what they were given, and show nothing until the player ticks it

@@ -170,6 +170,7 @@ final class AddonMarkersTest {
 	}
 
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		boolean handedOver = false;
 		List<String> wrong = new ArrayList<>();
 		Recorder recorder = new Recorder();
 		boolean lockNorth = context.computeOnClient(mc -> Settings.get().minimapLockNorth);
@@ -220,6 +221,7 @@ final class AddonMarkersTest {
 			context.waitTicks(3);
 
 			replaced(context, scene, probe, wrong);
+			unnamedMoment(context, probe, wrong);
 			switchedOff(context, scene, probe, wrong);
 			iconThroughReload(context, scene, probe, wrong);
 			closed(context, scene, probe, wrong);
@@ -242,12 +244,17 @@ final class AddonMarkersTest {
 			if (!before.markers().containsKey(MOD + "/world-change/0")) {
 				wrong.add("The layer kept for the next world isn't drawn in this one: " + before.markers().keySet());
 			}
+			handedOver = true;
 		} finally {
+			boolean keep = handedOver;
 			context.runOnClient(mc -> {
 				for (MapLayer layer : opened) {
 					if (example == null || layer != example.carts() && layer != example.places() && layer != example.roads()) {
 						layer.close();
 					}
+				}
+				if (!keep) {
+					closeKept();
 				}
 				AddonOverlay.probe = null;
 				Settings.get().minimapLockNorth = lockNorth;
@@ -322,6 +329,7 @@ final class AddonMarkersTest {
 				other.getServer().runCommand("tp @a " + scene.playerX() + " " + (scene.playerY() + 20) + " " + scene.playerZ() + " 180 60");
 				context.waitFor(mc -> Math.abs(mc.player.getX() - scene.playerX()) < 1 && Math.abs(mc.player.getZ() - scene.playerZ()) < 1, 1200);
 				context.waitTicks(40);
+				DioramaClientTest.waitUntilGenerated(context, other);
 				// The example sees the new world on its next tick, as a real addon would.
 				for (int i = 0; i < 3; i++) {
 					context.runOnClient(mc -> example.tick());
@@ -460,6 +468,10 @@ final class AddonMarkersTest {
 	}
 
 	private static boolean inTriangle(double x, double y, double ax, double ay, double bx, double by, double cx, double cy) {
+		// A quad's fan can repeat a corner: a triangle with no area covers nothing.
+		if ((bx - ax) * (cy - ay) - (by - ay) * (cx - ax) == 0) {
+			return false;
+		}
 		double d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by);
 		double d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy);
 		double d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay);
@@ -579,6 +591,28 @@ final class AddonMarkersTest {
 		}
 		context.runOnClient(mc -> probe.replace(probeContent(scene, 0)));
 		Diorama.LOGGER.info("addon-api markers: replaced, the block's marker moved from {} to {}", text(was), text(moved));
+	}
+
+	/**
+	 * A moment in the same level with the world's name unknown, as a dimension change gives on a
+	 * server that names its worlds for Xaero's mods: the layer keeps its content, and draws it.
+	 */
+	private static void unnamedMoment(ClientGameTestContext context, MapLayer probe, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		context.runOnClient(mc -> dev.diorama.WorldKey.unknownForTests = true);
+		try {
+			context.waitTicks(5);
+		} finally {
+			context.runOnClient(mc -> dev.diorama.WorldKey.unknownForTests = false);
+		}
+		context.waitTicks(3);
+		boolean held = context.computeOnClient(mc -> !((AddonLayers.Layer) probe).content().markers().isEmpty());
+		Map<String, float[]> after = frame(context, recorder, false);
+		if (!held || !after.containsKey(MOD + "/probe/0")) {
+			wrong.add("After five ticks with the world's name unknown in the same level, the probe layer " + (held ? "kept" : "lost") + " its content and drew " + after.keySet());
+			return;
+		}
+		Diorama.LOGGER.info("addon-api markers: five ticks with the world's name unknown kept the layer's content");
 	}
 
 	/**
@@ -981,10 +1015,10 @@ final class AddonMarkersTest {
 				});
 				// An icon gives its tile up only once no draw that may not have reached the screen uses
 				// it (AddonOverlay.RING draws), so the new ones have all their tiles a few frames on.
-				Frame drawn = snapshot(context, recorder, true, 2 * AddonOverlay.RING);
+				Frame drawn = snapshot(context, recorder, true, 4 * AddonOverlay.RING);
 				long icons = drawn.markers().entrySet().stream().filter(each -> each.getKey().startsWith(MOD + "/many-icons/") && each.getValue()[2] >= 0).count();
 				long shown = drawn.markers().keySet().stream().filter(key -> key.startsWith(MOD + "/many-icons/")).count();
-				if (shown < 100 || icons != shown) {
+				if (shown != 150 || icons != shown) {
 					dots.add("round " + round + " (icons " + from + " to " + (from + 149) + "): " + shown + " drawn, " + (shown - icons) + " of them as dots");
 				}
 				if (round == 1) {
@@ -1001,13 +1035,14 @@ final class AddonMarkersTest {
 					}
 					layer.replace(content.build());
 				});
-				snapshot(context, recorder, true);
+				// A draw looks up 64 icons it doesn't know at most.
+				snapshot(context, recorder, true, 4 * AddonOverlay.RING);
 			}
 			int[] counts = context.computeOnClient(mc -> MarkerAtlas.counts());
 			int kept = context.computeOnClient(mc -> WaypointIcons.kept());
-			if (!dots.isEmpty() || counts[0] > MarkerAtlas.SLOTS || counts[1] > 256 || kept > 512) {
+			if (!dots.isEmpty() || counts[0] > MarkerAtlas.SLOTS || counts[1] != 1000 || kept > 512) {
 				wrong.add("Icons over time: " + (dots.isEmpty() ? "every one drawn as an icon" : String.join("; ", dots)) + "; after a thousand missing IDs, " + counts[0]
-					+ " icons on tiles (most " + MarkerAtlas.SLOTS + "), " + counts[1] + " missing IDs remembered (most 256), " + kept + " icon images kept (most 512)");
+					+ " icons on tiles (most " + MarkerAtlas.SLOTS + "), " + counts[1] + " missing IDs remembered (all 1000, within the bound), " + kept + " icon images kept (most 512)");
 				return;
 			}
 			Diorama.LOGGER.info("addon-api markers: 300 icons over time all drawn as icons; then {} on tiles, {} missing IDs remembered, {} images kept", counts[0], counts[1], kept);
