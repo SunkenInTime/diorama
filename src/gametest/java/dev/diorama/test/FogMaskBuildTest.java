@@ -32,9 +32,11 @@ import org.jspecify.annotations.Nullable;
 final class FogMaskBuildTest {
 	private static final com.sun.management.ThreadMXBean THREADS = (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
 	/**
-	 * The most a build may allocate. A build now allocates a few hundred bytes, and a key for each
-	 * tile it reads that no build before it read; the minimap's first build in new land reads at
-	 * most a few dozen.
+	 * The most a build may allocate: on the minimap every build, on the full map the least of a
+	 * part's. A build allocates a hundred bytes or so, and a key, kept, for each tile no build before
+	 * it read: on the minimap a few dozen at most, but on the full map's first build at a new zoom up
+	 * to a few thousand. Before 0.12 every minimap build allocated 200 KB or more, and every full
+	 * map build 50 KB to 2 MB.
 	 */
 	private static final long MOST_BYTES = 24 * 1024;
 	/** Blocks a tick: walking (4.3 m/s), and an elytra (32 m/s). */
@@ -47,6 +49,7 @@ final class FogMaskBuildTest {
 		int builds;
 		long bytes;
 		long mostBytes;
+		long leastBytes = Long.MAX_VALUE;
 		long nanos;
 		long mostNanos;
 		int ticks;
@@ -205,7 +208,7 @@ final class FogMaskBuildTest {
 		StringBuilder text = new StringBuilder(p.name).append(" | ").append(p.builds).append(" builds (").append(p.caveBuilds).append(" of a cave slice) in ").append(p.ticks).append(" ticks (")
 			.append(String.format(Locale.ROOT, "%.1f", p.builds * 20.0 / p.ticks)).append(" a second)");
 		if (p.builds > 0) {
-			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" max ").append(p.mostBytes)
+			text.append(" | bytes a build mean ").append(p.bytes / p.builds).append(" min ").append(p.leastBytes).append(" max ").append(p.mostBytes)
 				.append(" | us a build mean ").append(p.nanos / p.builds / 1000).append(" max ").append(p.mostNanos / 1000)
 				.append(" | most tiles a build reads ").append(p.mostTiles);
 		}
@@ -238,9 +241,12 @@ final class FogMaskBuildTest {
 			}
 		}
 		for (Part p : PARTS.values()) {
-			if (p.mostBytes > MOST_BYTES) {
-				throw new AssertionError("A fog mask build in \"" + p.name + "\" allocated " + p.mostBytes + " bytes on the render thread, over " + MOST_BYTES
-					+ " (mean " + p.bytes / Math.max(1, p.builds) + " over " + p.builds + " builds): is a tile looked up with a new key for every texel row again?");
+			boolean minimap = !p.name.contains("full map");
+			long bytes = minimap ? p.mostBytes : p.builds == 0 ? 0 : p.leastBytes;
+			if (bytes > MOST_BYTES) {
+				throw new AssertionError((minimap ? "A" : "Every") + " fog mask build in \"" + p.name + "\" allocated " + (minimap ? "" : "at least ") + bytes
+					+ " bytes on the render thread, over " + MOST_BYTES + " (mean " + p.bytes / Math.max(1, p.builds) + " over " + p.builds
+					+ " builds): is a tile looked up with a new key for every texel row again?");
 			}
 		}
 	}
@@ -290,6 +296,7 @@ final class FogMaskBuildTest {
 				p.builds++;
 				p.bytes += bytes;
 				p.mostBytes = Math.max(p.mostBytes, bytes);
+				p.leastBytes = Math.min(p.leastBytes, bytes);
 				p.nanos += nanos;
 				p.mostNanos = Math.max(p.mostNanos, nanos);
 			}
