@@ -77,9 +77,15 @@ public final class Waystones {
 	private Waystones() {
 	}
 
-	/** Called every client tick: listens to Waystones' events from the first, and finds picked-up waystones placed again. */
+	/**
+	 * Called every client tick: listens to Waystones' events from the first, checks the ordinary
+	 * waystones against Waystones' own list now and then, and finds picked-up waystones placed
+	 * again. Here, rather than where the waystones are read, so reading what changed allocates
+	 * nothing.
+	 */
 	public static void tick() {
 		start();
+		check();
 		rediscover();
 	}
 
@@ -455,7 +461,6 @@ public final class Waystones {
 
 	/** Goes up each time the known waystones change. */
 	static int changes() {
-		check();
 		return changes;
 	}
 
