@@ -19,11 +19,15 @@ import org.jspecify.annotations.Nullable;
  * three are X, Y and Z, as Copy coordinates writes them;
  * <li>{@code x: 120, z: -340}, {@code X=120 Y=64 Z=-340}, and JourneyMap's
  * {@code [x:120, y:64, z:-340, dim:minecraft:overworld]};
- * <li>{@code /tp 120 64 -340}, and the line F3+C copies,
- * {@code /execute in minecraft:overworld run tp @s 120.50 64.00 -340.50 90.00 0.00}; not a teleport
- * with {@code ~} or {@code ^}, which counts from wherever its sender stood;
+ * <li>a teleport command to three numbers, {@code /tp 120 64 -340} or {@code /tp @s 120 64 -340},
+ * and the line F3+C copies, {@code /execute in minecraft:overworld run tp @s 120.50 64.00 -340.50 90.00 0.00};
  * <li>a waypoint shared in chat, in Xaero's format ({@link WaypointShare}).
  * </ul>
+ *
+ * <p>Read wrongly, text sends the player's eyes to a place nobody meant, so what isn't surely a
+ * place is refused: anything with {@code ~} or {@code ^}, which count from wherever a command's
+ * sender stood, a teleport to anything but three numbers, and whatever stands inside quotes, where
+ * a name can hold numbers and "x:" of its own.
  */
 public final class MapCoordinates {
 	/** Further out than the world border, or outside any world's height, isn't a real place. */
@@ -33,15 +37,14 @@ public final class MapCoordinates {
 	private static final int MAX_TEXT = 512;
 
 	private static final String NUMBER = "(-?\\d{1,9}(?:\\.\\d{1,9})?)";
-	/** {@code tp} or {@code teleport}, a target that isn't a number if there is one, then three numbers. */
-	private static final Pattern TELEPORT = Pattern.compile("(?:^|[\\s/])(?:tp|teleport)\\s+(?:[^\\s\\d~-]\\S*\\s+)?" + NUMBER + "\\s+" + NUMBER + "\\s+" + NUMBER + "(?![\\w.])");
-	/** Any teleport command, the ones {@link #TELEPORT} can't read included: relative coordinates, a player as the destination. */
-	private static final Pattern TELEPORT_COMMAND = Pattern.compile("(?:^|[\\s/])(?:tp|teleport)(?:\\s|$)");
-	/** The dimension a command runs in; the game reads a name without a namespace as its own. */
-	private static final Pattern IN_DIMENSION = Pattern.compile("execute\\s+in\\s+((?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)");
-	/** A quoted name, which can hold anything, numbers and "x:" included. */
-	private static final Pattern QUOTED = Pattern.compile("\"[^\"]*\"");
+	private static final Pattern WHOLE_NUMBER = Pattern.compile(NUMBER);
+	/** {@code tp} or {@code teleport} as a command, with or without the slash and a namespace ({@code minecraft:tp}). */
+	private static final Pattern TELEPORT = Pattern.compile("(?:^|[\\s/])(?:[a-z0-9_.-]+:)?(?:tp|teleport)(?=\\s|$)");
+	/** The dimension {@code execute ... in <dimension> ... run} runs its command in; the game reads a name without a namespace as its own. */
+	private static final Pattern IN_DIMENSION = Pattern.compile("\\sin\\s+((?:[a-z0-9_.-]+:)?[a-z0-9_./-]+)(?=\\s)");
 	private static final Pattern NAMED_DIMENSION = Pattern.compile("dim(?:ension)?\\s*[:=]\\s*([a-z0-9_.-]+:[a-z0-9_./-]+)");
+	/** Quoted text, with the quotes a backslash keeps inside it. */
+	private static final Pattern QUOTED = Pattern.compile("\"(?:[^\"\\\\]|\\\\.)*\"");
 	private static final Pattern X = labelled('x');
 	private static final Pattern Y = labelled('y');
 	private static final Pattern Z = labelled('z');
@@ -68,17 +71,16 @@ public final class MapCoordinates {
 		if (shared.isPresent()) {
 			return new Place(shared.get().x(), shared.get().y(), shared.get().z(), shared.get().dimension());
 		}
-		String lower = QUOTED.matcher(text.toLowerCase(Locale.ROOT)).replaceAll(" ");
+		// What's inside quotes goes, the quotes stay: a selector like @e[name="Base"] is still one word.
+		String lower = QUOTED.matcher(text.toLowerCase(Locale.ROOT)).replaceAll("\"\"");
+		// A quote left open: where its name ends is anyone's guess.
+		boolean openQuote = lower.chars().filter(c -> c == '"').count() % 2 != 0;
+		if (openQuote || lower.indexOf('~') >= 0 || lower.indexOf('^') >= 0) {
+			return null;
+		}
 		Matcher teleport = TELEPORT.matcher(lower);
 		if (teleport.find()) {
-			Matcher in = IN_DIMENSION.matcher(lower);
-			String dimension = in.find() ? in.group(1) : null;
-			return place(teleport.group(1), teleport.group(2), teleport.group(3), dimension == null || dimension.indexOf(':') >= 0 ? dimension : "minecraft:" + dimension);
-		}
-		if (TELEPORT_COMMAND.matcher(lower).find()) {
-			// A teleport that isn't to three plain numbers (~ and ^ count from wherever its sender stood):
-			// the numbers left in it aren't a place.
-			return null;
+			return teleported(lower.substring(0, teleport.start()), lower.substring(teleport.end()).trim().split("\\s+"));
 		}
 		Matcher x = X.matcher(lower);
 		Matcher z = Z.matcher(lower);
@@ -97,6 +99,33 @@ public final class MapCoordinates {
 			case 3 -> place(numbers.get(0), numbers.get(1), numbers.get(2), null);
 			default -> null;
 		};
+	}
+
+	/**
+	 * A teleport command's destination: three numbers, after one word for who's teleported if there
+	 * is one. Anything else after the command (a player to teleport to, a selector with spaces in
+	 * it) isn't a place this can know. {@code before} is the command line up to it, where
+	 * {@code execute} says which dimension.
+	 */
+	private static @Nullable Place teleported(String before, String[] words) {
+		int first = words.length > 0 && !WHOLE_NUMBER.matcher(words[0]).matches() ? 1 : 0;
+		if (words.length < first + 3) {
+			return null;
+		}
+		for (int i = first; i < first + 3; i++) {
+			if (!WHOLE_NUMBER.matcher(words[i]).matches()) {
+				return null;
+			}
+		}
+		String dimension = null;
+		if (before.contains("execute")) {
+			// The last one counts, as in the game.
+			Matcher in = IN_DIMENSION.matcher(before);
+			while (in.find()) {
+				dimension = in.group(1);
+			}
+		}
+		return place(words[first], words[first + 1], words[first + 2], dimension == null || dimension.indexOf(':') >= 0 ? dimension : "minecraft:" + dimension);
 	}
 
 	/** The block each number is in: 120.5 is in block 120, and -340.5 in block -341. */

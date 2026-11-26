@@ -239,8 +239,13 @@ final class GoToCoordinatesTest {
 		read("[name:\"Y64 Base 7\", x:120, y:80, z:-340]", 120, 80, -340, null);
 		// The game reads a dimension without a namespace as its own.
 		read("/execute in the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
+		read("/execute as @s in minecraft:the_nether run tp @s 120 64 -340", 120, 64, -340, "minecraft:the_nether");
+		read("/minecraft:tp 120 64 -340", 120, 64, -340, null);
+		read("/tp @e[name=\"Base 5\"] 120 64 -340", 120, 64, -340, null);
+		read("[name:\"Base \\\" x:200\", x:120, y:80, z:-340]", 120, 80, -340, null);
 		for (String none : new String[] {"", "   ", "my base", "120", "1 2 3 4", "40000000 0", "0 99999 0", "minecraft:overworld", "x: 5",
-			"/tp @s ~ 64 -340", "/tp @s ^1 ^2 ^3", "/tp Alex 12 40", "/teleport ~5 ~ ~-5"}) {
+			"/tp @s ~ 64 -340", "/tp @s ^1 ^2 ^3", "/tp Alex 12 40", "/teleport ~5 ~ ~-5", "/minecraft:teleport @s ~ 64 -340", "~ 64 -340",
+			"/tp Alex Steve", "/tp @e[type=cow, limit=1] 1 2 3", "[name:\"Base, x:200, z:5"}) {
 			MapCoordinates.Place place = MapCoordinates.parse(none);
 			if (place != null) {
 				throw new AssertionError("\"" + none + "\" was read as " + place);
