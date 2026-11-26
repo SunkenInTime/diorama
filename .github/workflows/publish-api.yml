@@ -1,0 +1,94 @@
+# Publishes the addon API (api/) as dev.diorama:diorama-api to the Maven repository on GitHub
+# Pages, https://sunkenintime.github.io/diorama/maven, which is the maven/ folder of the gh-pages
+# branch. It runs only when someone pushes a tag api-v<version>, where <version> is api_version in
+# gradle.properties at the tagged commit, so merging to master never publishes anything.
+#
+# A published version never changes: the run stops if that version is already on the site or on the
+# branch, and it only adds a commit to gh-pages (no force-push), so earlier versions stay as they
+# were. See docs/addon-api.md for addon authors and docs/development.md for how to cut a version.
+name: Publish addon API
+
+on:
+  push:
+    tags:
+      - "api-v*"
+
+permissions:
+  contents: write
+
+# Two publishes at once would race for the same gh-pages commit.
+concurrency:
+  group: publish-api
+  cancel-in-progress: false
+
+env:
+  REPO_URL: https://sunkenintime.github.io/diorama/maven
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+
+      - name: Check the tag names the API version
+        run: |
+          version=$(sed -n 's/^api_version=//p' gradle.properties | tr -d '\r')
+          if [ "api-v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match api_version=$version in gradle.properties; tag api-v$version instead"
+            exit 1
+          fi
+          echo "API_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Refuse a version the site already serves
+        run: |
+          pom="$REPO_URL/dev/diorama/diorama-api/$API_VERSION/diorama-api-$API_VERSION.pom"
+          status=$(curl -s -o /dev/null -w '%{http_code}' "$pom" || true)
+          echo "$pom: $status"
+          if [ "$status" != "404" ]; then
+            echo "::error::dev.diorama:diorama-api:$API_VERSION is already published, or the site couldn't be checked (HTTP $status). Published versions never change; raise api_version instead."
+            exit 1
+          fi
+
+      - name: Check out gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: pages
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # Builds the API jar, checks that 26.3's mod jar carries its classes byte for byte, and
+      # publishes that same jar. The publish task refuses a version pages/maven already has.
+      - name: Build, check and publish into gh-pages
+        run: ./gradlew --no-daemon --console=plain :api:build :26.3:checkApiCopy :api:publishApiPublicationToPagesRepository "-PapiRepoDir=$GITHUB_WORKSPACE/pages/maven"
+
+      - name: Commit and push gh-pages
+        working-directory: pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add maven
+          git commit -m "diorama-api $API_VERSION from ${GITHUB_SHA::10}"
+          git push origin HEAD:gh-pages
+
+      # GitHub Pages takes a minute or two to serve a new commit.
+      - name: Wait for the site to serve the new jar
+        run: |
+          jar="$REPO_URL/dev/diorama/diorama-api/$API_VERSION/diorama-api-$API_VERSION.jar"
+          want=$(cat "pages/maven/dev/diorama/diorama-api/$API_VERSION/diorama-api-$API_VERSION.jar.sha1")
+          for i in $(seq 1 60); do
+            got=$(curl -sf "$jar" | sha1sum | cut -d' ' -f1 || true)
+            if [ "$got" = "$want" ]; then
+              echo "$jar is served, sha1 $got"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$jar wasn't served with sha1 $want after 10 minutes; check the Pages settings"
+          exit 1
