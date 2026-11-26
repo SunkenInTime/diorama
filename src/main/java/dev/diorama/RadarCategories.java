@@ -24,7 +24,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The radar's categories, after Xaero's Minimap's entity categories: each has its own on/off, icon
- * size and names. Five are fixed, the kinds a player, mob or dropped item falls into by how it
+ * size, names and height range. Five are fixed, the kinds a player, mob or dropped item falls into by how it
  * behaves ({@link Radar.Kind}). Above them come the player's own, each a list of mobs; a mob in one
  * of those follows it and not its kind's, and the first that lists it wins, as the higher
  * sub-category does in Xaero's. Xaero's nests categories in a tree and has many more rules and
@@ -33,6 +33,10 @@ import org.jspecify.annotations.Nullable;
 public final class RadarCategories {
 	/** An icon size that follows the Radar tab's. */
 	public static final int SAME_SIZE = 0;
+	/** A height range that follows the Radar tab's. */
+	public static final int SAME_RANGE = 0;
+	/** A height range with no end: the category shows however far above or below. */
+	public static final int ANY_RANGE = -1;
 	/** What {@link Category#builtIn} says for the category Diorama makes when a Pokémon mod is installed. */
 	public static final String POKEMON = "pokemon";
 	private static final List<String> POKEMON_MOBS = List.of("cobblemon:pokemon", "pixelmon:pixelmon");
@@ -56,6 +60,20 @@ public final class RadarCategories {
 		Settings.NameTags names();
 
 		void names(Settings.NameTags names);
+
+		/** How far above or below the player this category still shows: blocks, {@link #SAME_RANGE} or {@link #ANY_RANGE}. */
+		int range();
+
+		void range(int range);
+
+		/** {@link #range} until the player picks one. */
+		int usualRange();
+
+		/** {@link #range} in blocks, as the radar checks it. */
+		default double reach() {
+			int range = this.range();
+			return range == ANY_RANGE ? Double.POSITIVE_INFINITY : range == SAME_RANGE ? Settings.get().radarRange : range;
+		}
 	}
 
 	/** One of the player's categories, as saved. */
@@ -72,6 +90,7 @@ public final class RadarCategories {
 		public boolean shown = true;
 		public int iconScale = SAME_SIZE;
 		public Settings.NameTags names = Settings.NameTags.NEVER;
+		public int range = SAME_RANGE;
 
 		@Override
 		public Component name() {
@@ -116,6 +135,21 @@ public final class RadarCategories {
 			this.names = names;
 		}
 
+		@Override
+		public int range() {
+			return this.range;
+		}
+
+		@Override
+		public void range(int range) {
+			this.range = range;
+		}
+
+		@Override
+		public int usualRange() {
+			return SAME_RANGE;
+		}
+
 		public boolean has(String id) {
 			for (String mob : this.mobs) {
 				if (matches(mob, id)) {
@@ -130,6 +164,8 @@ public final class RadarCategories {
 	public static final class KindLook {
 		public int iconScale = SAME_SIZE;
 		public Settings.NameTags names = Settings.NameTags.NEVER;
+		/** Null until the player picks one: the kind's own ({@link Entry#usualRange}). */
+		public @Nullable Integer range;
 	}
 
 	/**
@@ -212,6 +248,27 @@ public final class RadarCategories {
 			} else {
 				this.lookToChange().names = names;
 			}
+		}
+
+		@Override
+		public int range() {
+			KindLook look = this.look();
+			return look == null || look.range == null ? this.usualRange() : look.range;
+		}
+
+		/**
+		 * Players show at any height, as Xaero's Players category comes with its height limit at the top
+		 * of the slider: a friend in the mine below is someone the player is looking for, and there are
+		 * never so many that they crowd the map. The rest follow the Radar tab's.
+		 */
+		@Override
+		public int usualRange() {
+			return this.kind == Radar.Kind.PLAYER ? ANY_RANGE : SAME_RANGE;
+		}
+
+		@Override
+		public void range(int range) {
+			this.lookToChange().range = range;
 		}
 	}
 
@@ -307,6 +364,11 @@ public final class RadarCategories {
 		}
 	}
 
+	/** A height range read from the file made one the slider has. */
+	private static int snapRange(int range) {
+		return range == ANY_RANGE || range == SAME_RANGE ? range : range < 0 ? SAME_RANGE : Settings.nearest(Settings.RANGES, range);
+	}
+
 	/** A hand-edited list entry made an ID: trimmed, lower case, and Minecraft's own if it names no mod. Null for a blank one. */
 	static @Nullable String cleanMob(@Nullable String mob) {
 		String trimmed = mob == null ? "" : mob.trim().toLowerCase(Locale.ROOT);
@@ -342,6 +404,7 @@ public final class RadarCategories {
 				if (category.names == null) {
 					category.names = Settings.NameTags.NEVER;
 				}
+				category.range = snapRange(category.range);
 				categories.add(category);
 			}
 		}
@@ -354,6 +417,9 @@ public final class RadarCategories {
 					look.iconScale = look.iconScale <= 0 ? SAME_SIZE : Settings.snapScale(look.iconScale);
 					if (look.names == null) {
 						look.names = Settings.NameTags.NEVER;
+					}
+					if (look.range != null) {
+						look.range = snapRange(look.range);
 					}
 					kinds.put(kind.name(), look);
 				}
