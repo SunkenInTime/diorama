@@ -13,6 +13,10 @@ import dev.diorama.addon.HudHides;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
 import dev.diorama.testaddon.TestAddon;
+import dev.diorama.testaddon.looping.LoopingAddon;
+import dev.diorama.testaddon.throwing.ThrowingAddon;
+import dev.diorama.waypoint.Waypoint;
+import dev.diorama.waypoint.WaypointStore;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -36,8 +40,9 @@ import org.jspecify.annotations.Nullable;
 /**
  * The settings' Addons tab ({@code addons-settings}), with the test addons in testaddon/ installed
  * (boat_run.py --mods testaddon/build/libs after ./gradlew :testaddon:assemble). The good addon
- * hides the minimap from onReady at the title screen and keeps the handle. The tab lists all seven
- * test mods by the names their loader's metadata gives, the six that failed as stopped; the Minimap
+ * hides the minimap from onReady at the title screen and keeps the handle. The tab lists all nine
+ * test mods by the names their loader's metadata gives, the eight that failed as stopped (the two
+ * waypoint ones are made to fail here, as addon-api does, when it didn't run first); the Minimap
  * tab says which addon hides the minimap; unticking it with a real click brings the minimap back
  * with the handle still open, writes the mod ID to config.json, and ticking it hides the minimap
  * again. The rows follow what addons hide while the screen is open, an addon found while it is
@@ -55,7 +60,7 @@ final class AddonsSettingsTest {
 
 	static {
 		NAMES.put(GOOD, "Diorama Test Addon");
-		for (String kind : List.of("assertion", "broken", "linkage", "overflow", "recursive", "unprintable")) {
+		for (String kind : List.of("assertion", "broken", "linkage", "looping", "overflow", "recursive", "throwing", "unprintable")) {
 			NAMES.put(GOOD + "_" + kind, "Diorama Test Addon (" + kind + ")");
 		}
 	}
@@ -69,6 +74,7 @@ final class AddonsSettingsTest {
 		context.setScreen(() -> null);
 		// Long enough for the commands' chat lines to fade.
 		context.waitTicks(220);
+		failWaypointAddons(context);
 		Path config = config(context);
 		badEntries(context, config);
 		if (!context.computeOnClient(mc -> TestAddon.fromReady() != null && TestAddon.fromReady().isOpen() && HudHides.minimapHidden()
@@ -334,7 +340,30 @@ final class AddonsSettingsTest {
 		Diorama.LOGGER.info("addons-restart: the minimap showed, the tab had them unticked, ticking the test addon hid the minimap, closing its handle showed it");
 	}
 
-	/** The listing: all seven test mods by name, the good one running and hiding the minimap, the six failed ones stopped. */
+	/**
+	 * The two test addons that listen to waypoints fail only when driven to: addon-api does it, and
+	 * without it this does the same, so the tab shows them stopped whichever sections ran before.
+	 */
+	private static void failWaypointAddons(ClientGameTestContext context) {
+		context.runOnClient(mc -> {
+			if (ThrowingAddon.world() != null && ThrowingAddon.world().isOpen()) {
+				ThrowingAddon.arm();
+				WaypointStore.get().add(new Waypoint("Settings trigger", mc.player.getBlockX() + 3, mc.player.getBlockY(), mc.player.getBlockZ(), "minecraft:overworld", Waypoint.PALETTE[0]));
+			}
+			if (LoopingAddon.renames() == 0) {
+				LoopingAddon.start(mc.player.getBlockX() - 3, mc.player.getBlockY(), mc.player.getBlockZ());
+			}
+		});
+		// Diorama's tick tells the addons, which fail on it.
+		context.waitTicks(3);
+		context.runOnClient(mc -> {
+			WaypointStore store = WaypointStore.get();
+			store.all().stream().filter(w -> w.name.equals("Settings trigger") || w.name.startsWith("Loop ")).toList().forEach(store::remove);
+		});
+		context.waitTicks(2);
+	}
+
+	/** The listing: all nine test mods by name, the good one running and hiding the minimap, the eight failed ones stopped. */
 	private static void listing(ClientGameTestContext context) {
 		List<Addons.Listed> listed = context.computeOnClient(mc -> Addons.listed());
 		Map<String, String> names = new LinkedHashMap<>();
@@ -356,7 +385,7 @@ final class AddonsSettingsTest {
 	 * The rows on the Addons tab: one checkbox per test mod named as its metadata says, ticked
 	 * unless switched off, with the good addon's state as {@code goodState} and the rest stopped.
 	 * The page shown is the first: the good addon's row is on it, first by name, and the others on
-	 * it say stopped. On 1.20.1, whose checkboxes are taller, seven rows take two pages.
+	 * it say stopped. On 1.20.1, whose checkboxes are taller, nine rows take two pages or more.
 	 */
 	private static void expectStates(ClientGameTestContext context, String when, String goodState) {
 		List<String> problems = context.computeOnClient(mc -> {
@@ -388,7 +417,7 @@ final class AddonsSettingsTest {
 	}
 
 	/**
-	 * A small window, 1280x720 (a 427x240 GUI): the seven rows take more than one page, nothing on
+	 * A small window, 1280x720 (a 427x240 GUI): the nine rows take more than one page, nothing on
 	 * a page overlaps or runs off, and the arrow turns the page until every row has shown once.
 	 */
 	private static void smallWindow(ClientGameTestContext context) {
