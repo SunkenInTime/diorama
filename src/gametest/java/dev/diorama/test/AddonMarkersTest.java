@@ -1084,10 +1084,15 @@ final class AddonMarkersTest {
 		}
 		String coloured = Marker.builder(DimensionId.OVERWORLD, 0, 64, 0).label(" §cRed §lroad§r ").build().label();
 		String onlyCodes = Marker.builder(DimensionId.OVERWORLD, 0, 64, 0).label("§a§l").build().label();
-		String longWithCodes = Marker.builder(DimensionId.OVERWORLD, 0, 64, 0).label("§e" + "x".repeat(Marker.MAX_LABEL_LENGTH)).build().label();
+		String longWithCodes;
+		try {
+			longWithCodes = Marker.builder(DimensionId.OVERWORLD, 0, 64, 0).label("§e" + "x".repeat(Marker.MAX_LABEL_LENGTH)).build().label();
+		} catch (IllegalArgumentException e) {
+			longWithCodes = "refused: " + e.getMessage();
+		}
 		if (!coloured.equals("Red road") || !onlyCodes.isEmpty() || longWithCodes.length() != Marker.MAX_LABEL_LENGTH) {
 			wrong.add("Labels with formatting codes: \"§cRed §lroad§r\" became \"" + coloured + "\", codes alone became \"" + onlyCodes + "\", 32 letters after a code became "
-				+ longWithCodes.length() + " long");
+				+ longWithCodes.length() + " long (" + longWithCodes + ")");
 		}
 		List<String> onClient = context.computeOnClient(mc -> {
 			List<String> found = new ArrayList<>();
