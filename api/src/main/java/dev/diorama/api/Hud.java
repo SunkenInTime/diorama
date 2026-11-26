@@ -31,6 +31,10 @@ public interface Hud {
 	 *
 	 * <p>While the player places the minimap in Diorama's settings, the minimap shows regardless.
 	 *
+	 * <p>The player can untick this addon in the Addons tab of Diorama's settings, and that choice
+	 * is saved. Its handles then stay open, and {@link Handle#isOpen} stays true, but they hide
+	 * nothing until the player ticks it again.
+	 *
 	 * @param parts the parts to hide; at least one
 	 * @return the handle that keeps them hidden while it is open
 	 * @throws IllegalArgumentException if {@code parts} is empty

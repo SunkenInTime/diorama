@@ -94,6 +94,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (tests.contains("addon-api")) {
 			AddonApiTest.titleScreen(context);
 		}
+		if (tests.contains("addons-restart")) {
+			AddonsSettingsTest.restartTitleScreen(context);
+		}
 		TestWorldSave save = null;
 		int[] spawnCell = null;
 		int savedChunksGround = 0;
@@ -117,6 +120,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 			Diorama.LOGGER.info("Map warm-up done");
 			if (tests.contains("addon-api")) {
 				AddonApiTest.firstWorld(context, world);
+			}
+			if (tests.contains("addons-settings")) {
+				AddonsSettingsTest.run(context, world);
+			}
+			if (tests.contains("addons-restart")) {
+				AddonsSettingsTest.restartWorld(context, world);
 			}
 			context.runOnClient(mc -> VoxelReaderChecks.check(MapSession.get().map(),
 				mc.player.blockPosition().getX() >> 4, mc.player.blockPosition().getZ() >> 4));
@@ -605,6 +614,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 			realms(context);
 		}
 		//?}
+		if (tests.contains("addons-settings")) {
+			// Last of all, so every section before it sees the test addons ticked.
+			AddonsSettingsTest.switchedOffForRestart(context);
+		}
 	}
 
 	/**
@@ -1258,6 +1271,28 @@ public class DioramaClientTest implements FabricClientGameTest {
 					context.getInput().setCursorPos(at[0], at[1]);
 					context.waitTicks(14);
 					context.takeScreenshot("languages-" + language + "-5-tooltip-" + tooltips[tab][0]);
+				}
+				if (context.computeOnClient(mc -> !dev.diorama.addon.Addons.listed().isEmpty())) {
+					// With addons installed (--mods testaddon/build/libs), their tab and one row's tooltip.
+					context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(5));
+					context.getInput().setCursorPos(2, 2);
+					context.waitTicks(3);
+					context.takeScreenshot("languages-" + language + "-4-settings-tab-6");
+					String name = context.computeOnClient(mc -> dev.diorama.addon.Addons.listed().get(0).name());
+					double[] at = context.computeOnClient(mc -> {
+						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
+						collectWidgets(mc.gui.screen(), widgets);
+						double scale = mc.getWindow().getGuiScale();
+						for (var widget : widgets) {
+							if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(name)) {
+								return new double[] {(widget.getX() + 8) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
+							}
+						}
+						throw new AssertionError("No row for " + name + " in " + language);
+					});
+					context.getInput().setCursorPos(at[0], at[1]);
+					context.waitTicks(14);
+					context.takeScreenshot("languages-" + language + "-5-tooltip-addons");
 				}
 				context.setScreen(() -> null);
 				context.getInput().setCursorPos(2, 2);
