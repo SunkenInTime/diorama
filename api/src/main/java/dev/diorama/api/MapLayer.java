@@ -26,8 +26,7 @@ package dev.diorama.api;
  * other players show over any addon's markers.
  *
  * <p>Markers show whether or not the server lets the radar show: a server's radar lock hides
- * Diorama's radar, not addons' markers. An addon that shows entities is expected to follow the
- * server's rules itself.
+ * Diorama's radar, not addons' markers. This may change before 1.0.0.
  *
  * <p>Every method must be called on the client thread; calls from any other thread throw
  * {@link IllegalStateException}.
