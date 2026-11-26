@@ -70,6 +70,8 @@ public final class MarkerAtlas {
 	private static long draw;
 	/** Icons this draw has looked up so far. */
 	private static int lookups;
+	/** Whether this draw already found every tile in use: none comes free before the next draw, so it isn't looked for again. */
+	private static boolean noRoom;
 	private static boolean fullSaid;
 
 	private MarkerAtlas() {
@@ -92,6 +94,7 @@ public final class MarkerAtlas {
 	static void startDraw() {
 		draw++;
 		lookups = 0;
+		noRoom = false;
 	}
 
 	/**
@@ -107,8 +110,12 @@ public final class MarkerAtlas {
 		if (MISSING.get(icon) != null) {
 			return NONE;
 		}
+		if (noRoom) {
+			return NONE;
+		}
 		int tile = free();
 		if (tile == NONE) {
+			noRoom = true;
 			if (!fullSaid) {
 				fullSaid = true;
 				Diorama.LOGGER.warn("Addon markers show more than {} different icons at once; {} and others show as dots while there's no room", SLOTS, icon);
