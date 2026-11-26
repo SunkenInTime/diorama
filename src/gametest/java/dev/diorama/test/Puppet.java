@@ -12,12 +12,13 @@ import net.minecraft.client.Minecraft;
  * The part of a {@link SecondPlayer} that runs in its game: while the game was started with a
  * commands file, each line added to that file is sent as a command once the player is on a
  * server, but {@link #SNEAK} and {@link #STAND}, which hold the sneak key down and let it go, as the
- * player would. In any other game, the tests' own included, it does nothing.
+ * player would, and a line that starts with {@link #SAY}, whose rest the player says in chat. In any other game, the tests' own included, it does nothing.
  */
 public final class Puppet implements ClientModInitializer {
 	static final String PROPERTY = "diorama.test.puppet";
 	static final String SNEAK = "+sneak";
 	static final String STAND = "-sneak";
+	static final String SAY = "+say ";
 	private static volatile boolean sneaking;
 
 	@Override
@@ -48,7 +49,12 @@ public final class Puppet implements ClientModInitializer {
 							continue;
 						}
 						mc.execute(() -> {
-							if (mc.getConnection() != null) {
+							if (mc.getConnection() == null) {
+								return;
+							}
+							if (command.startsWith(SAY)) {
+								mc.getConnection().sendChat(command.substring(SAY.length()));
+							} else {
 								mc.getConnection().sendCommand(command);
 							}
 						});
@@ -69,5 +75,6 @@ public final class Puppet implements ClientModInitializer {
 	static final String PROPERTY = "diorama.test.puppet";
 	static final String SNEAK = "+sneak";
 	static final String STAND = "-sneak";
+	static final String SAY = "+say ";
 }
 *///?}

@@ -202,6 +202,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("seasons")) {
 				SeasonsTest.run(context, world);
 			}
+			if (tests.contains("e33chat")) {
+				E33ChatTest.run(context, world);
+			}
 			if (tests.contains("portal-crossing")) {
 				portalCrossing(context, world);
 			}
@@ -558,6 +561,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (tests.contains("far-players")) {
 			FarPlayersTest.run(context);
+		}
+		if (tests.contains("e33chat-server")) {
+			E33ChatTest.server(context);
 		}
 		if (tests.contains("radar-sneaking-server")) {
 			RadarSneakingTest.server(context);
@@ -4513,6 +4519,11 @@ public class DioramaClientTest implements FabricClientGameTest {
 				}
 				if (text.contains("xaero-waypoint:Old Mine:")) {
 					command = link;
+					// One link: the line gets it as it arrives, and chat must not add a second.
+					String add = net.minecraft.network.chat.Component.translatable("diorama.share.add").getString();
+					if (text.indexOf(add) != text.lastIndexOf(add)) {
+						throw new AssertionError("The shared line has more than one [Add] link: " + text);
+					}
 				}
 			}
 			if (command == null) {

@@ -1,13 +1,16 @@
 package dev.diorama.mixin;
 
 import dev.diorama.MapSession;
+import dev.diorama.waypoint.WaypointShare;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacketData;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 //? if neoforge && <1.21.4 || forge {
 /*import net.neoforged.neoforge.client.ClientCommandHandler;
@@ -19,6 +22,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * sky view keeps the block light of for the night. Hooks the
  * method that applies it; the packet handler only queues that work. Also tells it when a block
  * entity got new data, which is how a copycat being filled reaches the client.
+ * It also puts the "[Add]" link on a shared waypoint the server sends.
  * On NeoForge before 1.21.4 and on Forge it also runs the client's own commands from chat links.
  */
 @Mixin(ClientPacketListener.class)
@@ -47,6 +51,27 @@ public abstract class ClientPacketListenerMixin {
 		if (mc.level != null) {
 			MapSession.blockEntityChanged(mc.level, packet.getPos());
 		}
+	}
+
+	// A line from the server that carries a shared waypoint gets its "[Add]" link here, as it
+	// arrives: a chat mod that keeps its own copy of each line (E33Chat) takes it before chat does,
+	// and has to find the link on it. ChatListenerMixin does the same for a player's line.
+	@ModifyArg(method = "handleSystemChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleSystemMessage(Lnet/minecraft/network/chat/Component;Z)V"), index = 0)
+	//? if >=26.1 {
+	private Component diorama$linkSharedWaypoint(Component content) {
+		return WaypointShare.withAddLinkOnArrival(content);
+	}
+	//?} else {
+	/*// The same call shows a line above the hotbar, where nothing can be clicked.
+	private Component diorama$linkSharedWaypoint(Component content, boolean overlay) {
+		return overlay ? content : WaypointShare.withAddLinkOnArrival(content);
+	}
+	*///?}
+
+	// What a command like /say sends: a line with a sender and no signature.
+	@ModifyArg(method = "handleDisguisedChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleDisguisedChatMessage(Lnet/minecraft/network/chat/Component;Lnet/minecraft/network/chat/ChatType$Bound;)V"), index = 0)
+	private Component diorama$linkSharedWaypointSaid(Component message) {
+		return WaypointShare.withAddLinkOnArrival(message);
 	}
 
 	//? if neoforge && <1.21.4 || forge {

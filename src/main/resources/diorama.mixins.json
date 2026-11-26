@@ -9,6 +9,7 @@
 	"client": [
 		"BossBarMixin",
 		"ChatComponentMixin",
+		"ChatListenerMixin",
 		"ClientChunkCacheMixin",
 		"ClientPacketListenerMixin",
 		"CustomPayloadMixin",
