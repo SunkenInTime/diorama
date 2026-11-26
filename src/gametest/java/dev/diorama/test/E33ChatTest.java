@@ -87,7 +87,8 @@ final class E33ChatTest {
 			throw new AssertionError("DIORAMA_TESTS=e33chat needs E33Chat installed: chat opened as " + screen);
 		}
 		context.takeScreenshot(picture);
-		// Where E33Chat drew a link that runs Diorama's command for this waypoint, in GUI pixels.
+		// Where E33Chat drew a link that runs Diorama's command for this waypoint, in GUI pixels: one
+		// for each row the link is on, and E33Chat before 2.4.8 makes the whole line the link.
 		List<double[]> links = context.computeOnClient(mc -> {
 			List<double[]> found = new ArrayList<>();
 			for (Object span : spans(mc.gui.screen())) {
@@ -99,9 +100,6 @@ final class E33ChatTest {
 			}
 			return found;
 		});
-		if (links.size() > 1) {
-			wrong.add(name + " has " + links.size() + " [Add] links in E33Chat's window");
-		}
 		double[] at = links.isEmpty() ? null : links.get(0);
 		if (at == null) {
 			String vanilla = context.computeOnClient(mc -> {

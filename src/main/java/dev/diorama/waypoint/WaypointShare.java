@@ -9,6 +9,13 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+//? if fabric {
+import net.fabricmc.loader.api.FabricLoader;
+//?} else if neoforge {
+/*import net.neoforged.fml.ModList;
+*///?} else {
+/*import net.minecraftforge.fml.ModList;
+*///?}
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.ClickEvent;
@@ -149,6 +156,29 @@ public final class WaypointShare {
 		Minecraft mc = Minecraft.getInstance();
 		int y = shared.get().y() != null ? shared.get().y() : mc.player != null ? mc.player.getBlockY() : 64;
 		return message.copy().append(" ").append(addLink(shared.get(), y));
+	}
+
+	/**
+	 * The line as it arrives from the server or a player, before chat or a chat mod has it, with its
+	 * "[Add]" link. Left as it is beside Xaero's Minimap, which reads the same line, takes it out of
+	 * chat and posts one of its own with its own link: a link added first would end up in the
+	 * waypoint it reads.
+	 */
+	public static Component withAddLinkOnArrival(Component message) {
+		return XaeroInstalled.YES ? message : withAddLink(message);
+	}
+
+	/** Looked up at the first chat line, when the loader knows its mods. */
+	private static final class XaeroInstalled {
+		static final boolean YES = modLoaded("xaerominimap") || modLoaded("xaerobetterpvp");
+
+		private static boolean modLoaded(String mod) {
+			//? if fabric {
+			return FabricLoader.getInstance().isModLoaded(mod);
+			//?} else {
+			/*return ModList.get().isLoaded(mod);
+			*///?}
+		}
 	}
 
 	/** Whether part of the line runs the "Add" link's command when clicked. */

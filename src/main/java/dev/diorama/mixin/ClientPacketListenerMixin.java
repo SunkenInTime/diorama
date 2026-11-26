@@ -59,19 +59,19 @@ public abstract class ClientPacketListenerMixin {
 	@ModifyArg(method = "handleSystemChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleSystemMessage(Lnet/minecraft/network/chat/Component;Z)V"), index = 0)
 	//? if >=26.1 {
 	private Component diorama$linkSharedWaypoint(Component content) {
-		return WaypointShare.withAddLink(content);
+		return WaypointShare.withAddLinkOnArrival(content);
 	}
 	//?} else {
 	/*// The same call shows a line above the hotbar, where nothing can be clicked.
 	private Component diorama$linkSharedWaypoint(Component content, boolean overlay) {
-		return overlay ? content : WaypointShare.withAddLink(content);
+		return overlay ? content : WaypointShare.withAddLinkOnArrival(content);
 	}
 	*///?}
 
 	// What a command like /say sends: a line with a sender and no signature.
 	@ModifyArg(method = "handleDisguisedChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/chat/ChatListener;handleDisguisedChatMessage(Lnet/minecraft/network/chat/Component;Lnet/minecraft/network/chat/ChatType$Bound;)V"), index = 0)
 	private Component diorama$linkSharedWaypointSaid(Component message) {
-		return WaypointShare.withAddLink(message);
+		return WaypointShare.withAddLinkOnArrival(message);
 	}
 
 	//? if neoforge && <1.21.4 || forge {

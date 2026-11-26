@@ -22,6 +22,6 @@ public abstract class ChatListenerMixin {
 	/*@ModifyArg(method = "showMessageToPlayer", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/components/ChatComponent;addMessage(Lnet/minecraft/network/chat/Component;Lnet/minecraft/network/chat/MessageSignature;Lnet/minecraft/client/GuiMessageTag;)V"), index = 0)
 	*///?}
 	private Component diorama$linkSharedWaypoint(Component contents) {
-		return WaypointShare.withAddLink(contents);
+		return WaypointShare.withAddLinkOnArrival(contents);
 	}
 }
