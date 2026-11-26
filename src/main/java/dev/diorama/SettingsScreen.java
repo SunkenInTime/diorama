@@ -745,7 +745,7 @@ public final class SettingsScreen extends Screen {
 		return nearest;
 	}
 
-	private static int indexOf(int[] values, int value) {
+	static int indexOf(int[] values, int value) {
 		for (int i = 0; i < values.length; i++) {
 			if (values[i] == value) {
 				return i;

@@ -4,6 +4,7 @@ import dev.diorama.Diorama;
 import dev.diorama.MapSession;
 import dev.diorama.MapStyle;
 import dev.diorama.Projection;
+import dev.diorama.RadarCategories;
 import dev.diorama.Settings;
 import dev.diorama.bake.BlockLooks;
 import dev.diorama.bake.Mipmaps;
@@ -290,7 +291,7 @@ public final class Lights {
 	private static boolean onRadar(Player player, Player self, Entity viewer, float partialTick) {
 		Settings settings = Settings.get();
 		return settings.radarPlayers && player.isAlive() && !Radar.hidden(player, self) && (!player.isSpectator() || self.isSpectator())
-			&& Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= settings.radarRange;
+			&& Math.abs(player.getPosition(partialTick).y - viewer.getPosition(partialTick).y) <= RadarCategories.kind(Radar.Kind.PLAYER).reach();
 	}
 
 	/**

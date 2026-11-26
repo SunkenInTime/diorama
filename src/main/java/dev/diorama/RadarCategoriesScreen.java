@@ -88,7 +88,7 @@ public final class RadarCategoriesScreen extends Screen {
 			.bounds(this.width / 2 + 2, bottom, 120, 20).build());
 	}
 
-	/** "3 mobs · 150% · Names", leaving out what the category doesn't change. */
+	/** "3 mobs · 150% · Names · 64 m", leaving out what the category doesn't change. */
 	private static Component summary(RadarCategories.Entry entry) {
 		List<Component> parts = new ArrayList<>();
 		if (entry instanceof RadarCategories.Category category) {
@@ -99,6 +99,9 @@ public final class RadarCategoriesScreen extends Screen {
 		}
 		if (entry.hasNames() && entry.names() != Settings.NameTags.NEVER) {
 			parts.add(Component.translatable("diorama.radar_categories.names_shown"));
+		}
+		if (entry.range() != entry.usualRange()) {
+			parts.add(RadarCategoryScreen.rangeValue(entry.range()));
 		}
 		net.minecraft.network.chat.MutableComponent line = Component.empty();
 		for (int i = 0; i < parts.size(); i++) {
