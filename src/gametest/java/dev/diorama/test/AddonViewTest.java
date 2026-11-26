@@ -230,7 +230,8 @@ final class AddonViewTest {
 
 	/** Shows a screen drawing these and waits for a few frames of it. */
 	private static ViewScreen show(ClientGameTestContext context, ViewScreen.Draw... draws) {
-		ViewScreen screen = new ViewScreen(List.of(draws));
+		// A screen is made on the client thread: its constructor reads the game.
+		ViewScreen screen = context.computeOnClient(mc -> new ViewScreen(List.of(draws)));
 		context.setScreen(() -> screen);
 		context.waitFor(mc -> screen.frames >= 5, 600);
 		context.waitTicks(3);
@@ -721,7 +722,7 @@ final class AddonViewTest {
 				.build()));
 			MapView close = open(context, opened, MapView.Part.values());
 			MapView wide = open(context, opened);
-			ViewScreen screen = new ViewScreen(List.of(new ViewScreen.Draw(close, near), new ViewScreen.Draw(wide, farther)));
+			ViewScreen screen = context.computeOnClient(mc -> new ViewScreen(List.of(new ViewScreen.Draw(close, near), new ViewScreen.Draw(wide, farther))));
 			screen.framed = true;
 			context.setScreen(() -> screen);
 			context.waitFor(mc -> screen.frames >= 5, 600);

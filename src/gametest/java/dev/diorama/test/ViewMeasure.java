@@ -131,7 +131,7 @@ final class ViewMeasure {
 	}
 
 	private static void measureScreen(ClientGameTestContext context, List<String> table, String what, List<ViewScreen.Draw> draws) {
-		ViewScreen screen = new ViewScreen(draws);
+		ViewScreen screen = context.computeOnClient(mc -> new ViewScreen(draws));
 		context.setScreen(() -> screen);
 		context.waitFor(mc -> screen.frames >= 5, 600);
 		context.waitTicks(20);
