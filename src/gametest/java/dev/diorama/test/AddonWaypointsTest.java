@@ -812,7 +812,7 @@ final class AddonWaypointsTest {
 		});
 		boolean nothing = context.computeOnClient(mc -> WaypointStore.saves() == saves + 1 && WaypointStore.get().all().stream().noneMatch(w -> w.id.equals(second)));
 		context.setScreen(() -> null);
-		if (stale.contains("Menu pin") || !labels.contains("Menu pin two") || !clicked.equals("clicked") || !nothing) {
+		if (stale.equals("no pin drawn") || stale.contains("Menu pin") || !labels.contains("Menu pin two") || !clicked.equals("clicked") || !nothing) {
 			wrong.add("The map's menu and a pin an addon deleted: right-clicking the pin drawn before gave " + stale + " (expected no waypoint menu); the menu opened before "
 				+ labels + ", Hide after the delete " + clicked + ", nothing saved but the delete and the waypoint still gone " + nothing);
 		}

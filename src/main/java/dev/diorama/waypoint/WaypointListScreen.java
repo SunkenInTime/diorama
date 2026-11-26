@@ -413,7 +413,8 @@ public final class WaypointListScreen extends Screen {
 		this.empty = store == null || store.all().isEmpty() && store.customFolders().isEmpty() && store.waystones().isEmpty();
 		this.waystoneChanges = Waystones.changes();
 		this.hadWaystones = store != null && !store.waystones().isEmpty();
-		this.storeRevision = store == null ? 0 : store.revision();
+		// -1 with no store: one that comes later, at revision 0, still makes the rows again.
+		this.storeRevision = store == null ? -1 : store.revision();
 		this.folderArmed = false;
 		this.folderActions.clear();
 		this.folderMenu = null;

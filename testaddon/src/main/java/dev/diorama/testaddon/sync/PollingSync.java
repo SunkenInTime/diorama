@@ -12,10 +12,12 @@ import dev.diorama.api.Waypoints;
 import dev.diorama.api.World;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -105,6 +107,8 @@ public final class PollingSync {
 		Map<UUID, OtherMod.Pin> updates = new LinkedHashMap<>();
 		List<UUID> removals = new ArrayList<>();
 		List<String> adding = new ArrayList<>();
+		// Links whose Diorama side is on a saved map not in use: their other side keeps its baseline until it's back.
+		Set<String> skipped = new HashSet<>();
 
 		for (Map.Entry<UUID, Link> entry : new ArrayList<>(this.links.entrySet())) {
 			Link link = entry.getValue();
@@ -112,6 +116,7 @@ public final class PollingSync {
 			OtherMod.Pin their = theirs.remove(link.other());
 			if (mine == null && !now.mapId(link.dimension()).equals(link.map())) {
 				// On a saved map not in use: not here, and not deleted.
+				skipped.add(link.other());
 				continue;
 			}
 			if (mine == null && their == null) {
@@ -120,8 +125,14 @@ public final class PollingSync {
 				this.other.remove(link.other());
 				this.unlink(entry.getKey());
 			} else if (their == null) {
-				removals.add(entry.getKey());
-				this.unlink(entry.getKey());
+				OtherMod.Pin seen = pin(mine);
+				if (seen.equals(this.lastDiorama.get(entry.getKey()))) {
+					removals.add(entry.getKey());
+					this.unlink(entry.getKey());
+				} else {
+					// Changed in Diorama while deleted in the other mod: Diorama's side wins, so it goes back.
+					this.links.put(entry.getKey(), new Link(this.other.add(seen), link.dimension(), link.map()));
+				}
 			} else {
 				OtherMod.Pin seen = pin(mine);
 				if (!seen.equals(this.lastDiorama.get(entry.getKey()))) {
@@ -135,18 +146,25 @@ public final class PollingSync {
 		for (Waypoint mine : diorama.values()) {
 			this.links.put(mine.id(), new Link(this.other.add(pin(mine)), mine.dimension(), mine.mapId()));
 		}
-		adding.addAll(theirs.keySet());
+		// A pin whose dimension Diorama can't name is left out, so it can't stop the rest of the batch.
+		Map<String, DimensionId> dimensions = new HashMap<>();
+		for (Map.Entry<String, OtherMod.Pin> pin : theirs.entrySet()) {
+			if (this.dimension(pin.getValue(), dimensions) != null) {
+				adding.add(pin.getKey());
+			}
+		}
+		updates.values().removeIf(pin -> this.dimension(pin, dimensions) == null);
 
 		if (!updates.isEmpty() || !removals.isEmpty() || !adding.isEmpty()) {
 			EditResult result = waypoints.edit(now.worldId(), edits -> {
 				for (String id : adding) {
 					OtherMod.Pin pin = theirs.get(id);
-					edits.add(NewWaypoint.builder(pin.name(), DimensionId.of(pin.dimension()), BlockCoord.of(pin.x(), pin.y(), pin.z()))
+					edits.add(NewWaypoint.builder(pin.name(), dimensions.get(pin.dimension()), BlockCoord.of(pin.x(), pin.y(), pin.z()))
 						.rgb(pin.rgb()).visible(pin.visible()).folder(pin.folder()).build());
 				}
 				for (Map.Entry<UUID, OtherMod.Pin> update : updates.entrySet()) {
 					OtherMod.Pin pin = update.getValue();
-					edits.update(update.getKey(), WaypointUpdate.builder().name(pin.name()).dimension(DimensionId.of(pin.dimension()))
+					edits.update(update.getKey(), WaypointUpdate.builder().name(pin.name()).dimension(dimensions.get(pin.dimension()))
 						.pos(BlockCoord.of(pin.x(), pin.y(), pin.z())).rgb(pin.rgb()).visible(pin.visible()).folder(pin.folder()).build());
 				}
 				removals.forEach(edits::remove);
@@ -178,8 +196,26 @@ public final class PollingSync {
 				this.links.put(waypoint.id(), new Link(link.other(), waypoint.dimension(), waypoint.mapId()));
 			}
 		}
-		this.lastOther.clear();
-		this.lastOther.putAll(this.other.pins());
+		for (Map.Entry<String, OtherMod.Pin> pin : this.other.pins().entrySet()) {
+			if (!skipped.contains(pin.getKey())) {
+				this.lastOther.put(pin.getKey(), pin.getValue());
+			}
+		}
+		this.lastOther.keySet().retainAll(this.other.pins().keySet());
+	}
+
+	/** The pin's dimension as Diorama names it, or null (noted in {@link #lastProblem}) for one it can't. */
+	private DimensionId dimension(OtherMod.Pin pin, Map<String, DimensionId> known) {
+		DimensionId dimension = known.get(pin.dimension());
+		if (dimension == null) {
+			try {
+				dimension = DimensionId.of(pin.dimension());
+				known.put(pin.dimension(), dimension);
+			} catch (IllegalArgumentException e) {
+				this.lastProblem = "Left out the other mod's waypoint " + pin.name() + ": " + e.getMessage();
+			}
+		}
+		return dimension;
 	}
 
 	/** The other mod's ID for a linked waypoint, and the dimension and saved map Diorama's is on. */

@@ -19,9 +19,10 @@ import java.util.function.Consumer;
  *     to another world or dimension, or a saved map was switched: start again from {@link #all},
  *     as a switch of saved map swaps the waypoints {@code all()} lists for the other map's, which
  *     isn't the player deleting the old map's.</li>
- * <li>Read {@link #revision}. If it is the number you last read, nothing here changed: stop.</li>
- * <li>Otherwise read {@link #all}, compare it with what you had, and send what changed to the
- *     other mod.</li>
+ * <li>Read {@link #revision}. If it is the number you last read, nothing here changed, and if the
+ *     other mod's side hasn't changed either, stop.</li>
+ * <li>Otherwise read {@link #all} and the other mod's waypoints, compare each with what you had,
+ *     and carry what changed across.</li>
  * <li>To change Diorama's side, make one {@link #edit} with everything, then read
  *     {@code revision()} again and keep that number, so your next tick doesn't take your own
  *     change for the player's.</li>
