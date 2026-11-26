@@ -560,6 +560,27 @@ public final class MapViewport {
 		}
 	}
 
+	/** For tests ({@code fog-mask}): told about every fog mask build, on the render thread. */
+	public interface MaskWatch {
+		/** A build starts: the mask is read from the map again. */
+		void started();
+
+		/**
+		 * The known share of each mask texel, read from the tiles, before the rest of the build works
+		 * on it. The other arguments are everything that reading depends on besides the map.
+		 */
+		void sampled(MapLevel level, int layer, int lod, double originU, double originV, double texel, boolean coarse, boolean drawsNear, int nearU, int nearV, int[] known);
+
+		/** The build's part on the render thread is done. */
+		void finished();
+	}
+
+	private static volatile @Nullable MaskWatch maskWatch;
+
+	public static void watchMasksForTests(@Nullable MaskWatch watch) {
+		maskWatch = watch;
+	}
+
 	private static volatile boolean fogHiddenForTests;
 
 	/** For tests that check the tiles under the fog (TileFilterTest): the map drawn without it. */
@@ -739,6 +760,10 @@ public final class MapViewport {
 			this.finishing.join();
 			this.finishing = null;
 		}
+		MaskWatch watch = maskWatch;
+		if (watch != null) {
+			watch.started();
+		}
 		this.maskInputs = inputs;
 		this.maskLevel = new WeakReference<>(level);
 		double units = (double) Projection.TILE_UNITS * (1 << lod);
@@ -849,6 +874,9 @@ public final class MapViewport {
 				this.maskPixels[j * MASK + i] = 0xFF000000 | Math.round(most * 255);
 			}
 		}
+		if (watch != null) {
+			watch.sampled(level, view.layer(), lod, originU, originV, texel, coarse, drawsNear, nearU, nearV, this.maskPixels);
+		}
 		boolean surface = view.layer() == TileKey.SURFACE;
 		if (surface) {
 			if (memory != null) {
@@ -870,6 +898,9 @@ public final class MapViewport {
 			}
 		}
 		this.finish(() -> this.finishBuild(inputs, rounded, surface), later);
+		if (watch != null) {
+			watch.finished();
+		}
 	}
 
 	/**
