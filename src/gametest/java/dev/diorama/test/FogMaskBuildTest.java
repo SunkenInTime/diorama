@@ -198,6 +198,7 @@ final class FogMaskBuildTest {
 		if (off != null) {
 			throw new AssertionError("fog-mask can't measure what fog mask builds allocate: " + off);
 		}
+		Diorama.LOGGER.info("fog-mask | memory at the start | {}", MemoryLog.line());
 		boolean frames = MinimapAllocTest.register(context);
 		context.runOnClient(mc -> MapViewport.watchMasksForTests(new Watch()));
 		try {
@@ -351,6 +352,9 @@ final class FogMaskBuildTest {
 				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
 				return;
 			}
+			if (waited % 400 == 0) {
+				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, left, MemoryLog.line());
+			}
 			if (waited >= REDRAW_TICKS) {
 				throw new AssertionError("The map wasn't drawn again from the save within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
 			}
@@ -378,6 +382,7 @@ final class FogMaskBuildTest {
 		context.waitTicks(5);
 		int[] size = context.computeOnClient(mc -> new int[] {mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight()});
 		Diorama.LOGGER.info("fog-mask | large view: window {} by {} at GUI scale 1", size[0], size[1]);
+		Diorama.LOGGER.info("fog-mask | memory with the large window | {}", MemoryLog.line());
 		try {
 			if (size[0] < LARGE_WIDTH || size[1] < LARGE_HEIGHT) {
 				throw new AssertionError("The window couldn't be made " + LARGE_WIDTH + " by " + LARGE_HEIGHT + " for the large view: it's " + size[0] + " by " + size[1]);
@@ -443,6 +448,7 @@ final class FogMaskBuildTest {
 		});
 		PARTS.put(name, counting);
 		Diorama.LOGGER.info("fog-mask | {}", line(counting));
+		Diorama.LOGGER.info("fog-mask | memory after \"{}\" | {}", name, MemoryLog.line());
 	}
 
 	private static String line(Part p) {
