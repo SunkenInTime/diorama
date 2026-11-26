@@ -9,8 +9,8 @@ import org.jspecify.annotations.Nullable;
  * of texels at a time, and a tile lies under dozens of rows, so the build used to look each one up
  * again on every row it lay on, and for one not in memory every overview level above it as well,
  * with a new key each time: 200 KB to 2 MB a build, a build or more a second while the player
- * moves. Here the key for a tile is made the first time a build reads it and kept for the builds
- * after, and what the map has there is looked up once a build. Render thread.
+ * moves. Here the key for a tile is made the first time a build reads it and kept while builds go on
+ * reading it, and what the map has there is looked up once a build. Render thread.
  */
 final class MaskTiles {
 	/** Slots to start with, a power of two: a minimap's build reads up to about a hundred tiles. */
@@ -66,7 +66,7 @@ final class MaskTiles {
 		}
 		// Kept under three quarters full, so a slot is always found within a few steps.
 		if (this.count >= this.keys.length * 3 / 4) {
-			this.grow();
+			this.prune();
 			slot = this.free(hash(layer, tileU, tileV, lod));
 		}
 		TileKey key = new TileKey(layer, tileU, tileV, lod);
@@ -76,17 +76,32 @@ final class MaskTiles {
 		return tile;
 	}
 
-	/** Twice the slots, up to {@link #MOST_SLOTS}; past that, every key is dropped and made again when read. */
-	private void grow() {
+	/**
+	 * Keeps only the keys this build has read, in as many slots as leave room for as many again:
+	 * so a minimap flying over new land keeps the hundred or so tiles around it rather than every
+	 * tile it ever passed, and the full map zoomed far out gets room for its thousands. If this build
+	 * alone reads more than fit, every key is dropped and made again when read.
+	 */
+	private void prune() {
 		@Nullable TileKey[] oldKeys = this.keys;
 		@Nullable MapTile[] oldFound = this.found;
 		int[] oldReadIn = this.readIn;
-		int slots = Math.min(MOST_SLOTS, oldKeys.length * 2);
-		if (slots == oldKeys.length) {
-			// Only what this build found goes with the keys: looked up again, it's the same.
+		int live = 0;
+		for (int i = 0; i < oldKeys.length; i++) {
+			if (oldKeys[i] != null && oldReadIn[i] == this.build) {
+				live++;
+			}
+		}
+		int slots = FIRST_SLOTS;
+		while (slots < MOST_SLOTS && slots * 3 / 8 <= live) {
+			slots *= 2;
+		}
+		this.count = 0;
+		// Only what this build found goes with the keys dropped: looked up again, it's the same.
+		boolean keep = slots * 3 / 8 > live;
+		if (!keep && slots == oldKeys.length) {
 			Arrays.fill(this.keys, null);
 			Arrays.fill(this.found, null);
-			this.count = 0;
 			return;
 		}
 		this.layers = new int[slots];
@@ -96,10 +111,14 @@ final class MaskTiles {
 		this.keys = new TileKey[slots];
 		this.found = new MapTile[slots];
 		this.readIn = new int[slots];
+		if (!keep) {
+			return;
+		}
 		for (int i = 0; i < oldKeys.length; i++) {
 			TileKey key = oldKeys[i];
-			if (key != null) {
+			if (key != null && oldReadIn[i] == this.build) {
 				this.put(this.free(hash(key.layer(), key.tileU(), key.tileV(), key.lod())), key, oldFound[i], oldReadIn[i]);
+				this.count++;
 			}
 		}
 	}
