@@ -543,26 +543,38 @@ final class SavedChunksTest {
 		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		int x = at.getX() + 5;
 		int z = at.getZ();
-		int y = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z)) - 1;
+		// Up in the air, as in placesPlayedInAreNotDrawnAgain: the map is drawn tilted, so on the
+		// ground a taller tree a few blocks south can hide the block, and changing it shows nothing.
+		int y = world.getServer().computeOnServer(server -> server.overworld().getHeight(Heightmap.Types.WORLD_SURFACE, x, z)) + PILLAR;
 		BlockPos top = new BlockPos(x, y, z);
 		TileKey tile = tileAt(x, y + 1, z);
 		int pixel = pixelAt(x, y + 1, z);
-		// A full block first, whatever was there, so the change after is one full block for another.
+		// A full block first, so the change after is one full block for another.
 		int before = savedPixel(context, tile, pixel);
-		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(top,
-			(server.overworld().getBlockState(top).is(Blocks.STONE) ? Blocks.GOLD_BLOCK : Blocks.STONE).defaultBlockState()));
-		context.waitFor(mc -> savedPixelNow(tile, pixel) != before, 1200);
+		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(top, Blocks.GOLD_BLOCK.defaultBlockState()));
+		waitForPixel(context, tile, pixel, before, "a gold block put at " + top);
 		DioramaClientTest.settle(context, 40);
-		int stone = savedPixel(context, tile, pixel);
+		int gold = savedPixel(context, tile, pixel);
 		if (context.computeOnClient(mc -> MapSession.get().map().peek(tile) == null)) {
 			throw new AssertionError("The map doesn't have tile " + tile + " next to the player");
 		}
 		int coverageBefore = context.computeOnClient(mc -> MapSession.get().map().coverageChanges());
 		world.getServer().runOnServer(server -> server.overworld().setBlockAndUpdate(top, Blocks.DIAMOND_BLOCK.defaultBlockState()));
-		context.waitFor(mc -> savedPixelNow(tile, pixel) != stone, 1200);
+		waitForPixel(context, tile, pixel, gold, "the gold block at " + top + " turned to diamond");
 		int coverage = context.computeOnClient(mc -> MapSession.get().map().coverageChanges()) - coverageBefore;
 		if (coverage > 0) {
-			throw new AssertionError("Stone turned to diamond next to the player changed the coverage of " + coverage + " tiles, so the fog was built again");
+			throw new AssertionError("Gold turned to diamond next to the player changed the coverage of " + coverage + " tiles, so the fog was built again");
+		}
+	}
+
+	/** Waits for a saved pixel to change from {@code was} after {@code what}. */
+	private static void waitForPixel(ClientGameTestContext context, TileKey tile, int pixel, int was, String what) {
+		for (int i = 0; savedPixel(context, tile, pixel) == was; i++) {
+			if (i > 1200) {
+				throw new AssertionError("Pixel " + pixel % Projection.TILE_PIXELS + "," + pixel / Projection.TILE_PIXELS + " of tile " + tile + " still shows " + Integer.toHexString(was) + " a minute after " + what
+					+ " (tile in the map: " + context.computeOnClient(mc -> MapSession.get().map().peek(tile) != null) + ")");
+			}
+			context.waitTick();
 		}
 	}
 

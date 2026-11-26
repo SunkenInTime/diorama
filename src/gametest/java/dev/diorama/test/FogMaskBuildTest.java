@@ -78,7 +78,11 @@ final class FogMaskBuildTest {
 	 * the first build needs: under it, something new that allocated 100 KB every build would pass.
 	 */
 	private static final long MOST_TILT_MINIMAP_MEDIAN = 8 * 1024;
-	/** Ticks the redraw from the save after the tilt change may take. */
+	/** Blocks "tilt changed, redrawn, minimap, flying" flies, centred on the spawn. */
+	private static final int REDRAWN_FLIGHT = 320;
+	/** Blocks past the player the minimap shows, and more: what the redraw must have reached around the flight. */
+	private static final int MINIMAP_REACH = 64;
+	/** Ticks the redraw from the save after the tilt change may take under the flight. */
 	private static final int REDRAW_TICKS = 6000;
 	private static final int LARGE_WIDTH = 5120;
 	private static final int LARGE_HEIGHT = 1440;
@@ -346,8 +350,8 @@ final class FogMaskBuildTest {
 			if (context.computeOnClient(mc -> MapSession.get().savedChunks() == null)) {
 				throw new AssertionError("Nothing draws the map again from the save after its tilt changed (no saved-chunk import running), so \"tilt changed, redrawn\" would measure a map that was never redrawn");
 			}
-			waitForRedraw(context);
-			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - 160 + tick * ELYTRA, FLY_Y, z});
+			waitForRedraw(context, world, x - REDRAWN_FLIGHT / 2, x + REDRAWN_FLIGHT / 2, z);
+			measure(context, world, "tilt changed, redrawn, minimap, flying", frames, 200, tick -> new double[] {x - REDRAWN_FLIGHT / 2 + tick * ELYTRA, FLY_Y, z});
 			context.takeScreenshot("fog-mask-tilt-changed-minimap");
 		} finally {
 			setPitch(context, pitch);
@@ -356,28 +360,54 @@ final class FogMaskBuildTest {
 	}
 
 	/**
-	 * Waits for the map to be drawn again from the save after the tilt changed: everything the
-	 * player went over, a few hundred tiles at about 400 ms each on a VM with no GPU, beside the
-	 * baker. Two minutes wasn't always enough on NeoForge.
+	 * Waits for the map to be drawn again after the tilt changed under the ground the part after
+	 * flies over, from {@code fromX} to {@code toX} along {@code z} and the minimap's view around it:
+	 * each chunk there drawn from the save, or loaded on the client, which bakes it itself and never
+	 * draws it from the save. The save is drawn nearest the player first, so that's done long before
+	 * the far land the flights east made, the last of which took more than 6000 ticks on a slow VM
+	 * with NeoForge. Saved first, so every chunk there is in the save to be drawn.
 	 */
-	private static void waitForRedraw(ClientGameTestContext context) {
+	private static void waitForRedraw(ClientGameTestContext context, TestSingleplayerContext world, int fromX, int toX, int z) {
+		world.getServer().runOnServer(server -> server.saveEverything(true, true, true));
+		context.runOnClient(mc -> {
+			SavedChunkImport chunks = MapSession.get().savedChunks();
+			if (chunks != null) {
+				chunks.rescanSoon();
+			}
+		});
+		int cx0 = fromX - MINIMAP_REACH >> 4;
+		int cx1 = toX + MINIMAP_REACH >> 4;
+		int cz0 = z - MINIMAP_REACH >> 4;
+		int cz1 = z + MINIMAP_REACH >> 4;
 		for (int waited = 0; ; waited += 20) {
 			String left = context.computeOnClient(mc -> {
 				SavedChunkImport chunks = MapSession.get().savedChunks();
 				if (chunks == null) {
 					return "no saved-chunk import running";
 				}
-				return chunks.idle() ? null : chunks.chunksLeft() + " chunks left, " + chunks.percentDone() + "% done";
+				int undrawn = 0;
+				for (int cx = cx0; cx <= cx1; cx++) {
+					for (int cz = cz0; cz <= cz1; cz++) {
+						if (!chunks.drewChunk(cx, cz) && !mc.level.getChunkSource().hasChunk(cx, cz)) {
+							undrawn++;
+						}
+					}
+				}
+				String progress = chunks.chunksLeft() + " chunks of the save left, " + chunks.percentDone() + "% done";
+				if (undrawn == 0) {
+					Diorama.LOGGER.info("fog-mask | drawn again under the flight {} ticks after the full map closed ({})", waited, progress);
+					return null;
+				}
+				return undrawn + " chunks under the flight not drawn yet, " + progress;
 			});
 			if (left == null) {
-				Diorama.LOGGER.info("fog-mask | drawn again from the save {} ticks after the full map closed", waited);
 				return;
 			}
 			if (waited % 400 == 0) {
 				Diorama.LOGGER.info("fog-mask | memory while redrawing, {} ticks ({}) | {}", waited, left, MemoryLog.line());
 			}
 			if (waited >= REDRAW_TICKS) {
-				throw new AssertionError("The map wasn't drawn again from the save within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
+				throw new AssertionError("The map wasn't drawn again from the save under the flight within " + REDRAW_TICKS / 20 + " s of game time after the tilt changed (" + left + "), so \"tilt changed, redrawn\" can't run");
 			}
 			context.waitTicks(20);
 		}
