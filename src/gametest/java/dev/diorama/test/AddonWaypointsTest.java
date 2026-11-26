@@ -188,15 +188,17 @@ final class AddonWaypointsTest {
 		int hy = context.computeOnClient(mc -> mc.level.getHeight(Heightmap.Types.MOTION_BLOCKING, hx, hz));
 		context.runOnClient(mc -> TestAddon.forgetHeard());
 		int savesBefore = context.computeOnClient(mc -> WaypointStore.saves());
+		// Nothing is told from inside edit(): only at the tick. Read in the same call, as on
+		// NeoForge and Forge the game ticks on between the test's calls.
+		List<String> heardAtOnce = new ArrayList<>();
 		fromAddon = context.computeOnClient(mc -> {
 			UUID[] id = new UUID[1];
 			TestAddon.world().waypoints().edit(edits -> id[0] = edits.add(NewWaypoint.builder(FROM_ADDON, DimensionId.OVERWORLD, BlockCoord.of(hx, hy, hz))
 				.rgb(PIN).initials("TA").build()));
+			heardAtOnce.addAll(TestAddon.heard());
 			return id[0];
 		});
 		int saves = context.computeOnClient(mc -> WaypointStore.saves()) - savesBefore;
-		// Nothing is told from inside edit(): only at the tick.
-		List<String> heardAtOnce = context.computeOnClient(mc -> List.copyOf(TestAddon.heard()));
 		told(context);
 		String json = text(file);
 		boolean inFile = json.contains(fromAddon.toString()) && json.contains("\"addedBy\": \"diorama_test_addon\"");
