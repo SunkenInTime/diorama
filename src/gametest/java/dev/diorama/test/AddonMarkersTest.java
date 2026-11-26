@@ -311,9 +311,11 @@ final class AddonMarkersTest {
 			if (!full.isEmpty()) {
 				wrong.add("At the title screen after leaving the world, layers still hold content: " + full);
 			}
-			try (TestSingleplayerContext other = context.worldBuilder().setUseConsistentSettings(false).create()) {
+			try (TestSingleplayerContext other = context.worldBuilder().create()) {
 				context.runOnClient(mc -> AddonOverlay.probe = recorder);
 				other.getServer().runCommand("time set noon");
+				context.waitFor(mc -> mc.player != null && mc.player.onGround(), 1200);
+				BlockPos spawn = context.computeOnClient(mc -> mc.player.blockPosition());
 				// The new world's ground at the place the old content was.
 				other.getServer().runCommand("spreadplayers " + scene.playerX() + " " + scene.playerZ() + " 0 1 false @a");
 				context.waitFor(mc -> mc.player != null && mc.player.onGround(), 1200);
@@ -344,6 +346,10 @@ final class AddonMarkersTest {
 					closeKept();
 				});
 				//? if >=26.1 && fabric {
+				// Back where the world started the player, as the run measured against does.
+				other.getServer().runCommand("tp @a " + (spawn.getX() + 0.5) + " " + spawn.getY() + " " + (spawn.getZ() + 0.5));
+				context.waitFor(mc -> mc.player.onGround(), 1200);
+				context.waitTicks(20);
 				MarkersMeasure.run(context, other);
 				//?}
 			}
@@ -867,7 +873,8 @@ final class AddonMarkersTest {
 	 * A map's budget, on the full map: a layer of lines with all of {@link LayerContent#MAX_LINE_POINTS}
 	 * in view fills the line pieces, so the line in the layer after it isn't drawn; 8 layers of
 	 * {@link LayerContent#MAX_MARKERS} dots fill the markers, so the one in the layer after isn't;
-	 * and two frames draw exactly the same.
+	 * and two frames draw exactly the same. Once every layer is closed, the arrays that held all
+	 * that are let go.
 	 */
 	private static void budget(ClientGameTestContext context, Scene scene, List<String> wrong) {
 		Recorder recorder = context.computeOnClient(mc -> recorder());
@@ -931,6 +938,16 @@ final class AddonMarkersTest {
 				}
 			});
 		}
+		long busy = context.computeOnClient(mc -> AddonOverlay.heldBytes());
+		// Every layer closed: the next frames' maps find none and let the arrays go.
+		int[] open = context.computeOnClient(mc -> new int[] {AddonLayers.open().size()});
+		context.waitTicks(10);
+		long idle = context.computeOnClient(mc -> AddonOverlay.heldBytes());
+		if (open[0] == 0 && idle > 4096) {
+			wrong.add("After the budget's layers closed, with none open, the overlay still holds " + idle + " bytes of arrays (" + busy + " while they were open)");
+			return;
+		}
+		Diorama.LOGGER.info("addon-api markers: arrays held: {} bytes with the budget's layers just closed, {} bytes ten ticks on ({} layers open)", busy, idle, open[0]);
 	}
 
 	/**

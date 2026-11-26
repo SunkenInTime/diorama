@@ -45,15 +45,25 @@ final class MarkersMeasure {
 	/** What a feed of moving markers does each client tick, or null. */
 	private static Runnable feed;
 	private static boolean feeding;
+	/** The minimap's HUD element, as Fabric last drew it: Fabric applies a replacement as it draws. */
+	private static Object minimapHud;
 
 	private MarkersMeasure() {
 	}
 
+	/** Measures where the player stands, facing north, in a world it may kill every mob in. */
 	static void run(ClientGameTestContext context, TestSingleplayerContext world) {
+		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
+		world.getServer().runCommand("tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 180 0");
+		context.waitTicks(5);
 		long[] none = MapAllocProbe.none(context, world);
 		context.runOnClient(mc -> {
 			if (!feeding) {
 				feeding = true;
+				HudElementRegistry.replaceElement(Diorama.id("minimap"), element -> {
+					minimapHud = element;
+					return element;
+				});
 				net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents.END_CLIENT_TICK.register(client -> {
 					if (feed != null) {
 						feed.run();
@@ -61,7 +71,6 @@ final class MarkersMeasure {
 				});
 			}
 		});
-		BlockPos at = context.computeOnClient(mc -> mc.player.blockPosition());
 		double px = at.getX() + 0.5;
 		double py = at.getY();
 		double pz = at.getZ() + 0.5;
@@ -86,6 +95,8 @@ final class MarkersMeasure {
 			table.add(row(context, "1000 icons with labels, still", 100, 200));
 			context.runOnClient(mc -> layer.replace(LayerContent.EMPTY));
 			table.add(row(context, "layer open, empty", 100, 200));
+			context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+			table.add(row(context, "layer open, empty, round minimap", 100, 200));
 			context.runOnClient(mc -> layer.close());
 			layers.clear();
 
@@ -210,15 +221,13 @@ final class MarkersMeasure {
 
 	/** The minimap's AddonOverlay, read off the HUD element Diorama registered. Client thread. */
 	private static Object minimapOverlay() {
-		Object[] found = new Object[1];
-		HudElementRegistry.replaceElement(Diorama.id("minimap"), element -> {
-			found[0] = element;
-			return element;
-		});
+		if (minimapHud == null) {
+			throw new AssertionError("Fabric hasn't drawn the minimap's HUD element since its replacement was registered");
+		}
 		try {
-			Field field = found[0].getClass().getDeclaredField("addons");
+			Field field = minimapHud.getClass().getDeclaredField("addons");
 			field.setAccessible(true);
-			return field.get(found[0]);
+			return field.get(minimapHud);
 		} catch (ReflectiveOperationException e) {
 			throw new AssertionError(e);
 		}
