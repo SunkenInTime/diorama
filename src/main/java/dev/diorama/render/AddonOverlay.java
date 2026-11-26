@@ -29,8 +29,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Where things are on screen is worked out in doubles, and every line is cut to the view (a
  * little outside it) before any corner becomes a float, so a line from one end of the world to the
- * other gives corners near the view like any other. On a round minimap, what crosses its circle
- * is cut to the circle, and a marker is drawn only if all of what it draws is inside.
+ * other gives corners near the view like any other. The view handed in is the one the player
+ * sees, which the scissor cuts to: a turned square minimap's, not the bigger ground under it, so
+ * only what can be seen counts against a map's budget. In a rectangular view, a marker any of
+ * which is in view is drawn and the scissor cuts the rest. On a round minimap nothing cuts to the
+ * circle: lines are cut to it here, and a marker is drawn only if all of what it draws is inside.
  *
  * <p>What it draws a frame goes into arrays kept between frames, which the GUI holds on to until
  * the frame is drawn instead of copying ({@link MapCanvas#rectsKept}): so a crowd of markers
@@ -49,7 +52,7 @@ public final class AddonOverlay {
 	private static final int LABEL_CELL = 4;
 	/** The rim either side of a line's colour, in GUI pixels, as the player's drawings have. */
 	private static final float RIM = 1;
-	/** The corners of a line's joint: an octagon round each point. */
+	/** The corners of a line's joint: an octagon round each point, turning the way the GUI's corners do. */
 	private static final float[] OCTAGON = new float[16];
 	/**
 	 * How many draws of each kind may still be waiting for the screen: the minimap and the full
@@ -329,14 +332,15 @@ public final class AddonOverlay {
 				// which at a small size is bigger than the size asked for.
 				double dotHalf = marker.size() / 2.0 + 1;
 				double iconHalf = icon.isPresent() ? WaypointIcons.TILE * Radar.texel(marker.size(), WaypointIcons.TILE) / 2.0 : dotHalf;
-				double reach = Math.max(dotHalf, iconHalf);
-				if (x + reach < left || x - reach > right || y + reach < top || y - reach > bottom
-					|| circle != null && Math.hypot(x - circle.cx, y - circle.cy) - reach * Math.sqrt(2) > circle.r) {
+				boolean iconShows = icon.isPresent() && shows(x, y, iconHalf, left, top, right, bottom, circle);
+				boolean dotShows = shows(x, y, dotHalf, left, top, right, bottom, circle);
+				if (!iconShows && !dotShows) {
 					continue;
 				}
-				boolean iconFits = icon.isPresent() && fits(x, y, iconHalf, left, top, right, bottom, circle);
-				boolean dotFits = fits(x, y, dotHalf, left, top, right, bottom, circle);
-				if (!iconFits && !dotFits) {
+				// A marker whose icon wouldn't show here isn't drawn as a dot instead, unless its icon is
+				// already known to be missing, as then it is a dot wherever it is. Only what is known is
+				// read: a marker that isn't drawn never costs a lookup.
+				if (icon.isPresent() && !iconShows && !MarkerAtlas.missing(icon.get())) {
 					continue;
 				}
 				if (drawn == MapLayer.MAX_DRAWN_MARKERS) {
@@ -347,18 +351,10 @@ public final class AddonOverlay {
 					}
 					break all;
 				}
-				// Only an icon that is drawn takes a tile. One that wouldn't fit here isn't drawn as a dot
-				// instead, unless no pack has it, as then it is a dot wherever it is.
-				int tile = MarkerAtlas.NONE;
-				if (icon.isPresent()) {
-					if (iconFits) {
-						tile = MarkerAtlas.tile(icon.get());
-					} else if (!MarkerAtlas.missing(icon.get())) {
-						continue;
-					}
-					if (tile == MarkerAtlas.NONE && !dotFits) {
-						continue;
-					}
+				// Only an icon that is drawn takes a tile.
+				int tile = iconShows ? MarkerAtlas.tile(icon.get()) : MarkerAtlas.NONE;
+				if (tile == MarkerAtlas.NONE && !dotShows) {
+					continue;
 				}
 				double half = tile != MarkerAtlas.NONE ? iconHalf : dotHalf;
 				float fx = (float) x;
@@ -400,13 +396,17 @@ public final class AddonOverlay {
 		quads.settle();
 	}
 
-	/** Whether a square reaching {@code half} from (x, y) is wholly in the view, a round one's circle included. */
-	private static boolean fits(double x, double y, double half, double left, double top, double right, double bottom, @Nullable Circle circle) {
+	/**
+	 * Whether a square reaching {@code half} from (x, y) is drawn: in a rectangular view if any of
+	 * it is in the view, as the scissor cuts the rest; on a round minimap only if all of it is
+	 * inside the circle, as nothing cuts to the circle.
+	 */
+	private static boolean shows(double x, double y, double half, double left, double top, double right, double bottom, @Nullable Circle circle) {
+		if (circle == null) {
+			return x + half > left && x - half < right && y + half > top && y - half < bottom;
+		}
 		if (x - half < left || x + half > right || y - half < top || y + half > bottom) {
 			return false;
-		}
-		if (circle == null) {
-			return true;
 		}
 		float x0 = (float) (x - half);
 		float y0 = (float) (y - half);
@@ -533,7 +533,9 @@ public final class AddonOverlay {
 
 	/**
 	 * The layers' lines in {@code dimension}, cut to the view, a round one's circle included, up to
-	 * {@link MapLayer#MAX_DRAWN_LINE_PIECES} quads. Call it inside no scissor of its own.
+	 * {@link MapLayer#MAX_DRAWN_LINE_PIECES} quads. {@code view} is what the player sees, the
+	 * rectangle the scissor cuts to: on a turned square minimap that's the minimap itself, not the
+	 * ground view drawn under it, so lines out of sight take none of the budget.
 	 */
 	public void drawLines(GuiGraphicsExtractor graphics, MapViewport.View view, @Nullable DimensionId dimension, boolean fullscreen) {
 		List<AddonLayers.Layer> layers = AddonLayers.open();
@@ -593,7 +595,7 @@ public final class AddonOverlay {
 	private boolean line(Quads quads, MapViewport.View view, MapLine line) {
 		int n = line.pointCount();
 		if (sx.length < n) {
-			sx = new double[Math.max(n, sx.length * 2)];
+			sx = new double[Math.min(MapLine.MAX_POINTS, Math.max(n, sx.length * 2))];
 			sy = new double[sx.length];
 		}
 		double minX = Double.MAX_VALUE;
@@ -670,14 +672,16 @@ public final class AddonOverlay {
 			}
 			double nx = -dy / length * half;
 			double ny = dx / length * half;
+			// In the GUI's turning order, whichever way the piece goes: along it on the normal's side,
+			// then back on the other side.
 			p[0] = (float) (x0 + nx);
 			p[1] = (float) (y0 + ny);
-			p[2] = (float) (x0 - nx);
-			p[3] = (float) (y0 - ny);
+			p[2] = (float) (x1 + nx);
+			p[3] = (float) (y1 + ny);
 			p[4] = (float) (x1 - nx);
 			p[5] = (float) (y1 - ny);
-			p[6] = (float) (x1 + nx);
-			p[7] = (float) (y1 + ny);
+			p[6] = (float) (x0 - nx);
+			p[7] = (float) (y0 - ny);
 			if (!this.convex(quads, 4, argb)) {
 				return false;
 			}
@@ -733,31 +737,14 @@ public final class AddonOverlay {
 	}
 
 	/**
-	 * The convex polygon in {@link #POLYGON} as quads, turned the way the GUI draws (it culls the
-	 * other), and cut to the circle on a round minimap, with nothing allocated. False if they don't
-	 * fit in the budget.
+	 * The convex polygon in {@link #POLYGON} as quads, cut to the circle on a round minimap, with
+	 * nothing allocated. Its corners come turning the way the GUI's do (top left, bottom left,
+	 * bottom right, top right), as the GUI culls the other way round. They're put in that order
+	 * where they're made rather than worked out from the corners: for a tiny piece far from the
+	 * screen's corner, floats can't tell which way it turns. False if they don't fit in the budget.
 	 */
 	private boolean convex(Quads quads, int n, int argb) {
 		float[] p = POLYGON;
-		float area = 0;
-		for (int k = 0, j = n - 1; k < n; j = k++) {
-			area += p[j * 2] * p[k * 2 + 1] - p[k * 2] * p[j * 2 + 1];
-		}
-		if (area == 0) {
-			return true;
-		}
-		if (area > 0) {
-			// The GUI's corner order (top left, bottom left, bottom right, top right) turns the other way on screen.
-			for (int k = 0; k < n / 2; k++) {
-				int j = n - 1 - k;
-				float x = p[k * 2];
-				float y = p[k * 2 + 1];
-				p[k * 2] = p[j * 2];
-				p[k * 2 + 1] = p[j * 2 + 1];
-				p[j * 2] = x;
-				p[j * 2 + 1] = y;
-			}
-		}
 		float[] corners = p;
 		int count = n;
 		Circle circle = this.circle;

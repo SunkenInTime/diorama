@@ -22,8 +22,9 @@ import org.jspecify.annotations.Nullable;
  * until the end of the frame. With none free, the marker shows as a dot that frame, and its
  * image isn't even read. Icons no resource pack has are remembered, up to {@link #MAX_MISSING}
  * of them, so they aren't looked for every frame, and a draw looks up at most
- * {@link #LOOKUPS_PER_DRAW} icons it doesn't know yet: the rest show as dots and are looked up in
- * the draws after. A resource reload drops it all.
+ * {@link #LOOKUPS_PER_DRAW} icons it doesn't know yet, only for markers it draws as icons, and each
+ * one once however many markers show it: the rest show as dots and are looked up in the draws
+ * after. A resource reload drops it all.
  */
 public final class MarkerAtlas {
 	static final int SIZE = 256;
@@ -138,26 +139,12 @@ public final class MarkerAtlas {
 	}
 
 	/**
-	 * Whether no resource pack has this icon, looking it up if it isn't known yet and this draw
-	 * may look up more, without giving it a tile: for a marker whose icon wouldn't fit where it is,
-	 * which is drawn as a dot only if it has no icon.
+	 * Whether this icon is already known to be in no resource pack: only what is known, never a
+	 * lookup. For a marker whose icon wouldn't fit where it is, which is drawn as a dot only if its
+	 * icon is missing; one that isn't drawn mustn't use up a draw's lookups.
 	 */
 	static boolean missing(ResourceId icon) {
-		if (TILES.containsKey(icon)) {
-			return false;
-		}
-		if (MISSING.get(icon) != null) {
-			return true;
-		}
-		if (lookups == LOOKUPS_PER_DRAW) {
-			return false;
-		}
-		lookups++;
-		if (WaypointIcons.image(icon.toString()) == null) {
-			MISSING.put(icon, Boolean.TRUE);
-			return true;
-		}
-		return false;
+		return MISSING.get(icon) != null;
 	}
 
 	/**

@@ -16,8 +16,9 @@ import org.jspecify.annotations.Nullable;
  * out until a map draws it. The maps read {@link #open} every frame; with no layer open that is
  * one size check. Only the client thread changes or reads them.
  *
- * <p>When the world open changes, every layer is emptied ({@link #sync}), so what an addon showed
- * in one world never shows in another.
+ * <p>Leaving a world or joining one empties every layer at that moment ({@link #onJoinOrLeave}),
+ * and so does finding the world's key changed with no leave in between ({@link #sync}), so what
+ * an addon showed in one world never shows in another.
  */
 public final class AddonLayers {
 	/** Every open layer, of every addon, oldest first. */
@@ -32,11 +33,24 @@ public final class AddonLayers {
 	}
 
 	/**
+	 * The player is leaving a world, or joining one (a network moving the player to another of its
+	 * servers joins again without leaving): every layer is emptied now. Called where each loader's
+	 * leave and join callbacks drop the waypoint store, so emptying never waits for a tick in
+	 * between, which a quick return to a world with the same key would skip.
+	 */
+	public static void onJoinOrLeave() {
+		seenStore = null;
+		seenKey = null;
+		empty();
+	}
+
+	/**
 	 * Empties every layer if the world open isn't the one their content was handed over in: the
-	 * player left it, or joined another (a different world key, so a different
-	 * {@link dev.diorama.api.World#worldId}). Asked each client tick, before a map draws the
-	 * layers, and before a layer takes new content, so content handed over in the new world is
-	 * never emptied for the old one's sake. With no layer open, nothing to do.
+	 * world's key changed with no leave or join in between (a different key, so a different
+	 * {@link dev.diorama.api.World#worldId}), or content was handed over with no world and one is
+	 * known now. Asked each client tick, before
+	 * a map draws the layers, and before a layer takes new content, so content handed over in the
+	 * new world is never emptied for the old one's sake. With no layer open, nothing to do.
 	 *
 	 * <p>While the player is in a level whose world Diorama can't name yet, nothing happens: that
 	 * is a dimension change on a server that names its worlds for Xaero's mods, and the world is
@@ -59,6 +73,13 @@ public final class AddonLayers {
 			return;
 		}
 		seenKey = key;
+		empty();
+	}
+
+	private static void empty() {
+		if (OPEN.isEmpty()) {
+			return;
+		}
 		for (Layer layer : OPEN) {
 			layer.content = LayerContent.EMPTY;
 		}

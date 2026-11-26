@@ -274,7 +274,8 @@ public final class MinimapHud implements HudElement {
 		}
 		DimensionId addonDimension = AddonOverlay.any() ? this.addons.dimension(mc.level.dimension().identifier().toString()) : null;
 		if (addonDimension != null) {
-			this.addons.drawLines(graphics, ground, addonDimension, false);
+			// Placed and turned by the overlay itself, so the minimap's own view: what can be seen is all that's cut into pieces.
+			this.addons.drawLines(graphics, view, addonDimension, false);
 		}
 		graphics.disableScissor();
 		// Over the map, since a resource pack's frame can reach in over its edge, and under what's marked on it.

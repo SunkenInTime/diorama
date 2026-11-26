@@ -63,7 +63,12 @@ import net.minecraft.world.entity.EntityType;
  *       closed when it failed and never drawn.</li>
  *   <li>The round minimap: a line through it with both ends far outside is drawn across it and
  *       cut to its circle; at GUI scale 1, small icons near the rim are drawn only where their
- *       whole 11-pixel tile is inside the circle.</li>
+ *       whole 11-pixel tile is inside the circle, and markers left out there cost no icon
+ *       lookup.</li>
+ *   <li>Rectangular views: a marker a pixel inside the edge is drawn, for the scissor to cut; on
+ *       a turned square minimap, lines out of sight above it take none of the budget.</li>
+ *   <li>Line pieces far too short to see all turn the way the GUI draws; a line's point arrays
+ *       never grow past a line's most points.</li>
  *   <li>Coordinates at the ends of the world give corners near the view and no NaN or infinity,
  *       on both maps.</li>
  *   <li>The budget: a full layer of lines fills a map's pieces, and the line after it isn't
@@ -74,7 +79,8 @@ import net.minecraft.world.entity.EntityType;
  *   <li>The test addon's own example ({@link MapMarkers}): a few hundred carts replaced every
  *       tick, icons with labels (one from its own jar, one missing), and roads, on the minimap and
  *       the full map, in screenshots.</li>
- *   <li>A new world ({@link #afterReopened}): leaving empties every layer; in another world the
+ *   <li>A new world ({@link #afterReopened}): leaving empties every layer, by the time the
+ *       loader's leave event has reached Diorama, before any tick; in another world the
  *       old content isn't drawn, and the example, which follows the world, shows its places and
  *       roads again.</li>
  * </ul>
@@ -119,6 +125,9 @@ final class AddonMarkersTest {
 		final int[][] markerColors = {new int[0], new int[0]};
 		final int[] markerQuads = new int[2];
 		final int[] frames = new int[2];
+		/** Set to keep the markers of the next draw of a view in {@link #captured}, then cleared. */
+		final boolean[] capture = new boolean[2];
+		final List<Map<String, float[]>> captured = List.of(new HashMap<>(), new HashMap<>());
 		/** Anything of the broken addon's, ever. */
 		boolean brokenSeen;
 
@@ -160,6 +169,11 @@ final class AddonMarkersTest {
 				this.markerXyz[i] = Arrays.copyOf(xyz, quads * 12);
 				this.markerColors[i] = Arrays.copyOf(colors, quads);
 				this.markerQuads[i] = quads;
+				if (this.capture[i]) {
+					this.capture[i] = false;
+					this.captured.get(i).clear();
+					this.captured.get(i).putAll(this.markers.get(i));
+				}
 			}
 		}
 	}
@@ -226,6 +240,11 @@ final class AddonMarkersTest {
 			iconThroughReload(context, scene, probe, wrong);
 			closed(context, scene, probe, wrong);
 
+			pointArrays(context, scene, wrong);
+			edgeMarkers(context, scene, wrong);
+			rimLookups(context, scene, wrong);
+			turnedSquareLines(context, scene, at, world, wrong);
+			tinyPieces(context, scene, wrong);
 			roundLine(context, scene, wrong);
 			rimIcons(context, scene, wrong);
 			extremes(context, scene, wrong);
@@ -244,6 +263,12 @@ final class AddonMarkersTest {
 			if (!before.markers().containsKey(MOD + "/world-change/0")) {
 				wrong.add("The layer kept for the next world isn't drawn in this one: " + before.markers().keySet());
 			}
+			// What the layers hold when the loader says the player is leaving, for afterReopened.
+			context.runOnClient(mc -> {
+				listenForLeave();
+				heldAtLeave = null;
+				leaveArmed = true;
+			});
 			handedOver = true;
 		} finally {
 			boolean keep = handedOver;
@@ -279,6 +304,48 @@ final class AddonMarkersTest {
 		Diorama.LOGGER.info("addon-api markers: every check in the reopened world passed");
 	}
 
+	/** What the layers held when the loader's leave event came, after Diorama heard it; null before. */
+	private static List<String> heldAtLeave;
+	private static boolean leaveArmed;
+	private static boolean leaveListening;
+
+	/** Hears the loader's leave event after Diorama's own listener, from now on. Client thread. */
+	private static void listenForLeave() {
+		if (leaveListening) {
+			return;
+		}
+		leaveListening = true;
+		//? if fabric {
+		// Registered after Diorama's, so called after it.
+		net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> left());
+		//?} else if neoforge {
+		/*net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST, false,
+			net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut.class, event -> left());
+		*///?} else {
+		/*net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(net.minecraftforge.eventbus.api.EventPriority.LOWEST, false,
+			net.minecraftforge.client.event.ClientPlayerNetworkEvent.LoggingOut.class, event -> left());
+		*///?}
+	}
+
+	private static void left() {
+		if (leaveArmed) {
+			leaveArmed = false;
+			heldAtLeave = held();
+		}
+	}
+
+	/** Every open layer that holds anything, with what. Client thread. */
+	private static List<String> held() {
+		List<String> held = new ArrayList<>();
+		for (AddonLayers.Layer layer : AddonLayers.open()) {
+			LayerContent content = layer.content();
+			if (!content.markers().isEmpty() || !content.lines().isEmpty()) {
+				held.add(layer.modId() + "/" + layer.layerName() + " " + content);
+			}
+		}
+		return held;
+	}
+
 	private static void closeKept() {
 		if (worldChange != null) {
 			worldChange.close();
@@ -304,17 +371,17 @@ final class AddonMarkersTest {
 			throw new AssertionError("Addon markers: the layers kept from the reopened world are missing; did run() pass?");
 		}
 		try {
-			context.waitTicks(5);
-			List<String> full = context.computeOnClient(mc -> {
-				List<String> held = new ArrayList<>();
-				for (AddonLayers.Layer layer : AddonLayers.open()) {
-					LayerContent content = layer.content();
-					if (!content.markers().isEmpty() || !content.lines().isEmpty()) {
-						held.add(layer.modId() + "/" + layer.layerName() + " " + content);
-					}
-				}
-				return held;
+			List<String> atLeave = context.computeOnClient(mc -> {
+				leaveArmed = false;
+				return heldAtLeave;
 			});
+			if (atLeave == null) {
+				wrong.add("The loader's leave event never came while the reopened world closed");
+			} else if (!atLeave.isEmpty()) {
+				wrong.add("At the loader's leave event, before any tick at the title screen, layers still held content: " + atLeave);
+			}
+			context.waitTicks(5);
+			List<String> full = context.computeOnClient(mc -> held());
 			if (!full.isEmpty()) {
 				wrong.add("At the title screen after leaving the world, layers still hold content: " + full);
 			}
@@ -728,6 +795,306 @@ final class AddonMarkersTest {
 			return;
 		}
 		Diorama.LOGGER.info("addon-api markers: closed, nothing drawn, replace() after close did nothing, the name opened again");
+	}
+
+	/** Where a place in the world is on a view's screen, in doubles, as the overlay works it out. */
+	private static double[] screenOf(MapViewport.View view, double x, double y, double z) {
+		double u = Projection.u(x, z) - view.centerU();
+		double v = Projection.v(x, y, z) - view.centerV();
+		double cos = view.turn() == 0 ? 1 : Math.cos(view.turn());
+		double sin = view.turn() == 0 ? 0 : Math.sin(view.turn());
+		return new double[] {view.x() + view.width() / 2.0 + (u * cos - v * sin) * view.zoom(), view.y() + view.height() / 2.0 + (u * sin + v * cos) * view.zoom()};
+	}
+
+	/** The x and z at height {@code y} that land at (sx, sy) on a view's screen: at one height, the screen is a linear map of x and z. */
+	private static double[] placeAt(MapViewport.View view, Scene scene, double sx, double sy) {
+		double ox = scene.playerX();
+		double oy = scene.playerY();
+		double oz = scene.playerZ();
+		double[] o = screenOf(view, ox, oy, oz);
+		double[] east = screenOf(view, ox + 1, oy, oz);
+		double[] south = screenOf(view, ox, oy, oz + 1);
+		double a = east[0] - o[0];
+		double b = south[0] - o[0];
+		double c = east[1] - o[1];
+		double d = south[1] - o[1];
+		double det = a * d - b * c;
+		double rx = sx - o[0];
+		double ry = sy - o[1];
+		return new double[] {ox + (d * rx - b * ry) / det, oz + (a * ry - c * rx) / det};
+	}
+
+	/** Reads how many points the overlay's scratch arrays for a line's screen points hold. */
+	private static int pointRoom() {
+		try {
+			java.lang.reflect.Field field = AddonOverlay.class.getDeclaredField("sx");
+			field.setAccessible(true);
+			return ((double[]) field.get(null)).length;
+		} catch (ReflectiveOperationException e) {
+			throw new AssertionError("AddonOverlay has no sx array to read", e);
+		}
+	}
+
+	/**
+	 * The arrays a line's screen points are worked out in never grow past a line's most points:
+	 * a 700-point line, then a 1,000-point one, leaves them at {@link MapLine#MAX_POINTS} at most.
+	 */
+	private static void pointArrays(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		MapLayer layer = context.computeOnClient(mc -> api().openLayer("points"));
+		try {
+			int[] room = new int[3];
+			room[0] = context.computeOnClient(mc -> pointRoom());
+			int step = 0;
+			for (int points : new int[] {700, 1000}) {
+				context.runOnClient(mc -> {
+					MapLine.Builder line = MapLine.builder(scene.overworld()).rgb(LINE_RGB);
+					for (int k = 0; k < points; k++) {
+						line.point(scene.playerX() - 10 + k * 0.02, scene.playerY(), scene.playerZ() + 6 + (k % 2));
+					}
+					layer.replace(LayerContent.builder().add(line.build()).build());
+				});
+				snapshot(context, recorder, false);
+				room[++step] = context.computeOnClient(mc -> pointRoom());
+			}
+			if (room[2] > MapLine.MAX_POINTS) {
+				wrong.add("A line's screen points: arrays for " + room[0] + " points, then " + room[1] + " after a 700-point line, then " + room[2]
+					+ " after a 1,000-point one (most " + MapLine.MAX_POINTS + ")");
+				return;
+			}
+			Diorama.LOGGER.info("addon-api markers: a line's point arrays: {}, then {} after 700 points, {} after 1,000", room[0], room[1], room[2]);
+		} finally {
+			context.runOnClient(mc -> layer.close());
+		}
+	}
+
+	/**
+	 * In a rectangular view, the scissor cuts what reaches past the edge: a marker whose middle is
+	 * a pixel inside the view's right edge is drawn though its dot reaches past it, on the square
+	 * minimap and on the full map.
+	 */
+	private static void edgeMarkers(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		MapLayer layer = context.computeOnClient(mc -> api().openLayer("edge"));
+		try {
+			for (boolean fullscreen : new boolean[] {false, true}) {
+				if (fullscreen) {
+					openMap(context);
+				}
+				String where = fullscreen ? "the full map" : "the square minimap";
+				MapViewport.View view = snapshot(context, recorder, fullscreen).view();
+				double edge = view.x() + view.width();
+				double[] at = placeAt(view, scene, edge - 1, view.y() + view.height() / 2.0);
+				context.runOnClient(mc -> layer.replace(LayerContent.builder()
+					.add(Marker.builder(scene.overworld(), at[0], scene.playerY(), at[1]).rgb(SPOT_RGB).size(SIZE).build())
+					.build()));
+				Frame drawn = snapshot(context, recorder, fullscreen);
+				float[] marker = drawn.markers().get(MOD + "/edge/0");
+				if (marker == null) {
+					wrong.add("On " + where + ", a size-" + SIZE + " dot with its middle a pixel inside the right edge (x " + edge + ") isn't drawn");
+				} else {
+					Diorama.LOGGER.info("addon-api markers: on {}, a dot a pixel inside the right edge drawn at {}", where, text(marker));
+				}
+			}
+		} finally {
+			context.setScreen(() -> null);
+			context.runOnClient(mc -> layer.close());
+		}
+	}
+
+	/**
+	 * On the round minimap at GUI scale 1, a marker whose icon's tile doesn't fit inside the rim
+	 * costs no icon lookup: in the first draw after the icons are dropped, 80 such markers with an
+	 * icon that has an image come before 101 at the middle (100 with one icon, then one with
+	 * another), and every one at the middle is drawn as an icon. Those at the rim aren't drawn, but
+	 * one there whose icon is already known to be missing is drawn as a dot.
+	 */
+	private static void rimLookups(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		MapLayer layer = context.computeOnClient(mc -> api().openLayer("rim-lookups"));
+		try {
+			context.runOnClient(mc -> Settings.get().minimapShape = Settings.Shape.ROUND);
+			DioramaClientTest.setGuiScale(context, 1);
+			context.waitTicks(3);
+			MapViewport.View view = snapshot(context, recorder, false).view();
+			double[] c = circle(view);
+			// A size-2 marker at GUI scale 1: its dot reaches 2 pixels, its icon's tile 5.5. With its
+			// middle 3.5 pixels inside the rim, the dot fits inside the circle and the tile doesn't.
+			double[] rim = placeAt(view, scene, c[0] + c[2] - 3.5, c[1]);
+			context.runOnClient(mc -> {
+				LayerContent.Builder content = LayerContent.builder();
+				content.add(Marker.builder(scene.overworld(), scene.playerX(), scene.playerY(), scene.playerZ()).icon(MapMarkers.MISSING_ICON).build());
+				for (int i = 0; i < 80; i++) {
+					content.add(Marker.builder(scene.overworld(), rim[0], scene.playerY(), rim[1]).icon(ResourceId.of("diorama:mine")).size(Marker.MIN_SIZE).build());
+				}
+				content.add(Marker.builder(scene.overworld(), rim[0], scene.playerY(), rim[1]).icon(MapMarkers.MISSING_ICON).size(Marker.MIN_SIZE).build());
+				for (int i = 0; i < 100; i++) {
+					content.add(Marker.builder(scene.overworld(), scene.playerX() - 5 + i * 0.1, scene.playerY(), scene.playerZ()).icon(ResourceId.of("diorama:villagers")).build());
+				}
+				content.add(Marker.builder(scene.overworld(), scene.playerX(), scene.playerY(), scene.playerZ() + 3).icon(ResourceId.of("diorama:home")).build());
+				MarkerAtlas.forget();
+				layer.replace(content.build());
+				recorder.capture[0] = true;
+			});
+			snapshot(context, recorder, false, 2);
+			Map<String, float[]> first = context.computeOnClient(mc -> new HashMap<>(recorder.captured.get(0)));
+			int middleIcons = 0;
+			int middleDots = 0;
+			for (int i = 82; i <= 182; i++) {
+				float[] marker = first.get(MOD + "/rim-lookups/" + i);
+				if (marker != null) {
+					if (marker[2] >= 0) {
+						middleIcons++;
+					} else {
+						middleDots++;
+					}
+				}
+			}
+			int rimDrawn = 0;
+			for (int i = 1; i <= 80; i++) {
+				rimDrawn += first.containsKey(MOD + "/rim-lookups/" + i) ? 1 : 0;
+			}
+			float[] rimMissing = first.get(MOD + "/rim-lookups/81");
+			if (middleIcons != 101 || rimDrawn != 0 || rimMissing == null || rimMissing[2] >= 0) {
+				wrong.add("The round minimap at GUI scale 1, the first draw after the icons were dropped (circle radius " + c[2] + "): of 101 icons at the middle, "
+					+ middleIcons + " drawn as icons and " + middleDots + " as dots; " + rimDrawn + " of 80 at the rim whose tile doesn't fit drawn; the one at the rim with a missing icon "
+					+ tileText(rimMissing));
+				return;
+			}
+			Diorama.LOGGER.info("addon-api markers: round minimap, first draw: 101 icons at the middle drawn as icons after 80 rim markers that cost no lookup; the rim's missing icon drawn as a dot");
+		} finally {
+			context.runOnClient(mc -> {
+				layer.close();
+				Settings.get().minimapShape = Settings.Shape.SQUARE;
+			});
+			DioramaClientTest.setGuiScale(context, scale);
+		}
+	}
+
+	/**
+	 * On a turned square minimap, only lines that can be seen count against the budget: four
+	 * lines of {@link MapLine#MAX_POINTS} points zigzagging just above the minimap, on ground drawn
+	 * under it but cut off by its edge, take no pieces, and a line through its middle in the layer
+	 * after them is drawn.
+	 */
+	private static void turnedSquareLines(ClientGameTestContext context, Scene scene, BlockPos at, TestSingleplayerContext world, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		List<MapLayer> layers = new ArrayList<>();
+		context.runOnClient(mc -> Settings.get().minimapLockNorth = false);
+		world.getServer().runCommand("tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 210 0");
+		try {
+			context.runOnClient(mc -> {
+				layers.add(api().openLayer("turned-above"));
+				layers.add(api().openLayer("turned-after"));
+			});
+			context.waitTicks(5);
+			MapViewport.View view = snapshot(context, recorder, false).view();
+			MapViewport.View ground = view.ground();
+			double top = view.y();
+			if (view.turn() == 0 || top - ground.y() < 14) {
+				wrong.add("The turned square minimap check needs a turned minimap with ground at least 14 pixels above it: turn " + view.turn() + ", " + (top - ground.y()) + " pixels");
+				return;
+			}
+			context.runOnClient(mc -> {
+				LayerContent.Builder above = LayerContent.builder();
+				for (int l = 0; l < 4; l++) {
+					MapLine.Builder line = MapLine.builder(scene.overworld()).rgb(0x3060FF).width(1);
+					for (int k = 0; k < MapLine.MAX_POINTS; k++) {
+						double[] place = placeAt(view, scene, view.x() + view.width() * k / (MapLine.MAX_POINTS - 1.0), top - 5 - (k % 2) * 5);
+						line.point(place[0], scene.playerY(), place[1]);
+					}
+					above.add(line.build());
+				}
+				layers.get(0).replace(above.build());
+				double middleX = view.x() + view.width() / 2.0;
+				double middleY = view.y() + view.height() / 2.0;
+				double[] from = placeAt(view, scene, middleX - 10, middleY);
+				double[] to = placeAt(view, scene, middleX + 10, middleY);
+				layers.get(1).replace(LayerContent.builder()
+					.add(MapLine.builder(scene.overworld()).point(from[0], scene.playerY(), from[1]).point(to[0], scene.playerY(), to[1]).rgb(LINE_RGB).width(1).build())
+					.build());
+			});
+			Frame drawn = snapshot(context, recorder, false);
+			context.takeScreenshot("addon-markers-15-turned-square-lines");
+			long aboveDrawn = drawn.lines().stream().filter(key -> key.startsWith(MOD + "/turned-above/")).count();
+			boolean middle = drawn.lines().contains(MOD + "/turned-after/0");
+			if (aboveDrawn != 0 || !middle) {
+				wrong.add("On the turned square minimap (turn " + view.turn() + "), four " + MapLine.MAX_POINTS + "-point lines just above it: " + aboveDrawn + " of them gave pieces, "
+					+ drawn.lineQuads() + " quads in all; the line through its middle " + (middle ? "drawn" : "not drawn"));
+				return;
+			}
+			Diorama.LOGGER.info("addon-api markers: turned square minimap: lines just above it gave no pieces, the line through it drawn ({} quads)", drawn.lineQuads());
+		} finally {
+			context.runOnClient(mc -> {
+				for (MapLayer layer : layers) {
+					layer.close();
+				}
+				Settings.get().minimapLockNorth = true;
+			});
+			world.getServer().runCommand("tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 180 0");
+		}
+	}
+
+	/**
+	 * Pieces of a line far too short to see, far from the screen's corner (GUI scale 1, the full
+	 * map's lower right): every quad drawn turns the way the GUI draws, so none is culled, and
+	 * every piece and joint gives its quads.
+	 */
+	private static void tinyPieces(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		Recorder recorder = context.computeOnClient(mc -> recorder());
+		int scale = context.computeOnClient(mc -> mc.options.guiScale().get());
+		MapLayer layer = context.computeOnClient(mc -> api().openLayer("tiny"));
+		int points = 1000;
+		try {
+			DioramaClientTest.setGuiScale(context, 1);
+			openMap(context);
+			MapViewport.View view = snapshot(context, recorder, true).view();
+			double x0 = view.x() + view.width() * 0.7 + 0.30679;
+			double y0 = view.y() + view.height() * 0.8 + 0.91266;
+			context.runOnClient(mc -> {
+				// Pieces 0.004 pixels long, each a little higher than the last.
+				MapLine.Builder line = MapLine.builder(scene.overworld()).rgb(ROUND_RGB).width(1);
+				for (int k = 0; k < points; k++) {
+					double[] place = placeAt(view, scene, x0 + k * 0.004, y0 - k * 0.0003);
+					line.point(place[0], scene.playerY(), place[1]);
+				}
+				layer.replace(LayerContent.builder().add(line.build()).build());
+			});
+			Frame drawn = snapshot(context, recorder, true);
+			int core = 0xFF000000 | ROUND_RGB;
+			int quads = 0;
+			int reversed = 0;
+			double worst = 0;
+			for (int q = 0; q < drawn.lineQuads(); q++) {
+				if (drawn.lineColors()[q] != core) {
+					continue;
+				}
+				quads++;
+				double area = 0;
+				float[] xyz = drawn.lineXyz();
+				for (int k = 0, j = 3; k < 4; j = k++) {
+					area += (double) xyz[q * 12 + j * 3] * xyz[q * 12 + k * 3 + 1] - (double) xyz[q * 12 + k * 3] * xyz[q * 12 + j * 3 + 1];
+				}
+				// The GUI's corner order (top left, bottom left, bottom right, top right) sums below 0.
+				if (area > 1e-9) {
+					reversed++;
+					worst = Math.max(worst, area);
+				}
+			}
+			// A piece between each two points and a joint of three quads at each.
+			int expected = points - 1 + points * 3;
+			if (reversed > 0 || quads != expected) {
+				wrong.add("A line of " + points + " points 0.004 pixels apart at " + text(new float[] {(float) x0, (float) y0}) + " on the full map at GUI scale 1: " + quads
+					+ " quads of its colour (" + expected + " expected), " + reversed + " turned the way the GUI culls (twice the area up to " + worst + ")");
+				return;
+			}
+			Diorama.LOGGER.info("addon-api markers: {} quads of a line with pieces 0.004 pixels long, every one turned the GUI's way", quads);
+		} finally {
+			context.setScreen(() -> null);
+			context.runOnClient(mc -> layer.close());
+			DioramaClientTest.setGuiScale(context, scale);
+		}
 	}
 
 	/** The circle a round minimap view is cut to: its middle and radius. */

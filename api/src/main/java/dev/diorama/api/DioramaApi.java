@@ -46,8 +46,9 @@ public interface DioramaApi {
 	/**
 	 * Opens a layer of markers and lines on Diorama's maps, empty until its first
 	 * {@link MapLayer#replace}. See {@link MapLayer} for how long it holds, how it is drawn, and
-	 * how a new world empties it: an addon that shows things per world replaces its layers again
-	 * when {@link #world}'s ID changes.
+	 * how a new world empties it: hand content over while {@link #world} is present, and again
+	 * when its ID changes. Content handed over while it's empty may be emptied once the world is
+	 * known.
 	 *
 	 * @param name what this addon calls it: 1 to 32 characters, {@code a-z 0-9 _ - .}, such as
 	 *     {@code trains}; not the name of another layer this addon has open
