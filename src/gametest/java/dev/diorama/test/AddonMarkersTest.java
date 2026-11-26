@@ -316,10 +316,12 @@ final class AddonMarkersTest {
 				other.getServer().runCommand("time set noon");
 				context.waitFor(mc -> mc.player != null && mc.player.onGround(), 1200);
 				BlockPos spawn = context.computeOnClient(mc -> mc.player.blockPosition());
-				// The new world's ground at the place the old content was.
-				other.getServer().runCommand("spreadplayers " + scene.playerX() + " " + scene.playerZ() + " 0 1 false @a");
-				context.waitFor(mc -> mc.player != null && mc.player.onGround(), 1200);
-				context.waitTicks(20);
+				// At the place the old content was, held there in spectator mode whatever the ground is.
+				String mode = context.computeOnClient(mc -> mc.gameMode.getPlayerMode().getName());
+				other.getServer().runCommand("gamemode spectator @a");
+				other.getServer().runCommand("tp @a " + scene.playerX() + " " + (scene.playerY() + 20) + " " + scene.playerZ() + " 180 60");
+				context.waitFor(mc -> Math.abs(mc.player.getX() - scene.playerX()) < 1 && Math.abs(mc.player.getZ() - scene.playerZ()) < 1, 1200);
+				context.waitTicks(40);
 				// The example sees the new world on its next tick, as a real addon would.
 				for (int i = 0; i < 3; i++) {
 					context.runOnClient(mc -> example.tick());
@@ -347,6 +349,7 @@ final class AddonMarkersTest {
 				});
 				//? if >=26.1 && fabric {
 				// Back where the world started the player, as the run measured against does.
+				other.getServer().runCommand("gamemode " + mode + " @a");
 				other.getServer().runCommand("tp @a " + (spawn.getX() + 0.5) + " " + spawn.getY() + " " + (spawn.getZ() + 0.5));
 				context.waitFor(mc -> mc.player.onGround(), 1200);
 				context.waitTicks(20);
