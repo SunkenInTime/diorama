@@ -37,6 +37,7 @@ import java.util.concurrent.TimeoutException;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.tooltip.MenuTooltipPositioner;
@@ -178,11 +179,58 @@ public final class MapScreen extends Screen {
 	private @Nullable OtherMap otherMap;
 	private Button facingButton;
 	/**
+	 * Opens the box for typed or pasted coordinates, as Xaero's World Map's "Hop to specified
+	 * coordinates" button does, at the left edge like it: above the dimension button's place.
+	 */
+	private Button goButton;
+	private EditBox goBox;
+	/** Whether the box is open; it stays open through a resize. */
+	private boolean goOpen;
+	/** Why the box couldn't act on what's in it, said above it; null with nothing to say. */
+	private @Nullable Component goProblem;
+	/** The place the box last went to, marked on the map for a while. */
+	private @Nullable GoMark goMark;
+	/**
 	 * The Turn map key is down since a press that turned the map. Kept while another screen is over this
 	 * one, so a key still held on coming back doesn't turn the map again; let go over there, its next
 	 * press here is taken for the held one and does nothing.
 	 */
 	private boolean turnKeyHeld;
+
+	/**
+	 * Where the Go to coordinates box took the view. The map is seen at a slant, so a place without a
+	 * height isn't one point on it: {@code y} starts as a guess and {@link #findGround} corrects it
+	 * from the map, and {@code heightKnown} says whether it's the place's own.
+	 */
+	private static final class GoMark {
+		private final int x;
+		private int y;
+		private final int z;
+		private boolean heightKnown;
+		private final String dimension;
+		private final long until;
+		/** The view's middle as this mark set it: a later correction moves the view only if the player hasn't. */
+		private double centerU;
+		private double centerV;
+
+		private GoMark(int x, int y, int z, boolean heightKnown, String dimension, long until) {
+			this.x = x;
+			this.y = y;
+			this.z = z;
+			this.heightKnown = heightKnown;
+			this.dimension = dimension;
+			this.until = until;
+		}
+	}
+
+	/** How long the mark stays, and how long its fading at the end takes. */
+	private static final long GO_MARK_MS = 20_000;
+	private static final long GO_MARK_FADE_MS = 2_000;
+	/** How many times the ground is looked up for a place without a height: each look corrects the last one's guess. */
+	private static final int GROUND_TRIES = 4;
+	private static final int GO_BOX_WIDTH = 140;
+	/** The longest chat line, which a shared waypoint can fill. */
+	private static final int GO_BOX_LENGTH = 256;
 
 	/** A dimension's saved map, and what it was opened for: a change to either opens it again. */
 	private record OtherMap(Path folder, MapStyle style, Facing facing, MapLevel map) {
@@ -280,6 +328,16 @@ public final class MapScreen extends Screen {
 		}).size(20, 20).createNarration(n -> Component.translatable("diorama.draw.button")).build());
 		this.draw.init(this.font, this::addRenderableWidget, this::setFocused, (x, y) -> this.spotAt(x, y, false).thenApply(MapLevel.Spot::pos),
 			(u, v) -> this.spotAtMap(u, v, false).thenApply(MapLevel.Spot::pos), this::dimension);
+		this.goButton = this.addRenderableWidget(Button.builder(Component.empty(), b -> this.toggleGo())
+			.size(20, 20).createNarration(n -> Component.translatable("diorama.map.go_to")).build());
+		// A resize builds the screen again: what was typed stays.
+		String typed = this.goBox == null ? "" : this.goBox.getValue();
+		this.goBox = this.addRenderableWidget(new EditBox(this.font, 0, 0, GO_BOX_WIDTH, 20, Component.translatable("diorama.map.go_to")));
+		this.goBox.setMaxLength(GO_BOX_LENGTH);
+		this.goBox.setHint(Component.translatable("diorama.map.go_to.hint").withStyle(ChatFormatting.DARK_GRAY));
+		this.goBox.setValue(typed);
+		this.goBox.setResponder(text -> this.goProblem = null);
+		this.goBox.visible = this.goOpen;
 		this.placeControls();
 	}
 
@@ -452,6 +510,18 @@ public final class MapScreen extends Screen {
 		// tools can reach down this far on a short window.
 		this.dimensionButton.visible = this.severalDimensions && Settings.get().mapDimensionButton && !this.draw.active();
 		this.dimensionButton.setPosition(DIMENSION_BUTTON_X, y + 48);
+		// Not while drawing either: the draw tools stand at this edge.
+		if (this.draw.active() && this.goOpen) {
+			this.closeGo();
+		}
+		this.goButton.visible = !this.draw.active();
+		this.goButton.setPosition(DIMENSION_BUTTON_X, y + 26);
+		this.goBox.visible = this.goOpen;
+		this.goBox.setPosition(DIMENSION_BUTTON_X + 22, y + 26);
+		// Keys are the box's while it's open, whichever button was clicked last.
+		if (this.goOpen && this.getFocused() != this.goBox) {
+			this.setFocused(this.goBox);
+		}
 		this.zoomIn.active = this.zoom < MAX_ZOOM;
 		this.zoomOut.active = this.zoom > this.minZoom();
 		this.sliceUp.visible = caves;
@@ -536,6 +606,7 @@ public final class MapScreen extends Screen {
 		this.pins = store == null || !Settings.get().waypointsOnMap ? List.of() : this.layoutPins(view, store.shownIn(this.dimension()));
 		WaypointOverlay.Pin hoveredPin = WaypointOverlay.under(this.pins, mouseX, mouseY);
 		WaypointOverlay.draw(graphics, view, this.pins, true, hoveredPin);
+		this.drawGoMark(graphics, view);
 		Radar.draw(graphics, view, this.blips, true, true);
 		Markers.player(graphics, view.screenX(playerU), view.screenY(playerV), Markers.onMap(viewer.getViewYRot(a)), 6 * Settings.get().arrowScale());
 		if (caves) {
@@ -620,6 +691,18 @@ public final class MapScreen extends Screen {
 		}
 		if (this.dimensionButton.visible) {
 			this.drawDimensionIcon(graphics);
+		}
+		if (this.goButton.visible) {
+			DrawMode.icon(graphics, TARGET, this.goButton.getX(), this.goButton.getY(), 0xFFFFFFFF);
+			if (this.goOpen) {
+				DrawMode.outline(graphics, this.goButton.getX(), this.goButton.getY(), 20, 20, 0xFFFFFFFF);
+				if (this.goProblem != null) {
+					int left = this.goBox.getX();
+					int top = this.goBox.getY() - 12;
+					graphics.fill(left, top, left + this.font.width(this.goProblem) + 4, top + 11, 0xC0101418);
+					graphics.text(this.font, this.goProblem, left + 2, top + 2, 0xFFFF7A70, false);
+				}
+			}
 		}
 		if (caves) {
 			this.caret(graphics, this.sliceUp, false);
@@ -811,6 +894,10 @@ public final class MapScreen extends Screen {
 	private boolean clicked(boolean widgetTook, double x, double y, int button) {
 		this.pressButton = button;
 		this.pressOnControl = false;
+		// A press anywhere else puts the box away, as it would take the keys from it.
+		if (this.goOpen && !on(this.goBox, x, y) && !on(this.goButton, x, y)) {
+			this.closeGo();
+		}
 		if (!widgetTook && button == InputConstants.MOUSE_BUTTON_LEFT) {
 			int tab = this.tabAt(x, y);
 			if (tab >= 0) {
@@ -1224,6 +1311,19 @@ public final class MapScreen extends Screen {
 			// Typing a note: only Enter and Esc are the map's, the rest are the note's.
 			return this.draw.key(key, this.dimension());
 		}
+		if (this.goOpen) {
+			// Typing coordinates: Enter goes there and Esc puts the box away. The rest are the box's, or
+			// C, Space and the player's own keys would act on the map as they type.
+			if (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) {
+				this.goTo(this.goBox.getValue());
+				return true;
+			}
+			if (key == InputConstants.KEY_ESCAPE) {
+				this.closeGo();
+				return true;
+			}
+			return false;
+		}
 		// The player's own bindings come before the map's fixed keys, so Open map rebound to C still closes it.
 		if (turnKey) {
 			// A key held down repeats, and each turn redraws the whole map: only the press turns it.
@@ -1292,6 +1392,136 @@ public final class MapScreen extends Screen {
 		return false;
 	}
 
+	/** The Go to coordinates button: opens its box, empty and ready to type or paste in, or puts it away. */
+	private void toggleGo() {
+		this.menu = null;
+		if (this.goOpen) {
+			this.closeGo();
+			return;
+		}
+		this.goOpen = true;
+		this.goProblem = null;
+		this.goBox.setValue("");
+		this.goBox.visible = true;
+		this.setFocused(this.goBox);
+	}
+
+	private void closeGo() {
+		this.goOpen = false;
+		this.goProblem = null;
+		this.goBox.visible = false;
+		if (this.getFocused() == this.goBox) {
+			// Keys go back to the map.
+			this.setFocused(null);
+		}
+	}
+
+	/**
+	 * Moves the view to the place {@code text} names ({@link MapCoordinates}) and marks it, on the
+	 * map of the dimension the text names if it names one. Xaero's World Map's hop moves its camera
+	 * the same way and leaves it there; the mark is Diorama's own, since its map is seen at a slant
+	 * and the middle of the screen alone doesn't say which block was meant. False, with the reason
+	 * above the box, if the text names no place or a dimension with no map. Public for tests.
+	 */
+	public boolean goTo(String text) {
+		MapCoordinates.Place place = MapCoordinates.parse(text);
+		if (place == null) {
+			this.goProblem = Component.translatable("diorama.map.go_to.unread");
+			return false;
+		}
+		String dimension = place.dimension();
+		if (dimension != null && !dimension.equals(this.dimension())) {
+			if (this.minecraft.level == null || !this.dimensions().contains(dimension)) {
+				this.goProblem = Component.translatable("diorama.map.go_to.no_map", Waypoints.dimensionName(dimension));
+				return false;
+			}
+			this.draw.leaveDimension();
+			this.closeOtherMap();
+			this.otherDimension = dimension.equals(this.minecraft.level.dimension().identifier().toString()) ? null : dimension;
+			this.viewChanged();
+		}
+		this.closeGo();
+		this.menu = null;
+		// Without a height, where most ground is, or on a cave slice the slice: the map corrects it where it knows better.
+		int y = place.y() != null ? place.y() : this.layer == TileKey.SURFACE ? USUAL_GROUND_Y : this.layer;
+		GoMark mark = new GoMark(place.x(), y, place.z(), place.y() != null, this.dimension(), System.currentTimeMillis() + GO_MARK_MS);
+		this.goMark = mark;
+		this.centreOn(mark);
+		if (!mark.heightKnown) {
+			this.findGround(mark, GROUND_TRIES);
+		}
+		return true;
+	}
+
+	private void centreOn(GoMark mark) {
+		this.centerU = Projection.u(mark.x + 0.5, mark.z + 0.5);
+		this.centerV = Projection.v(mark.x + 0.5, mark.y, mark.z + 0.5);
+		this.following = false;
+		mark.centerU = this.centerU;
+		mark.centerV = this.centerV;
+	}
+
+	/**
+	 * Corrects the height of a mark that came without one. The map says which block shows at the
+	 * point the mark is drawn at: in the mark's own column, that's its ground. In another column, the
+	 * guess was off, that block's height is a better one, and the next look starts from it. Land the
+	 * map has never seen answers nothing, and the mark keeps its guess.
+	 */
+	private void findGround(GoMark mark, int tries) {
+		this.spotAtMap(Projection.u(mark.x + 0.5, mark.z + 0.5), Projection.v(mark.x + 0.5, mark.y, mark.z + 0.5), false).thenAcceptAsync(spot -> {
+			BlockPos ground = spot.pos();
+			// Another place since, or the map was closed.
+			if (this.goMark != mark || ground == null) {
+				return;
+			}
+			boolean moved = ground.getY() != mark.y;
+			if (moved) {
+				boolean viewLeft = !this.following && this.centerU == mark.centerU && this.centerV == mark.centerV;
+				mark.y = ground.getY();
+				if (viewLeft) {
+					this.centreOn(mark);
+				}
+			}
+			if (ground.getX() == mark.x && ground.getZ() == mark.z) {
+				mark.heightKnown = true;
+			} else if (moved && tries > 1) {
+				this.findGround(mark, tries - 1);
+			}
+		}, this.minecraft);
+	}
+
+	/** The mark: a ring with its coordinates under it, fading out at the end of its time. */
+	private void drawGoMark(GuiGraphicsExtractor graphics, MapViewport.View view) {
+		GoMark mark = this.goMark;
+		if (mark == null) {
+			return;
+		}
+		long left = mark.until - System.currentTimeMillis();
+		if (left <= 0 || !mark.dimension.equals(this.dimension())) {
+			this.goMark = null;
+			return;
+		}
+		int alpha = (int) Math.max(4, Math.min(255, left * 255 / GO_MARK_FADE_MS));
+		int white = alpha << 24 | 0xFFFFFF;
+		int dark = alpha << 24;
+		int x = Math.round(view.screenX(Projection.u(mark.x + 0.5, mark.z + 0.5)));
+		int y = Math.round(view.screenY(Projection.v(mark.x + 0.5, mark.y, mark.z + 0.5)));
+		// Four ticks around the block, dark under white so they read on snow and on water.
+		for (int pass = 0; pass < 2; pass++) {
+			int grow = pass == 0 ? 1 : 0;
+			int colour = pass == 0 ? dark : white;
+			graphics.fill(x - 9 - grow, y - grow, x - 3 + grow, y + 1 + grow, colour);
+			graphics.fill(x + 4 - grow, y - grow, x + 10 + grow, y + 1 + grow, colour);
+			graphics.fill(x - grow, y - 9 - grow, x + 1 + grow, y - 3 + grow, colour);
+			graphics.fill(x - grow, y + 4 - grow, x + 1 + grow, y + 10 + grow, colour);
+		}
+		Component label = mark.heightKnown ? Component.translatable("diorama.map.spot", mark.x, mark.y, mark.z) : Component.literal(mark.x + ", " + mark.z);
+		// On a dark plate: unmapped land is drawn pale.
+		int half = this.font.width(label) / 2;
+		graphics.fill(x - half - 2, y + 12, x - half + this.font.width(label) + 2, y + 22, (alpha * 3 / 4) << 24 | 0x101418);
+		graphics.text(this.font, label, x - half, y + 13, white, false);
+	}
+
 	/** The waypoint list, on the folder of the dimension shown. */
 	private void openWaypoints() {
 		WaypointListScreen list = new WaypointListScreen(this);
@@ -1353,8 +1583,11 @@ public final class MapScreen extends Screen {
 		int by0 = (this.export.visible ? this.export.getY() : this.drawButton.getY()) - 2;
 		int bx1 = this.zoomIn.getX() + this.zoomIn.getWidth() + 2;
 		int by1 = this.recenter.getY() + this.recenter.getHeight() + 2;
+		// The buttons at the left edge: Go to coordinates above the dimension button's place.
+		boolean leftButtons = this.goButton.visible || this.dimensionButton.visible;
 		int dx1 = this.dimensionButton.getX() + this.dimensionButton.getWidth() + 2;
-		int dy0 = this.dimensionButton.getY() - 2;
+		int dy0 = (this.goButton.visible ? this.goButton.getY() : this.dimensionButton.getY()) - 2;
+		int dy1 = (this.dimensionButton.visible ? this.dimensionButton.getY() + this.dimensionButton.getHeight() : this.goButton.getY() + this.goButton.getHeight()) + 2;
 		List<WaypointOverlay.Pin> out = new ArrayList<>(pins.size());
 		for (WaypointOverlay.Pin pin : pins) {
 			float r = Pins.reach(pin.waypoint(), (int) pin.size()) * pin.scale();
@@ -1368,8 +1601,8 @@ public final class MapScreen extends Screen {
 					? new WaypointOverlay.Pin(pin.waypoint(), pin.x(), by0 - r, pin.size(), pin.scale(), true)
 					: new WaypointOverlay.Pin(pin.waypoint(), bx0 - rx, pin.y(), pin.size(), pin.scale(), true);
 			}
-			if (this.dimensionButton.visible && pin.clamped() && pin.x() - rx < dx1 && pin.y() + r > dy0) {
-				// And behind the dimension button, above it or right.
+			if (leftButtons && pin.clamped() && pin.x() - rx < dx1 && pin.y() + r > dy0 && pin.y() - r < dy1) {
+				// And behind the buttons at the left edge, above them or right.
 				float up = pin.y() + r - dy0;
 				float across = dx1 - (pin.x() - rx);
 				pin = up <= across
@@ -1517,6 +1750,19 @@ public final class MapScreen extends Screen {
 		"###########"
 	};
 
+	/** The Go to coordinates button's icon: a target, 9 by 9. */
+	private static final String[] TARGET = {
+		"....#....",
+		"..#####..",
+		".#.....#.",
+		".#.....#.",
+		"##..#..##",
+		".#.....#.",
+		".#.....#.",
+		"..#####..",
+		"....#...."
+	};
+
 	/** A small up or down arrow on a slice button, grey when it can't go further. */
 	private void caret(GuiGraphicsExtractor graphics, Button button, boolean down) {
 		int colour = button.active ? 0xFFFFFFFF : 0xFFA0A0A0;
@@ -1538,7 +1784,7 @@ public final class MapScreen extends Screen {
 
 	/** Whether a point is on a shown button, whether or not it can be pressed right now. */
 	private boolean onButton(double x, double y) {
-		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
+		for (AbstractWidget widget : new AbstractWidget[] {this.facingButton, this.dimensionButton, this.goButton, this.goBox, this.mapsButton, this.waypointsButton, this.settingsButton, this.export, this.zoomIn, this.zoomOut, this.recenter, this.sliceUp, this.sliceDown, this.drawButton}) {
 			if (on(widget, x, y)) {
 				return true;
 			}
@@ -1565,6 +1811,10 @@ public final class MapScreen extends Screen {
 			return tip(this.dimensionButton, this.dimensionName(), DioramaClient.TOGGLE_DIMENSION.isUnbound()
 				? Component.translatable("diorama.map.dimension_button")
 				: Component.translatable("diorama.map.dimension_button_key", DioramaClient.TOGGLE_DIMENSION.getTranslatedKeyMessage()));
+		}
+		// Not with its box open: the tooltip would lie over what the box says is wrong.
+		if (on(this.goButton, x, y) && !this.goOpen) {
+			return tip(this.goButton, Component.translatable("diorama.map.go_to"), Component.translatable("diorama.map.go_to.how"));
 		}
 		if (on(this.waypointsButton, x, y) && !DioramaClient.WAYPOINT_LIST.isUnbound()) {
 			return tip(this.waypointsButton, this.waypointsButton.getMessage(), key(DioramaClient.WAYPOINT_LIST.getTranslatedKeyMessage()));
@@ -1803,6 +2053,8 @@ public final class MapScreen extends Screen {
 		this.viewport.close();
 		this.draw.close();
 		this.closeOtherMap();
+		// A look-up for it still under way finds it gone.
+		this.goMark = null;
 	}
 
 	/** The dimension the map shows. */
@@ -1841,6 +2093,31 @@ public final class MapScreen extends Screen {
 	/** For tests: the waypoint pins drawn last frame, in GUI coordinates. */
 	public List<WaypointOverlay.Pin> pins() {
 		return this.pins;
+	}
+
+	/** For tests: the Go to coordinates button and its box. */
+	public Button goButton() {
+		return this.goButton;
+	}
+
+	public EditBox goBox() {
+		return this.goBox;
+	}
+
+	/** For tests: what the box last couldn't act on, as said above it. */
+	public @Nullable String goProblem() {
+		return this.goProblem == null ? null : this.goProblem.getString();
+	}
+
+	/** For tests: the mark's block, and 1 if its height is the place's own, 0 for a guess; null with no mark. */
+	public int @Nullable [] goMark() {
+		GoMark mark = this.goMark;
+		return mark == null ? null : new int[] {mark.x, mark.y, mark.z, mark.heightKnown ? 1 : 0};
+	}
+
+	/** For tests: the map point in the middle of the view. */
+	public double[] centre() {
+		return new double[] {this.centerU, this.centerV};
 	}
 
 	/** For tests: the Export button. */
