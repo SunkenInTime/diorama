@@ -95,6 +95,9 @@ final class MapAllocProbe {
 			AllocProbe.measure(context, "warm-up, no layer", 150);
 			long minimap = AllocProbe.measure(context, "no layer", 300);
 			context.setScreen(MapScreen::new);
+			// The cursor on the map's bottom bar, where it shows no tooltip.
+			double[] bar = context.computeOnClient(mc -> new double[] {mc.getWindow().getScreenWidth() / 2.0, mc.getWindow().getScreenHeight() - 5});
+			context.getInput().setCursorPos(bar[0], bar[1]);
 			context.waitTicks(20);
 			measure(context, "warm-up, no layer", 150);
 			long map = measure(context, "no layer", 300);

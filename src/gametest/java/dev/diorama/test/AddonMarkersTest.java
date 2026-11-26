@@ -158,8 +158,7 @@ final class AddonMarkersTest {
 			context.runOnClient(mc -> Settings.get().minimapLockNorth = true);
 			world.getServer().runCommand("tp @a " + (at.getX() + 0.5) + " " + at.getY() + " " + (at.getZ() + 0.5) + " 180 0");
 
-			context.setScreen(MapScreen::new);
-			context.waitTicks(10);
+			openMap(context);
 			positions(context, scene, true, "on the full map", "addon-markers-03-map", wrong);
 			nether(context, scene, wrong);
 			context.setScreen(() -> null);
@@ -244,6 +243,14 @@ final class AddonMarkersTest {
 			.add(Marker.builder(DimensionId.NETHER, scene.spotX() + eastBy, scene.spotY(), scene.spotZ()).rgb(NETHER_RGB).size(SIZE).build())
 			.add(Marker.builder(DimensionId.NETHER, scene.netherX(), 70, scene.netherZ()).rgb(NETHER_RGB).size(SIZE).build())
 			.build();
+	}
+
+	/** Opens the full map with the cursor on its bottom bar, where no tooltip covers the map. */
+	static void openMap(ClientGameTestContext context) {
+		context.setScreen(MapScreen::new);
+		double[] bar = context.computeOnClient(mc -> new double[] {mc.getWindow().getScreenWidth() / 2.0, mc.getWindow().getScreenHeight() - 5});
+		context.getInput().setCursorPos(bar[0], bar[1]);
+		context.waitTicks(10);
 	}
 
 	/** Waits for a frame of the view drawn after now, and returns a copy of its markers. */
@@ -401,18 +408,29 @@ final class AddonMarkersTest {
 		return pins.isEmpty() ? null : new float[] {pins.get(0).x(), pins.get(0).y()};
 	}
 
-	/** Closing draws nothing of it from the next frame, replace() on it after does nothing, and its name can be opened again. */
+	/**
+	 * Closing draws nothing of it from the next frame, replace() on it after does nothing, and its
+	 * name can be opened again. An empty layer stays open meanwhile, so the maps go on drawing
+	 * layers, and telling the test about it.
+	 */
 	private static void closed(ClientGameTestContext context, Scene scene, MapLayer probe, List<String> wrong) {
 		Recorder recorder = context.computeOnClient(mc -> recorder());
+		MapLayer empty = context.computeOnClient(mc -> api().openLayer("empty"));
 		context.runOnClient(mc -> {
 			probe.close();
 			probe.close();
 			probe.replace(probeContent(scene, 0));
 		});
-		Map<String, float[]> after = frame(context, recorder, false);
+		Map<String, float[]> after;
+		try {
+			after = frame(context, recorder, false);
+		} finally {
+			context.runOnClient(mc -> empty.close());
+		}
 		List<String> lines = context.computeOnClient(mc -> new ArrayList<>(recorder.lines.get(0)));
 		boolean open = context.computeOnClient(mc -> probe.isOpen());
 		boolean listed = context.computeOnClient(mc -> AddonLayers.open().contains(probe));
+		context.waitTicks(2);
 		BufferedImage image = read(context.takeScreenshot("addon-markers-06-closed"));
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		float[] spot = context.computeOnClient(mc -> spotOnMinimap(scene));
@@ -584,8 +602,7 @@ final class AddonMarkersTest {
 		if (carts < 50 || moved < carts / 2) {
 			wrong.add("The carts on the minimap: " + carts + " drawn, " + moved + " of them moved over 10 ticks of replacing");
 		}
-		context.setScreen(MapScreen::new);
-		context.waitTicks(10);
+		openMap(context);
 		Map<String, float[]> map = frame(context, recorder, true);
 		List<String> roads = context.computeOnClient(mc -> new ArrayList<>(recorder.lines.get(1)));
 		context.takeScreenshot("addon-markers-08-showcase-map");
@@ -715,8 +732,8 @@ final class AddonMarkersTest {
 		context.waitTicks(10);
 		AllocProbe.measure(context, "warm-up, " + what, 100);
 		long minimap = AllocProbe.measure(context, what, 300);
-		context.setScreen(MapScreen::new);
-		context.waitTicks(20);
+		openMap(context);
+		context.waitTicks(10);
 		MapAllocProbe.measure(context, "warm-up, " + what, 100);
 		long map = MapAllocProbe.measure(context, what, 300);
 		context.setScreen(() -> null);
