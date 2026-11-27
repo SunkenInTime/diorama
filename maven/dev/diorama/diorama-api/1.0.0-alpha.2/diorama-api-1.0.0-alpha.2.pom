@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- This module was also published with a richer model, Gradle metadata,  -->
+  <!-- which should be used instead. Do not delete the following line which  -->
+  <!-- is to indicate to Gradle or any Gradle module metadata file consumer  -->
+  <!-- that they should prefer consuming it instead. -->
+  <!-- do_not_remove: published-with-gradle-metadata -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>dev.diorama</groupId>
+  <artifactId>diorama-api</artifactId>
+  <version>1.0.0-alpha.2</version>
+  <name>Diorama API</name>
+  <description>Alpha: the API other Minecraft mods use to work with Diorama, the 3D map mod. It has no Minecraft or mod loader types. Compile against it and don't bundle it: Diorama's own jar carries these classes. Not yet a compatibility promise; names and behaviour may change before 1.0.0.</description>
+  <url>https://github.com/SunkenInTime/diorama</url>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://github.com/SunkenInTime/diorama/blob/master/LICENSE</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <scm>
+    <connection>scm:git:https://github.com/SunkenInTime/diorama.git</connection>
+    <developerConnection>scm:git:git@github.com:SunkenInTime/diorama.git</developerConnection>
+    <url>https://github.com/SunkenInTime/diorama</url>
+  </scm>
+  <issueManagement>
+    <system>GitHub</system>
+    <url>https://github.com/SunkenInTime/diorama/issues</url>
+  </issueManagement>
+</project>
