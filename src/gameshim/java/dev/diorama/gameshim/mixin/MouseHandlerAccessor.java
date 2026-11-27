@@ -19,6 +19,9 @@ public interface MouseHandlerAccessor {
 	void diorama$onPress(long window, int button, int action, int mods);
 	*///?}
 
+	@Invoker("onScroll")
+	void diorama$onScroll(long window, double xOffset, double yOffset);
+
 	//? if >=26.3 {
 	@Invoker("onMove")
 	void diorama$onMove(long window, double x, double y, double deltaX, double deltaY);

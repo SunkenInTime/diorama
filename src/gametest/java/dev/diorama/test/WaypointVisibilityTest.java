@@ -244,7 +244,7 @@ final class WaypointVisibilityTest {
 		if (open == null) {
 			throw new AssertionError("The Waypoints tab has no New waypoints button");
 		}
-		// Above Done, which it would run into on a short window.
+		// Scrolled into view above Done, never under it.
 		int[] bottoms = context.computeOnClient(mc -> new int[] {open.getY() + open.getHeight(), DioramaClientTest.buttonLabelled(mc.gui.screen(), "Done").getY()});
 		DioramaClientTest.clickAt(context, open);
 		if (!context.computeOnClient(mc -> mc.gui.screen() instanceof NewWaypointsScreen)) {
