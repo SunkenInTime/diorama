@@ -1,5 +1,5 @@
 // Diorama's API for other mods (dev.diorama.api), compiled once for every Minecraft version and
-// mod loader. Only the JDK and JSpecify's annotations are on its classpath, so naming a Minecraft,
+// mod loader. Only the JDK and JSpecify's and JetBrains' annotations are on its classpath, so naming a Minecraft,
 // mod loader or Diorama class fails this build. Each version's jar carries these classes as they
 // are compiled here (gradle/common.gradle.kts), and this project's jar, with its sources and
 // Javadoc jars, is what an addon compiles against. It is published as dev.diorama:diorama-api to
@@ -20,6 +20,9 @@ repositories {
 
 dependencies {
 	compileOnly("org.jspecify:jspecify:1.0.0")
+	// @ApiStatus.Experimental on MapView, as Fabric API and NeoForge mark theirs. Kept only in the
+	// class files: nothing needs it at run time, and the game's own libraries carry it.
+	compileOnly("org.jetbrains:annotations:24.1.0")
 }
 
 java {

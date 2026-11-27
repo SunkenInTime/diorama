@@ -56,7 +56,8 @@ public final class AddonOverlay {
 	private static final float[] OCTAGON = new float[16];
 	/**
 	 * How many draws of each kind may still be waiting for the screen: the minimap and the full
-	 * map draw once a frame each, and this leaves room for a view drawn twice. A set of arrays, and
+	 * map draw once a frame each, and addons' views twice at most
+	 * ({@link dev.diorama.api.MapView#MAX_DRAWS_PER_FRAME}). A set of arrays, and
 	 * an icon's tile in {@link MarkerAtlas}, is used again only this many draws later.
 	 */
 	public static final int RING = 4;

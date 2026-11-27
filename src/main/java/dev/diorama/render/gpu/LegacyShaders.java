@@ -345,11 +345,20 @@ final class LegacyShaders extends RenderType {
 		//?}
 	}
 
+	// The caller's viewport, read before the fog layer is drawn.
+	private static final int[] CALLER_VIEWPORT = new int[4];
+
 	// Into a FogLayer texture through its framebuffer, {@code size} on a side: the fog written as it
 	// is, not blended. The framebuffer is bound after the render type's state, which from 1.21.2
-	// binds the game's main target, and the main target is bound again after.
+	// binds the game's main target. After, the framebuffers the caller had bound for reading and for
+	// drawing, and its viewport, are bound again, so the rest of the map goes where the caller was
+	// drawing: an addon's screen may draw a view into a target of its own (up to 1.21.1: from 1.21.2
+	// every GUI draw's render type binds the main target).
 	static void drawFogLayer(MeshData mesh, int framebuffer, int size) {
 		boolean depth = GL11.glIsEnabled(GL11.GL_DEPTH_TEST);
+		int callerRead = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_READ_FRAMEBUFFER_BINDING);
+		int callerDraw = GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING);
+		GL11.glGetIntegerv(GL11.GL_VIEWPORT, CALLER_VIEWPORT);
 		//? if >=1.21.2 {
 		FOG.setupRenderState();
 		//?} else {
@@ -367,7 +376,10 @@ final class LegacyShaders extends RenderType {
 		com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(mesh);
 		FOG_LAYER.clearRenderState();
 		//?}
-		Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		// GL_READ_FRAMEBUFFER, GL_DRAW_FRAMEBUFFER.
+		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(36008, callerRead);
+		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(36009, callerDraw);
+		com.mojang.blaze3d.platform.GlStateManager._viewport(CALLER_VIEWPORT[0], CALLER_VIEWPORT[1], CALLER_VIEWPORT[2], CALLER_VIEWPORT[3]);
 		if (depth) {
 			RenderSystem.enableDepthTest();
 		}

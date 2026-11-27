@@ -466,6 +466,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 				if (tests.contains("addon-api")) {
 					AddonWaypointsTest.reopened(context);
 					AddonApiTest.reopened(context, reopened);
+					AddonViewTest.run(context, reopened);
 					AddonMarkersTest.run(context, reopened);
 					//? if >=1.21.6 && fabric {
 					AddonWaypointsTest.frames(context, reopened);

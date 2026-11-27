@@ -5,6 +5,7 @@ import dev.diorama.api.DioramaApi;
 import dev.diorama.api.Handle;
 import dev.diorama.api.Hud;
 import dev.diorama.api.MapLayer;
+import dev.diorama.api.MapView;
 import dev.diorama.api.Waypoints;
 import dev.diorama.api.World;
 import java.io.PrintWriter;
@@ -48,6 +49,8 @@ final class Addon implements DioramaApi, Hud {
 	private final List<HudHides.Hold> holds = new ArrayList<>();
 	/** Its open layers of markers and lines, so they can be closed for it. */
 	private final List<AddonLayers.Layer> layers = new ArrayList<>();
+	/** Its open views of the map, so they can be closed for it. */
+	private final List<AddonView> views = new ArrayList<>();
 	private final AddonWaypoints waypoints = new AddonWaypoints(this);
 	private boolean failed;
 	private boolean allowed;
@@ -86,6 +89,10 @@ final class Addon implements DioramaApi, Hud {
 				layer.release();
 			}
 			this.layers.clear();
+			for (AddonView view : this.views) {
+				view.release();
+			}
+			this.views.clear();
 			HudHides.changed();
 			Error fatal = fatal(thrown);
 			if (fatal != null) {
@@ -183,6 +190,10 @@ final class Addon implements DioramaApi, Hud {
 		this.layers.remove(layer);
 	}
 
+	void forget(AddonView view) {
+		this.views.remove(view);
+	}
+
 	String id() {
 		return this.modId;
 	}
@@ -271,6 +282,24 @@ final class Addon implements DioramaApi, Hud {
 		AddonLayers.Layer layer = AddonLayers.Layer.opened(this, name);
 		this.layers.add(layer);
 		return layer;
+	}
+
+	@Override
+	public MapView openView(Set<MapView.Part> parts) {
+		checkThread();
+		Objects.requireNonNull(parts, "parts");
+		for (MapView.Part part : parts) {
+			Objects.requireNonNull(part, "a part");
+		}
+		if (this.failed) {
+			return AddonView.closed(this, parts);
+		}
+		if (this.views.size() >= MapView.MAX_OPEN) {
+			throw new IllegalStateException(this.modId + " already has " + MapView.MAX_OPEN + " map views open, the most an addon can have: close one first");
+		}
+		AddonView view = AddonView.opened(this, parts);
+		this.views.add(view);
+		return view;
 	}
 
 	@Override

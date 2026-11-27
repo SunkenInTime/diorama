@@ -2218,8 +2218,8 @@ public final class MapScreen extends Screen {
 		return this.blips;
 	}
 
-	/** The {@link Overlays} bits to draw, from the settings. */
-	private static int overlayBits(MapSession session) {
+	/** The {@link Overlays} bits to draw, from the settings: addons' views draw them too. */
+	public static int overlayBits(MapSession session) {
 		Settings s = Settings.get();
 		int bits = 0;
 		if (s.chunkGrid) {
@@ -2280,6 +2280,14 @@ public final class MapScreen extends Screen {
 	private double minZoom(int layer) {
 		MapSession session = MapSession.get();
 		boolean overviews = layer == TileKey.SURFACE && session != null && (this.otherDimension != null || session.map().hasOverviews());
+		return minZoom(overviews);
+	}
+
+	/**
+	 * The furthest out the map goes, in GUI pixels a block: 1/512 of a screen pixel where there are
+	 * overview tiles to show it, else {@link MapViewport#DETAILED_ZOOM}. Addons' views stop there too.
+	 */
+	public static double minZoom(boolean overviews) {
 		return overviews ? MIN_SCREEN_ZOOM / net.minecraft.client.Minecraft.getInstance().getWindow().getGuiScale() : MapViewport.DETAILED_ZOOM;
 	}
 

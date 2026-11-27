@@ -9,24 +9,28 @@ import dev.diorama.api.Hud;
 import dev.diorama.api.LayerContent;
 import dev.diorama.api.MapLayer;
 import dev.diorama.api.MapLine;
+import dev.diorama.api.MapView;
 import dev.diorama.api.Marker;
 import java.util.EnumSet;
 
 /**
- * Hides the minimap and opens a layer of markers and lines across the Overworld's spawn, then
- * fails: Diorama should switch it off, show the minimap again and take its layer off the maps.
+ * Hides the minimap, opens a layer of markers and lines across the Overworld's spawn and a view of
+ * the map, then fails: Diorama should switch it off, show the minimap again, take its layer off the
+ * maps and close its view.
  */
 @DioramaEntrypoint
 public final class BrokenAddon implements DioramaAddon {
 	private static DioramaApi api;
 	private static Handle held;
 	private static MapLayer layer;
+	private static MapView view;
 
 	@Override
 	public void onReady(DioramaApi api) {
 		BrokenAddon.api = api;
 		held = api.hud().hide(EnumSet.of(Hud.Part.MINIMAP));
 		layer = api.openLayer("everywhere");
+		view = api.openView(EnumSet.allOf(MapView.Part.class));
 		LayerContent.Builder content = LayerContent.builder();
 		for (int x = -256; x <= 256; x += 16) {
 			for (int z = -256; z <= 256; z += 16) {
@@ -52,5 +56,10 @@ public final class BrokenAddon implements DioramaAddon {
 	/** The layer it opened before it failed. */
 	public static MapLayer layer() {
 		return layer;
+	}
+
+	/** The view it opened before it failed. */
+	public static MapView view() {
+		return view;
 	}
 }

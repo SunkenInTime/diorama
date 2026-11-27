@@ -166,6 +166,11 @@ public final class MapSession {
 		return current;
 	}
 
+	/** Whether this is the session of that level: not yet, just after a respawn or a change of dimension, until the next tick. */
+	public boolean isFor(@Nullable ClientLevel level) {
+		return this.level == level;
+	}
+
 	/** For tests: how many sessions have started, one each time the player's level changes. */
 	public static int started() {
 		return started;

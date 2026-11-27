@@ -167,6 +167,8 @@ public final class XaeroRadarIcons {
 		// Waypoint icons and the minimap's frame are resources too; this listener is the one both loaders already register.
 		WaypointIcons.reload();
 		MinimapFrames.reload();
+		// Addons' map views make their fog of war again at their next draw.
+		dev.diorama.addon.AddonView.letGoOfMemory();
 	}
 
 	private static void load(ResourceManager manager) {

@@ -43,6 +43,7 @@ public abstract class GameRendererMixin {
 	private void diorama$gpuBakes(CallbackInfo ci) {
 		boolean baked = dev.diorama.render.gpu.GpuTileBaker.frame();
 		dev.diorama.MapSession.frame(baked);
+		dev.diorama.addon.AddonView.frame();
 	}
 
 	//? if >=26.1 {
