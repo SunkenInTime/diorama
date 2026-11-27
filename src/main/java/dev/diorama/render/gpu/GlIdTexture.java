@@ -54,11 +54,14 @@ final class GlIdTexture implements LegacyTexture {
 	}
 
 	// The framebuffer that draws into this texture: GL_FRAMEBUFFER, its first colour attachment.
+	// Made with what was bound before bound again, so the caller reads its own binding after.
 	int framebuffer() {
 		if (this.framebuffer < 0) {
+			int bound = org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING);
 			this.framebuffer = GlStateManager.glGenFramebuffers();
 			GlStateManager._glBindFramebuffer(36160, this.framebuffer);
 			GlStateManager._glFramebufferTexture2D(36160, 36064, TEXTURE_2D, this.id, 0);
+			GlStateManager._glBindFramebuffer(36160, bound);
 		}
 		return this.framebuffer;
 	}

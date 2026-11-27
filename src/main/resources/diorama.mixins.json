@@ -18,9 +18,11 @@
 		"EffectIconsMixin",
 		"FtbChunksUpdateMixin",
 		"GameRendererMixin",
+		"GuiGraphicsMixin",
 		"LevelChunkMixin",
 		"PufferfishRendererAccessor",
 		"RealmsServerMixin",
+		"ScreenMixin",
 		"SpriteContentsMixin",
 		"TropicalFishRendererAccessor"
 	],

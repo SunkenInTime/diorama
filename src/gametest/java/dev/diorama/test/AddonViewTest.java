@@ -137,12 +137,20 @@ final class AddonViewTest {
 			zoomOut(context, scene, opened, wrong);
 			roundTrip(context, scene, opened, wrong);
 			budget(context, scene, opened, wrong);
+			onceAFrame(context, scene, opened, wrong);
+			renderThenClose(context, scene, wrong);
+			scissored(context, scene, opened, wrong);
+			balanced(context, scene, opened, wrong);
+			legacyState(context, scene, opened, wrong);
+			outsideScreen(context, scene, wrong);
 			closed(context, scene, wrong);
 			showcase(context, scene, opened, wrong);
 			//? if >=26.1 && fabric {
 			ViewMeasure.run(context, scene.px(), scene.py(), scene.pz());
 			//?}
+			reloadLetsGo(context, scene, wrong);
 			mapOff(context, scene, wrong);
+			twoLevels(context, world, scene, wrong);
 		} finally {
 			Scene s = scene;
 			context.setScreen(() -> null);
@@ -254,6 +262,13 @@ final class AddonViewTest {
 		refused(wrong, "a zoom under MIN_ZOOM", IllegalArgumentException.class, () -> ViewPlace.builder(0, 0, 10, 10).zoom(ViewPlace.MIN_ZOOM / 2));
 		refused(wrong, "a middle past where the game stops a player", IllegalArgumentException.class, () -> ViewPlace.builder(0, 0, 10, 10).center(Marker.MAX_COORDINATE + 1.0, 64, 0));
 		refused(wrong, "a middle at a NaN height", IllegalArgumentException.class, () -> ViewPlace.builder(0, 0, 10, 10).center(0, Double.NaN, 0));
+		ViewPlace.Builder partly = ViewPlace.builder(0, 0, 10, 10).center(1, 2, 3).zoom(3);
+		refused(wrong, "a middle with a NaN z", IllegalArgumentException.class, () -> partly.center(4, 5, Double.NaN));
+		refused(wrong, "a zoom of 0", IllegalArgumentException.class, () -> partly.zoom(0));
+		ViewPlace kept = partly.build();
+		if (kept.centerX() != 1 || kept.centerY() != 2 || kept.centerZ() != 3 || kept.zoom() != 3) {
+			wrong.add("A builder after refused center(4, 5, NaN) and zoom(0) builds " + kept + ", not the middle 1, 2, 3 at zoom 3 it had");
+		}
 		ViewPlace place = ViewPlace.builder(0, 0, 10, 10).center(0, 64, 0).build();
 		if (place.zoom() != ViewPlace.DEFAULT_ZOOM || !place.equals(ViewPlace.builder(0, 0, 10, 10).center(0, 64, 0).zoom(ViewPlace.DEFAULT_ZOOM).build())) {
 			wrong.add("A place's zoom when none is given is " + place.zoom() + ", or two places made alike aren't equal");
@@ -303,6 +318,17 @@ final class AddonViewTest {
 				problems.add("worldAt() took an infinite point");
 			} catch (IllegalArgumentException expected) {
 				// Right.
+			}
+			try {
+				WorldPos far = first.worldAt(place, Double.MAX_VALUE, -Double.MAX_VALUE, 64);
+				problems.add("worldAt() took a point at Double.MAX_VALUE and gave " + far);
+			} catch (IllegalArgumentException expected) {
+				// Right.
+			}
+			ViewPlace edge = ViewPlace.builder(-ViewPlace.MAX_SIZE, -ViewPlace.MAX_SIZE, ViewPlace.MAX_SIZE, ViewPlace.MAX_SIZE).center(0, 64, 0).zoom(ViewPlace.MIN_ZOOM).build();
+			WorldPos corner = first.worldAt(edge, 2.0 * ViewPlace.MAX_SIZE, 2.0 * ViewPlace.MAX_SIZE, 64);
+			if (!Double.isFinite(corner.x()) || !Double.isFinite(corner.z())) {
+				problems.add("worldAt() as far out as it takes gave " + corner);
 			}
 			first.close();
 			second.close();
@@ -647,19 +673,35 @@ final class AddonViewTest {
 		Diorama.LOGGER.info("addon-api view: worldAt() undid project() facing north and east");
 	}
 
-	/** Past the most a frame draws, render() returns false, once with a warning; two views each drawn once both draw. */
+	/**
+	 * Past the most a frame draws across addons, render() returns false, once with a warning: the
+	 * test addon's two views and a second addon's view in one frame. Two views each drawn once both
+	 * draw.
+	 */
 	private static void budget(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
 		ViewPlace place = middle(context, scene, ZOOM);
 		long before = lines(context, "drew a map view after addons' views had been drawn");
 		MapView one = open(context, opened);
 		MapView two = open(context, opened);
-		ViewScreen thrice = show(context, new ViewScreen.Draw(one, place), new ViewScreen.Draw(one, place), new ViewScreen.Draw(two, place));
-		boolean[] three = thrice.returned.clone();
-		int frames = thrice.frames;
-		ViewScreen twice = show(context, new ViewScreen.Draw(one, place), new ViewScreen.Draw(two, place));
-		boolean[] both = twice.returned.clone();
+		AddonWaypointsTest.Probe second = AddonWaypointsTest.Probe.make(context, "view_budget");
+		MapView third;
+		boolean[] tried;
+		int frames;
+		boolean[] both;
+		try {
+			third = context.computeOnClient(mc -> second.api.openView(EnumSet.noneOf(MapView.Part.class)));
+			ViewScreen thrice = show(context, new ViewScreen.Draw(one, place), new ViewScreen.Draw(two, place), new ViewScreen.Draw(third, place));
+			tried = thrice.returned.clone();
+			frames = thrice.frames;
+			ViewScreen twice = show(context, new ViewScreen.Draw(one, place), new ViewScreen.Draw(two, place));
+			both = twice.returned.clone();
+			context.runOnClient(mc -> third.close());
+		} finally {
+			second.forget(context);
+		}
 		close(context, opened, one);
 		close(context, opened, two);
+		boolean[] three = tried;
 		long warned = lines(context, "drew a map view after addons' views had been drawn") - before;
 		if (!Arrays.equals(three, new boolean[] {true, true, false}) || !Arrays.equals(both, new boolean[] {true, true}) || warned != (before == 0 ? 1 : 0)) {
 			wrong.add("A frame's draws: three a frame returned " + Arrays.toString(three) + " over " + frames + " frames, two views once each " + Arrays.toString(both) + "; " + warned + " new warnings");
@@ -668,22 +710,486 @@ final class AddonViewTest {
 		Diorama.LOGGER.info("addon-api view: three draws a frame returned {}, warned once; two views once each {}", Arrays.toString(three), Arrays.toString(both));
 	}
 
+	/** The left and right halves of the screen's middle band: the left one on the player, the right one further east, where the fog is. */
+	private static ViewPlace[] halves(ClientGameTestContext context, Scene scene, double zoom) {
+		int[] gui = screen(context);
+		int w = gui[0] / 2 - 12;
+		int h = gui[1] / 2;
+		int y = (gui[1] - h) / 2;
+		return new ViewPlace[] {
+			ViewPlace.builder(8, y, w, h).center(scene.px(), scene.py(), scene.pz()).zoom(zoom).build(),
+			ViewPlace.builder(gui[0] - 8 - w, y, w, h).center(scene.px() + 200, scene.py(), scene.pz()).zoom(zoom).build(),
+		};
+	}
+
+	/** Shows a screen drawing these with {@code around} round them, and waits for a few frames of it. */
+	private static ViewScreen showAround(ClientGameTestContext context, ViewScreen.Around around, ViewScreen.Draw... draws) {
+		ViewScreen screen = context.computeOnClient(mc -> {
+			ViewScreen made = new ViewScreen(List.of(draws));
+			made.around = around;
+			return made;
+		});
+		context.setScreen(() -> screen);
+		context.waitFor(mc -> screen.frames >= 5, 600);
+		context.waitTicks(3);
+		int from = screen.frames;
+		context.waitFor(mc -> screen.frames >= from + 2, 600);
+		if (screen.thrown != null) {
+			throw new AssertionError("The view screen's draw threw", screen.thrown);
+		}
+		return screen;
+	}
+
+	/**
+	 * A view draws once a frame: two views at two places in one frame each show their own fog, as
+	 * each does drawn alone, and one view drawn at two places draws the first and refuses the
+	 * second, with one warning, leaving the first's fog as it was.
+	 */
+	private static void onceAFrame(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
+		ViewPlace[] at = halves(context, scene, 1);
+		long before = lines(context, "drew the same map view twice in a frame");
+		MapView a = open(context, opened);
+		MapView b = open(context, opened);
+		BufferedImage alone1;
+		BufferedImage alone2;
+		BufferedImage both;
+		BufferedImage twice;
+		boolean[] bothReturned;
+		boolean[] twiceReturned;
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		try (WorldPause paused = WorldPause.pause(context)) {
+			show(context, new ViewScreen.Draw(a, at[0]));
+			alone1 = read(context.takeScreenshot("addon-view-13-left-alone"));
+			show(context, new ViewScreen.Draw(b, at[1]));
+			alone2 = read(context.takeScreenshot("addon-view-14-right-alone"));
+			ViewScreen two = show(context, new ViewScreen.Draw(a, at[0]), new ViewScreen.Draw(b, at[1]));
+			both = read(context.takeScreenshot("addon-view-15-two-views"));
+			bothReturned = two.returned.clone();
+			ViewScreen one = show(context, new ViewScreen.Draw(a, at[0]), new ViewScreen.Draw(a, at[1]));
+			twice = read(context.takeScreenshot("addon-view-16-one-view-twice"));
+			twiceReturned = one.returned.clone();
+		}
+		close(context, opened, a);
+		close(context, opened, b);
+		long warned = lines(context, "drew the same map view twice in a frame") - before;
+		double left = differing(alone1, both, at[0], scale, 0);
+		double right = differing(alone2, both, at[1], scale, 0);
+		double first = differing(alone1, twice, at[0], scale, 0);
+		double apart = differing(alone1, alone2, at[0], scale, 0);
+		boolean secondBlank = blank(twice, at[1], context);
+		if (!Arrays.equals(bothReturned, new boolean[] {true, true}) || !Arrays.equals(twiceReturned, new boolean[] {true, false}) || left > 0.03 || right > 0.03 || first > 0.03
+			|| !secondBlank || warned != (before == 0 ? 1 : 0)) {
+			wrong.add(String.format(Locale.ROOT, "Once a frame: two views returned %s, %.2f%% and %.2f%% of their pixels differ from each drawn alone; one view at two places returned %s, "
+				+ "%.2f%% of the first place differs from it drawn alone, the second place %s the backdrop; %d new warnings (the two places differ by %.2f%%)",
+				Arrays.toString(bothReturned), left * 100, right * 100, Arrays.toString(twiceReturned), first * 100, secondBlank ? "is" : "isn't", warned, apart * 100));
+			return;
+		}
+		Diorama.LOGGER.info(String.format(Locale.ROOT, "addon-api view: two views in a frame differ %.2f%% and %.2f%% from each alone; one view twice returned [true, false] and its first place differs %.2f%% (places differ %.2f%%)",
+			left * 100, right * 100, first * 100, apart * 100));
+	}
+
+	/**
+	 * An addon that opens a view, draws it and closes it within every frame of its screen: every
+	 * draw draws, since each frame has the whole budget; the textures it drew with stay until the
+	 * frame is drawn, so the picture is right; and nothing is held once the screen is gone.
+	 */
+	private static void renderThenClose(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		ViewPlace place = halves(context, scene, 1)[0];
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		List<Boolean> results = java.util.Collections.synchronizedList(new ArrayList<>());
+		BufferedImage alone;
+		BufferedImage each;
+		int frames;
+		try (WorldPause paused = WorldPause.pause(context)) {
+			MapView reference = context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
+			show(context, new ViewScreen.Draw(reference, place));
+			alone = read(context.takeScreenshot("addon-view-17-drawn-alone"));
+			context.runOnClient(mc -> reference.close());
+			ViewScreen screen = showAround(context, (g, a, draws) -> {
+				MapView view = api().openView(EnumSet.noneOf(MapView.Part.class));
+				try {
+					results.add(view.render(g, place, a));
+				} finally {
+					view.close();
+				}
+			});
+			int from = screen.frames;
+			context.waitFor(mc -> screen.frames >= from + 10, 600);
+			each = read(context.takeScreenshot("addon-view-18-opened-drawn-closed-each-frame"));
+			frames = screen.frames;
+		}
+		context.setScreen(() -> null);
+		context.waitTicks(3);
+		int retiring = context.computeOnClient(mc -> AddonView.retiringCount());
+		int open = context.computeOnClient(mc -> AddonView.openCount());
+		List<Boolean> got;
+		synchronized (results) {
+			got = new ArrayList<>(results);
+		}
+		long refused = got.stream().filter(r -> !r).count();
+		double differ = differing(alone, each, place, scale, 0);
+		if (got.size() < 10 || refused != 0 || differ > 0.03 || retiring != 0 || open != 0) {
+			wrong.add(String.format(Locale.ROOT, "Opened, drawn and closed each frame: %d of %d draws over %d frames returned false (%s); %.2f%% of the place differs from a view drawn alone; "
+				+ "after the screen, %d viewports wait to be closed and %d views are open", refused, got.size(), frames, got.subList(0, Math.min(8, got.size())), differ * 100, retiring, open));
+			return;
+		}
+		Diorama.LOGGER.info(String.format(Locale.ROOT, "addon-api view: opened, drawn and closed in each of %d frames, every draw drew; %.2f%% differ from a view drawn alone; nothing held after", got.size(), differ * 100));
+	}
+
+	/**
+	 * Inside an addon's narrower scissor (a scroll panel), a view draws nothing outside it, the fog
+	 * included, on Fast and on Fancy.
+	 */
+	private static void scissored(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
+		ViewPlace middle = middle(context, scene, 1);
+		ViewPlace place = ViewPlace.builder(middle.x(), middle.y(), middle.width(), middle.height()).center(scene.px() + 250, scene.py(), scene.pz()).zoom(1).build();
+		int x0 = place.x() + place.width() / 3;
+		int x1 = place.x() + 2 * place.width() / 3;
+		Settings.Quality was = context.computeOnClient(mc -> Settings.get().quality);
+		List<String> problems = new ArrayList<>();
+		MapView view = open(context, opened);
+		try {
+			for (Settings.Quality quality : new Settings.Quality[] {Settings.Quality.FAST, Settings.Quality.FANCY}) {
+				context.runOnClient(mc -> {
+					Settings.get().quality = quality;
+					Settings.get().apply();
+				});
+				DioramaClientTest.settle(context, 10);
+				showAround(context, (g, a, draws) -> {
+					g.enableScissor(x0, place.y(), x1, place.y() + place.height());
+					try {
+						draws.run();
+					} finally {
+						g.disableScissor();
+					}
+				}, new ViewScreen.Draw(view, place));
+				BufferedImage shot = read(context.takeScreenshot("addon-view-19-in-a-scissor-" + quality.name().toLowerCase(Locale.ROOT)));
+				double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+				int outside = drawnIn(shot, scale, place.x(), place.y(), x0 - 1, place.y() + place.height()) + drawnIn(shot, scale, x1 + 1, place.y(), place.x() + place.width(), place.y() + place.height());
+				int inside = drawnIn(shot, scale, x0 + 1, place.y(), x1 - 1, place.y() + place.height());
+				if (outside > 0 || inside == 0) {
+					problems.add(quality + ": " + outside + " pixels drawn outside the scissor, " + inside + " inside");
+				}
+			}
+		} finally {
+			context.runOnClient(mc -> {
+				Settings.get().quality = was;
+				Settings.get().apply();
+			});
+			close(context, opened, view);
+		}
+		DioramaClientTest.settle(context, 10);
+		if (!problems.isEmpty()) {
+			wrong.add("In a narrower scissor: " + String.join("; ", problems));
+			return;
+		}
+		Diorama.LOGGER.info("addon-api view: inside a narrower scissor, nothing drawn outside it on Fast or Fancy");
+	}
+
+	/** Pixels in this GUI rectangle that aren't the view screen's backdrop, sampled every third. */
+	private static int drawnIn(BufferedImage image, double scale, int x0, int y0, int x1, int y1) {
+		int count = 0;
+		for (int y = (int) Math.ceil(y0 * scale); y < (int) (y1 * scale) && y < image.getHeight(); y += 3) {
+			for (int x = (int) Math.ceil(x0 * scale); x < (int) (x1 * scale) && x < image.getWidth(); x += 3) {
+				if (!alike(image.getRGB(x, y), 0x101418, 4)) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * A throw in the middle of a view's drawing, with a pose and a scissor of Diorama's still
+	 * pushed, leaves the caller's transform and scissor as they were; and a view drawn from inside a
+	 * view's drawing is refused.
+	 */
+	private static void balanced(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
+		ViewPlace place = middle(context, scene, ZOOM);
+		MapView view = open(context, opened);
+		MapView other = open(context, opened);
+		String[] seen = new String[3];
+		boolean[] done = new boolean[1];
+		try {
+			// The first frame only: before 26.1 the test shim draws frames between the test's calls,
+			// after the view below is closed too.
+			showAround(context, (g, a, draws) -> {
+				if (done[0]) {
+					return;
+				}
+				done[0] = true;
+				g.enableScissor(place.x() + 10, place.y() + 10, place.x() + 60, place.y() + 40);
+				Object pose = g.pose();
+				String before = poseText(g) + " " + scissorText(g);
+				AddonView.insideDrawForTests = inner -> {
+					//? if >=1.21.6 {
+					inner.pose().pushMatrix();
+					inner.pose().translate(37, 0);
+					//?} else {
+					/*inner.pose().pushPose();
+					inner.pose().translate(37, 0, 0);
+					*///?}
+					inner.enableScissor(0, 0, 5, 5);
+					try {
+						seen[1] = "returned " + other.render(inner, place, a);
+					} catch (IllegalStateException e) {
+						seen[1] = e.getMessage();
+					}
+					throw new IllegalStateException("planted");
+				};
+				try {
+					view.render(g, place, a);
+					seen[0] = "didn't throw";
+				} catch (IllegalStateException e) {
+					seen[0] = e.getMessage();
+				} finally {
+					AddonView.insideDrawForTests = null;
+				}
+				String after = poseText(g) + " " + scissorText(g);
+				seen[2] = g.pose() == pose && before.equals(after) ? null : "before " + before + ", after " + after + (g.pose() == pose ? "" : ", another pose stack");
+				g.disableScissor();
+			});
+		} finally {
+			AddonView.insideDrawForTests = null;
+			close(context, opened, view);
+			close(context, opened, other);
+		}
+		if (!"planted".equals(seen[0]) || seen[1] == null || !seen[1].contains("while a map view was drawing") || seen[2] != null) {
+			wrong.add("A throw inside a view's drawing: render() " + seen[0] + "; a view drawn from inside it: " + seen[1] + "; the caller's pose and scissor: " + (seen[2] == null ? "as they were" : seen[2]));
+			return;
+		}
+		Diorama.LOGGER.info("addon-api view: a throw inside the drawing left the caller's pose and scissor as they were; a view drawn from inside a view's drawing was refused");
+	}
+
+	/** The caller's transform, as text. */
+	private static String poseText(net.minecraft.client.gui.GuiGraphicsExtractor g) {
+		//? if >=1.21.6 {
+		return "pose " + new org.joml.Matrix3x2f(g.pose());
+		//?} else {
+		/*return "pose " + new org.joml.Matrix4f(g.pose().last().pose());
+		*///?}
+	}
+
+	/** The scissor the caller's draws are cut to now, as text. */
+	private static String scissorText(net.minecraft.client.gui.GuiGraphicsExtractor g) {
+		//? if >=1.21.6 {
+		return "scissor " + g.scissorStack.peek();
+		//?} else if <1.21.5 {
+		/*int[] box = new int[4];
+		org.lwjgl.opengl.GL11.glGetIntegerv(org.lwjgl.opengl.GL11.GL_SCISSOR_BOX, box);
+		return "scissor " + org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST) + " " + Arrays.toString(box);
+		*///?} else {
+		/*return "scissor (not read on 1.21.5)";
+		*///?}
+	}
+
+	/**
+	 * Through 1.21.4 the GUI draws straight away with OpenGL, and the fog layer into a framebuffer
+	 * of its own: after a view, the framebuffer (up to 1.21.1), viewport and blending the caller
+	 * had are as they were.
+	 */
+	private static void legacyState(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
+		//? if <1.21.5 {
+		/*ViewPlace place = middle(context, scene, 1);
+		Settings.Quality was = context.computeOnClient(mc -> Settings.get().quality);
+		context.runOnClient(mc -> {
+			Settings.get().quality = Settings.Quality.FANCY;
+			Settings.get().apply();
+		});
+		String[] seen = new String[2];
+		try {
+			// A new view, so its fog layer is drawn at its first draw; once.
+			showAround(context, (g, a, draws) -> {
+				if (seen[0] != null) {
+					return;
+				}
+				MapView view = api().openView(EnumSet.noneOf(MapView.Part.class));
+				try {
+					g.flush();
+					bindCallerTarget();
+					com.mojang.blaze3d.platform.GlStateManager._viewport(0, 0, 64, 64);
+					com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+					com.mojang.blaze3d.systems.RenderSystem.blendFuncSeparate(org.lwjgl.opengl.GL11.GL_ONE, org.lwjgl.opengl.GL11.GL_ZERO, org.lwjgl.opengl.GL11.GL_ONE, org.lwjgl.opengl.GL11.GL_ONE);
+					seen[0] = glState();
+					view.render(g, place, a);
+					g.flush();
+					seen[1] = glState();
+				} finally {
+					view.close();
+					com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+					net.minecraft.client.Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+				}
+			});
+		} finally {
+			context.runOnClient(mc -> {
+				Settings.get().quality = was;
+				Settings.get().apply();
+			});
+		}
+		DioramaClientTest.settle(context, 10);
+		if (seen[0] == null || !seen[0].equals(seen[1])) {
+			wrong.add("OpenGL state round a view: before " + seen[0] + ", after " + seen[1]);
+			return;
+		}
+		Diorama.LOGGER.info("addon-api view: the caller's OpenGL state was as it was after a view: {}", seen[1]);
+		*///?}
+	}
+
+	//? if <1.21.2 {
+	/*// The window's own framebuffer, not the game's main one, as an addon drawing into a target of its own would have.
+	private static void bindCallerTarget() {
+		com.mojang.blaze3d.platform.GlStateManager._glBindFramebuffer(org.lwjgl.opengl.GL30.GL_FRAMEBUFFER, 0);
+	}
+
+	private static String framebufferText() {
+		return "framebuffer " + org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING) + ", ";
+	}
+	*///?} else {
+	// From 1.21.2 every GUI draw binds the game's main framebuffer, so only the main one is kept.
+	private static void bindCallerTarget() {
+	}
+
+	private static String framebufferText() {
+		return "";
+	}
+	//?}
+
+	//? if <1.21.5 {
+	/*private static String glState() {
+		int[] viewport = new int[4];
+		org.lwjgl.opengl.GL11.glGetIntegerv(org.lwjgl.opengl.GL11.GL_VIEWPORT, viewport);
+		return framebufferText() + "viewport " + Arrays.toString(viewport)
+			+ ", blend " + org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_BLEND) + " " + org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL14.GL_BLEND_SRC_RGB)
+			+ "/" + org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL14.GL_BLEND_DST_RGB) + "/" + org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL14.GL_BLEND_SRC_ALPHA)
+			+ "/" + org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL14.GL_BLEND_DST_ALPHA);
+	}
+	*///?}
+
+	/**
+	 * Outside a screen's drawing (here a client tick, with the graphics object of an earlier
+	 * frame), render() is refused before it does any map work.
+	 */
+	private static void outsideScreen(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		ViewPlace place = middle(context, scene, ZOOM);
+		AddonView view = (AddonView) context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
+		try {
+			ViewScreen screen = show(context);
+			Object kept = screen.lastGraphics;
+			String result = context.computeOnClient(mc -> {
+				try {
+					return "returned " + view.render(kept, place, 0);
+				} catch (IllegalStateException e) {
+					return "refused";
+				}
+			});
+			boolean held = context.computeOnClient(mc -> view.holdsMemory());
+			if (!"refused".equals(result) || held) {
+				wrong.add("render() from a tick with an earlier frame's graphics " + result + "; the view " + (held ? "made" : "didn't make") + " its fog of war");
+				return;
+			}
+			Diorama.LOGGER.info("addon-api view: render() from a tick with an earlier frame's graphics was refused and made nothing");
+		} finally {
+			context.runOnClient(mc -> view.close());
+			context.setScreen(() -> null);
+		}
+	}
+
+	/** A resource reload lets go of a view's fog of war and label grid, and its next draw makes them again. */
+	private static void reloadLetsGo(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		ViewPlace place = middle(context, scene, ZOOM);
+		AddonView view = (AddonView) context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
+		try {
+			show(context, new ViewScreen.Draw(view, place));
+			boolean drawn = context.computeOnClient(mc -> view.holdsMemory());
+			context.setScreen(() -> null);
+			DioramaClientTest.reloadPacks(context, mc -> {
+			});
+			boolean afterReload = context.computeOnClient(mc -> view.holdsMemory());
+			int retiring = context.computeOnClient(mc -> AddonView.retiringCount());
+			DioramaClientTest.settle(context, 20);
+			ViewScreen again = show(context, new ViewScreen.Draw(view, place));
+			boolean redrawn = context.computeOnClient(mc -> view.holdsMemory());
+			if (!drawn || afterReload || retiring != 0 || !redrawn || !again.returned[0]) {
+				wrong.add("Resource reload: fog held after a draw " + drawn + ", after the reload " + afterReload + " (" + retiring + " viewports waiting to close); drawn again it returned "
+					+ again.returned[0] + " and holds it " + redrawn);
+				return;
+			}
+			Diorama.LOGGER.info("addon-api view: a resource reload let go of a view's fog, and its next draw made it again");
+		} finally {
+			context.runOnClient(mc -> view.close());
+			context.setScreen(() -> null);
+		}
+	}
+
+	/**
+	 * Just after a change of dimension, Minecraft has the new level while Diorama may still hold
+	 * the old one's session until a tick: a view then draws nothing and returns false. Here the
+	 * player goes to the Nether, and the game's level is set back to the Overworld's for one draw.
+	 */
+	private static void twoLevels(ClientGameTestContext context, TestSingleplayerContext world, Scene scene, List<String> wrong) {
+		ViewPlace place = middle(context, scene, ZOOM);
+		net.minecraft.client.multiplayer.ClientLevel overworld = context.computeOnClient(mc -> mc.level);
+		MapView view = context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
+		Boolean[] mixed = new Boolean[1];
+		boolean[] matched = new boolean[1];
+		try {
+			world.getServer().runCommand("execute in minecraft:the_nether run tp @a " + scene.px() / 8 + " 128 " + scene.pz() / 8);
+			context.waitFor(mc -> mc.level != overworld && MapSession.get() != null && MapSession.get().isFor(mc.level), 2400);
+			context.waitTicks(20);
+			showAround(context, (g, a, draws) -> {
+				// The first frame only, as in balanced().
+				if (mixed[0] != null) {
+					return;
+				}
+				net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+				net.minecraft.client.multiplayer.ClientLevel real = mc.level;
+				mc.level = overworld;
+				try {
+					mixed[0] = view.render(g, place, a);
+				} finally {
+					mc.level = real;
+				}
+			});
+			ViewScreen same = show(context, new ViewScreen.Draw(view, place));
+			matched[0] = same.returned[0];
+		} finally {
+			context.runOnClient(mc -> view.close());
+			context.setScreen(() -> null);
+			world.getServer().runCommand("execute in minecraft:overworld run tp @a " + scene.px() + " " + scene.py() + " " + scene.pz() + " 180 0");
+			context.waitFor(mc -> mc.level != null && mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD && MapSession.get() != null && MapSession.get().isFor(mc.level)
+				&& MapSession.get().map().chunkCount() > 100, 2400);
+			DioramaClientTest.settle(context, 20);
+		}
+		if (mixed[0] == null || mixed[0] || !matched[0]) {
+			wrong.add("Two levels at once: with the game's level not Diorama's, render() returned " + mixed[0] + "; with both the Nether's it returned " + matched[0]);
+			return;
+		}
+		Diorama.LOGGER.info("addon-api view: with the game's level not the session's, render() returned false; with both the same it drew");
+	}
+
 	/** A view holds its fog from its first draw until close; closed, it draws nothing. */
 	private static void closed(ClientGameTestContext context, Scene scene, List<String> wrong) {
 		ViewPlace place = middle(context, scene, ZOOM);
 		AddonView view = (AddonView) context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
-		boolean beforeDraw = context.computeOnClient(mc -> view.holdsFog());
+		boolean beforeDraw = context.computeOnClient(mc -> view.holdsMemory());
 		show(context, new ViewScreen.Draw(view, place));
-		boolean drawn = context.computeOnClient(mc -> view.holdsFog());
-		context.runOnClient(mc -> view.close());
-		boolean afterClose = context.computeOnClient(mc -> view.holdsFog() || view.isOpen());
+		boolean drawn = context.computeOnClient(mc -> view.holdsMemory());
+		// The handle lets go at once; the textures wait for the next frame to start.
+		int[] waiting = new int[1];
+		boolean afterClose = context.computeOnClient(mc -> {
+			view.close();
+			waiting[0] = AddonView.retiringCount();
+			return view.holdsMemory() || view.isOpen();
+		});
 		ViewScreen screen = show(context, new ViewScreen.Draw(view, place));
 		Path shot = context.takeScreenshot("addon-view-10-closed");
 		int count = context.computeOnClient(mc -> AddonView.openCount());
+		int left = context.computeOnClient(mc -> AddonView.retiringCount());
 		context.runOnClient(mc -> view.close());
-		if (beforeDraw || !drawn || afterClose || screen.returned[0] || count != 0 || !blank(read(shot), place, context)) {
-			wrong.add("Closing: fog held before the first draw " + beforeDraw + ", after it " + drawn + ", after close (or still open) " + afterClose + "; a closed view's render returned "
-				+ screen.returned[0] + " and its place " + (blank(read(shot), place, context) ? "is" : "isn't") + " the screen's backdrop; " + count + " views open");
+		if (beforeDraw || !drawn || afterClose || waiting[0] != 1 || left != 0 || screen.returned[0] || count != 0 || !blank(read(shot), place, context)) {
+			wrong.add("Closing: fog held before the first draw " + beforeDraw + ", after it " + drawn + ", after close (or still open) " + afterClose + "; viewports waiting to close: "
+				+ waiting[0] + " at close, " + left + " frames later; a closed view's render returned " + screen.returned[0] + " and its place "
+				+ (blank(read(shot), place, context) ? "is" : "isn't") + " the screen's backdrop; " + count + " views open");
 			return;
 		}
 		Diorama.LOGGER.info("addon-api view: fog held from the first draw until close; a closed view returned false and drew nothing");

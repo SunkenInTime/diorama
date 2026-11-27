@@ -19,13 +19,21 @@ final class ViewScreen extends Screen {
 	record Draw(MapView view, ViewPlace place) {
 	}
 
+	/** What a check does around the draws each frame, with the frame's graphics: the draws run when it runs {@code draws}. */
+	interface Around {
+		void draw(GuiGraphicsExtractor graphics, float partialTick, Runnable draws);
+	}
+
 	final List<Draw> draws = new ArrayList<>();
 	/** Whether each view gets a light frame round it, as a screen of an addon's might draw. */
 	boolean framed;
+	volatile Around around;
 	/** What each draw returned, the last frame. */
 	volatile boolean[] returned = new boolean[0];
 	volatile int frames;
 	volatile RuntimeException thrown;
+	/** The graphics object of the last frame, kept as an addon that misuses it might. */
+	volatile Object lastGraphics;
 
 	ViewScreen() {
 		super(Component.literal("Addon view test"));
@@ -44,6 +52,7 @@ final class ViewScreen extends Screen {
 
 	@Override
 	public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+		this.lastGraphics = graphics;
 		graphics.fill(0, 0, this.width, this.height, 0xFF101418);
 		if (this.framed) {
 			for (Draw draw : this.draws) {
@@ -52,11 +61,19 @@ final class ViewScreen extends Screen {
 			}
 		}
 		boolean[] result = new boolean[this.draws.size()];
-		try {
+		Runnable drawAll = () -> {
 			for (int i = 0; i < result.length; i++) {
 				Draw draw = this.draws.get(i);
 				Object g = graphics;
 				result[i] = draw.view().render(g, draw.place(), a);
+			}
+		};
+		try {
+			Around wrap = this.around;
+			if (wrap == null) {
+				drawAll.run();
+			} else {
+				wrap.draw(graphics, a, drawAll);
 			}
 		} catch (RuntimeException e) {
 			this.thrown = e;

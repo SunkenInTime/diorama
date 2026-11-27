@@ -124,6 +124,16 @@ final class StateCanvas implements MapCanvas {
 
 	@Override
 	public void fog(MapTexture mask, MapTexture noise, MapTexture detail, float[] corners, float[] uvs, int x, int y, int width, int height, int params) {
+		// Cut to the view and to whatever scissor the caller has on: an addon's view inside its
+		// scroll panel shows its fog only inside the panel.
+		ScreenRectangle clip = new ScreenRectangle(x, y, width, height);
+		ScreenRectangle caller = this.graphics.scissorStack.peek();
+		if (caller != null) {
+			clip = clip.intersection(caller);
+			if (clip == null) {
+				return;
+			}
+		}
 		this.graphics.guiRenderState.addGuiElement(QuadElement.of(
 			DioramaPipelines.FOG,
 			StateTexture.triple((StateTexture) mask, Sampling.CLAMP_LINEAR, (StateTexture) noise, Sampling.REPEAT_LINEAR, (StateTexture) detail, Sampling.CLAMP_LINEAR),
@@ -131,7 +141,7 @@ final class StateCanvas implements MapCanvas {
 			corners,
 			uvs,
 			params,
-			new ScreenRectangle(x, y, width, height)
+			clip
 		));
 	}
 }

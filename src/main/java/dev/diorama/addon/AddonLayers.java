@@ -42,6 +42,7 @@ public final class AddonLayers {
 		seenStore = null;
 		seenKey = null;
 		empty();
+		AddonView.letGoOfMemory();
 	}
 
 	/**

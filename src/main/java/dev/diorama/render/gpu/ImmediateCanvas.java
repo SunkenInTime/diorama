@@ -217,7 +217,7 @@ final class ImmediateCanvas implements MapCanvas {
 		boolean scissor = org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
 		org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);
 		int framebuffer = ((GlIdTexture) target).framebuffer();
-		net.minecraft.client.Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+		// Binds the layer's framebuffer, then the caller's again.
 		LegacyShaders.drawFogLayer(mesh.buildOrThrow(), framebuffer, size);
 		if (scissor) {
 			org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST);

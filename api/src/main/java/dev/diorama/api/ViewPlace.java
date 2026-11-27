@@ -187,12 +187,16 @@ public final class ViewPlace {
 		 * @return this builder
 		 * @throws IllegalArgumentException if {@code x} or {@code z} is beyond
 		 *     {@link Marker#MAX_COORDINATE} either way, {@code y} beyond {@link Marker#MAX_HEIGHT},
-		 *     or any of them NaN
+		 *     or any of them NaN; the builder is then as it was
 		 */
 		public Builder center(double x, double y, double z) {
-			this.centerX = Checks.horizontal("x", x);
-			this.centerY = Checks.height(y);
-			this.centerZ = Checks.horizontal("z", z);
+			// All three checked before any is kept.
+			double checkedX = Checks.horizontal("x", x);
+			double checkedY = Checks.height(y);
+			double checkedZ = Checks.horizontal("z", z);
+			this.centerX = checkedX;
+			this.centerY = checkedY;
+			this.centerZ = checkedZ;
 			this.centered = true;
 			return this;
 		}
@@ -203,7 +207,8 @@ public final class ViewPlace {
 		 *
 		 * @param zoom from {@link #MIN_ZOOM} to {@link #MAX_ZOOM}
 		 * @return this builder
-		 * @throws IllegalArgumentException if the zoom is outside that range, or NaN
+		 * @throws IllegalArgumentException if the zoom is outside that range, or NaN; the builder
+		 *     is then as it was
 		 */
 		public Builder zoom(double zoom) {
 			if (!(zoom >= MIN_ZOOM && zoom <= MAX_ZOOM)) {
