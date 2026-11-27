@@ -30,6 +30,7 @@ public final class BrokenAddon implements DioramaAddon {
 		BrokenAddon.api = api;
 		held = api.hud().hide(EnumSet.of(Hud.Part.MINIMAP));
 		layer = api.openLayer("everywhere");
+		view = api.openView(EnumSet.allOf(MapView.Part.class));
 		LayerContent.Builder content = LayerContent.builder();
 		for (int x = -256; x <= 256; x += 16) {
 			for (int z = -256; z <= 256; z += 16) {
@@ -39,7 +40,6 @@ public final class BrokenAddon implements DioramaAddon {
 		content.add(MapLine.builder(DimensionId.OVERWORLD).point(-256, 70, -256).point(256, 70, 256).rgb(0x00FF00).width(8).build());
 		content.add(MapLine.builder(DimensionId.OVERWORLD).point(-256, 70, 256).point(256, 70, -256).rgb(0x00FF00).width(8).build());
 		layer.replace(content.build());
-		view = api.openView(EnumSet.allOf(MapView.Part.class));
 		throw new IllegalStateException("Diorama test addon: broken on purpose");
 	}
 
