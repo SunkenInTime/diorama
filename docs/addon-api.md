@@ -9,7 +9,7 @@ Diorama has a small API for other mods: hide the minimap or the waypoints in the
 The jar is in a Maven repository on GitHub Pages:
 
 - Repository: `https://sunkenintime.github.io/diorama/maven`
-- Coordinates: `dev.diorama:diorama-api:1.0.0-alpha.1`
+- Coordinates: `dev.diorama:diorama-api:1.0.0-alpha.2`
 
 Compile against it and don't bundle it. Diorama carries the same classes inside its own jar, so a copy in yours would clash with it. That means `compileOnly`, never `implementation`, `include` or `jarJar`. It needs Java 17 or newer.
 
@@ -25,13 +25,13 @@ repositories {
 }
 
 dependencies {
-    compileOnly "dev.diorama:diorama-api:1.0.0-alpha.1"
+    compileOnly "dev.diorama:diorama-api:1.0.0-alpha.2"
 }
 ```
 
 Not `modCompileOnly` on Loom and no `fg.deobf(...)` on ForgeGradle: the API names nothing from Minecraft, so there is nothing to remap.
 
-In `build.gradle.kts` it's the same with Kotlin's syntax: `maven("https://sunkenintime.github.io/diorama/maven")` and `compileOnly("dev.diorama:diorama-api:1.0.0-alpha.1")`.
+In `build.gradle.kts` it's the same with Kotlin's syntax: `maven("https://sunkenintime.github.io/diorama/maven")` and `compileOnly("dev.diorama:diorama-api:1.0.0-alpha.2")`.
 
 The sources and Javadoc jars are published next to it, so your IDE shows the documentation. Start at `DioramaAddon`.
 
