@@ -12,6 +12,7 @@ import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.function.IntSupplier;
+import dev.diorama.waypoint.ScreenArt;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -27,10 +28,12 @@ import net.minecraft.client.gui.components.tabs.MenuTabBar;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
 //? if >=1.21.9 {
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
 //?}
 //? if >=1.21.6 {
 import net.minecraft.client.renderer.RenderPipelines;
@@ -42,7 +45,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * The settings in vanilla tabs, one group at a time: a checkbox for each on/off setting, two to a
  * row, then a button for each choice and a slider for each number. The minimap stays sharp on the
- * right as a live preview, so a change shows on it straight away.
+ * right as a live preview, so a change shows on it straight away. A tab taller than the window
+ * scrolls, as vanilla's options lists and Xaero's settings do, with the wheel or a scrollbar.
  */
 public final class SettingsScreen extends Screen {
 	/** Right edge of the settings side on a wide screen. */
@@ -52,14 +56,35 @@ public final class SettingsScreen extends Screen {
 	/** The settings' width; two checkbox columns with a gap between them. */
 	private static final int CONTENT = 280;
 	private static final int COLUMN_GAP = 8;
+	/** A heading's line, and the room over it that sets it apart from the row above. */
 	private static final int HEADING = 11;
-	/** How wide a text size slider is beside a button that keeps the rest of the row: room for "Text size: 200%". */
-	private static final int TEXT_SLIDER = 84;
+	private static final int HEADING_GAP = 4;
+	/** Over the first checkbox, and under the last row once the row's own gap is added. */
+	private static final int TOP = 10;
+	private static final int BOTTOM = 6;
+	/** A row of checkboxes, the room between them and the buttons, and a row of buttons or sliders. */
+	private static final int CHECK_ROW = 22;
+	private static final int AFTER_CHECKS = 8;
+	private static final int ROW = 24;
+	/** Kept free on the right for the scrollbar, and its gap to the settings. */
+	private static final int GUTTER = 4 + ScreenArt.SCROLLBAR_WIDTH;
+	/** How far a notch of the mouse wheel moves a tab. */
+	private static final int WHEEL_STEP = 20;
+	/** A checkbox column wide enough for any window: as narrow as it gets beside a scrollbar. */
+	private static final int CHECK_COLUMN = (CONTENT - GUTTER - COLUMN_GAP) / 2;
 	private static final int TAB_BAR_HEIGHT = 24;
 	private static final Identifier LIST_BACKGROUND = Identifier.withDefaultNamespace("textures/gui/inworld_menu_list_background.png");
 
 	private final @Nullable Screen parent;
-	private final TabManager tabManager = new TabManager(this::addRenderableWidget, this::removeWidget);
+	/**
+	 * The shown tab's widgets. They're the screen's children for input and focus, but drawn by hand,
+	 * cut off at the tab's area, so a scrolled tab never draws over its tab bar or Done.
+	 */
+	private final List<AbstractWidget> tabWidgets = new ArrayList<>();
+	private final TabManager tabManager = new TabManager(this::addTabWidget, this::removeTabWidget);
+	/** Where the tabs lay out: between the tab bar and the line over Done. */
+	private @Nullable ScreenRectangle tabArea;
+	private boolean draggingScrollbar;
 	private final MinimapHud preview = new MinimapHud();
 	private @Nullable TabNavigationBar tabBar;
 	private List<Tab> tabs = List.of();
@@ -88,6 +113,10 @@ public final class SettingsScreen extends Screen {
 		// Resizing the window runs this again: stay on the same tab.
 		Tab current = this.tabManager.getCurrentTab();
 		int selected = current == null ? 0 : Math.max(0, this.tabs.indexOf(current));
+		// And as far down it, as far as the new size lets it go.
+		int keptScroll = current instanceof SettingsTab settings ? settings.scroll : 0;
+		this.tabWidgets.clear();
+		this.draggingScrollbar = false;
 		this.side = Math.max(Math.min(SIDE, this.width - PREVIEW_ROOM), Math.min(this.width, CONTENT + 10));
 
 		SettingsTab minimap = new SettingsTab("diorama.settings.minimap");
@@ -162,7 +191,7 @@ public final class SettingsScreen extends Screen {
 		SettingsTab overlays = new SettingsTab("diorama.settings.overlays");
 		overlays.toggle("chunk_grid", () -> s.chunkGrid, v -> s.chunkGrid = v);
 		overlays.toggle("slime_chunks", () -> s.slimeChunks, v -> s.slimeChunks = v);
-		// The map's buttons here rather than under Waypoints: another row there runs into Done on a short window.
+		// The map's own buttons, together.
 		overlays.toggle("map_maps_button", () -> s.mapMapsButton, v -> s.mapMapsButton = v);
 		overlays.toggle("map_dimension_button", () -> s.mapDimensionButton, v -> s.mapDimensionButton = v);
 		overlays.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
@@ -188,17 +217,23 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
 		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
 		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
-		// Under Portal pins, in the cell seven checkboxes left free: the tab is no taller for it.
 		waypoints.toggle("portals_world", () -> s.portalMarkersInWorld, v -> s.portalMarkersInWorld = v);
+		// Where new waypoints show, three boxes on a screen of their own, first under the checkboxes
+		// that say where waypoints show.
+		waypoints.open("new_waypoints", () -> this.minecraft.gui.setScreen(new NewWaypointsScreen(this)));
+		// What the world's labels say, the whole row so every choice shows in full; then how big they
+		// are and how see-through the pins are, which together set how they look in the world.
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
-		// How big those labels are, beside what they say: the tab has no room for another row.
 		int[] labelSizes = TextSize.sizes();
 		waypoints.slider("waypoint_text_size", nearestIndex(labelSizes, s.waypointWorldTextSize), labelSizes.length, i -> s.waypointWorldTextSize = labelSizes[i], i -> Component.literal(labelSizes[i] + "%"));
-		waypoints.lastTwoSideBySide(TEXT_SLIDER);
+		int worldOpacities = (Settings.MAX_OPACITY - Settings.MIN_OPACITY) / Settings.OPACITY_STEP + 1;
+		waypoints.slider("waypoint_opacity", (Settings.snapOpacity(s.waypointWorldOpacity) - Settings.MIN_OPACITY) / Settings.OPACITY_STEP, worldOpacities,
+			i -> s.waypointWorldOpacity = Settings.MIN_OPACITY + i * Settings.OPACITY_STEP, i -> Component.literal((Settings.MIN_OPACITY + i * Settings.OPACITY_STEP) + "%"));
+		waypoints.lastTwoSideBySide();
 		int[] distances = Settings.WAYPOINT_DISTANCES;
 		waypoints.slider("waypoint_distance", indexOf(distances, s.waypointDistance), distances.length, i -> s.waypointDistance = distances[i],
 			i -> distances[i] == 0 ? Component.translatable("diorama.settings.waypoint_distance.any") : Component.literal(distances[i] + " m"));
-		// Beside the distance, which decides how far off a beam shows too; and the tab has no room for another row.
+		// Beside the distance, which decides how far off a beam shows too.
 		waypoints.choice("waypoint_beams", Settings.Beams.values(), () -> s.waypointBeams, v -> s.waypointBeams = v);
 		waypoints.lastTwoSideBySide();
 		int[] pinSizes = Pins.sizes();
@@ -207,12 +242,8 @@ public final class SettingsScreen extends Screen {
 		waypoints.slider("waypoint_size_map", nearestIndex(pinSizes, s.waypointMapSize), pinSizes.length, i -> s.waypointMapSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));
 		waypoints.slider("waypoint_size_world", nearestIndex(pinSizes, s.waypointWorldSize), pinSizes.length, i -> s.waypointWorldSize = pinSizes[i], i -> Component.literal(pinSizes[i] + "%"));
 		waypoints.lastThreeSideBySide();
+		// The whole row, so a long command shows in full.
 		waypoints.open("teleport_command", Component.literal("/" + s.teleportCommand), () -> this.minecraft.gui.setScreen(new TeleportCommandScreen(this)));
-		// Beside the command: the tab has no room for another row.
-		int worldOpacities = (Settings.MAX_OPACITY - Settings.MIN_OPACITY) / Settings.OPACITY_STEP + 1;
-		waypoints.slider("waypoint_opacity", (Settings.snapOpacity(s.waypointWorldOpacity) - Settings.MIN_OPACITY) / Settings.OPACITY_STEP, worldOpacities,
-			i -> s.waypointWorldOpacity = Settings.MIN_OPACITY + i * Settings.OPACITY_STEP, i -> Component.literal((Settings.MIN_OPACITY + i * Settings.OPACITY_STEP) + "%"));
-		waypoints.lastTwoSideBySide(TEXT_SLIDER);
 
 		SettingsTab look = new SettingsTab("diorama.settings.look");
 		look.toggle("outlines", () -> s.outlines, v -> s.outlines = v);
@@ -270,7 +301,11 @@ public final class SettingsScreen extends Screen {
 		this.tabBar = this.addWidget(bar);
 		this.addRenderableWidget(Button.builder(Component.translatable("gui.done"), b -> this.onClose())
 			.bounds(this.side / 2 - 100, this.height - 26, 200, 20).build());
-		this.tabManager.setTabArea(new ScreenRectangle(0, TAB_BAR_HEIGHT, this.side, this.listBottom() - TAB_BAR_HEIGHT));
+		this.tabArea = new ScreenRectangle(0, TAB_BAR_HEIGHT, this.side, this.listBottom() - TAB_BAR_HEIGHT);
+		this.tabManager.setTabArea(this.tabArea);
+		if (selected < tabs.size() && tabs.get(selected) instanceof SettingsTab shown) {
+			shown.scroll = keptScroll;
+		}
 		bar.selectTab(selected, false);
 	}
 
@@ -333,21 +368,144 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
-	/** The settings in one tab: checkboxes two to a row, then buttons and sliders the full width, or two to a row. */
+	/** How far down the shown tab is scrolled, and how far it can go. For tests. */
+	public int scroll() {
+		return this.tabManager.getCurrentTab() instanceof SettingsTab tab ? tab.scroll : 0;
+	}
+
+	public int maxScroll() {
+		return this.tabManager.getCurrentTab() instanceof SettingsTab tab ? tab.maxScroll() : 0;
+	}
+
+	/** The shown tab's widgets, in the order they're laid out. For tests. */
+	public List<AbstractWidget> tabWidgets() {
+		return List.copyOf(this.tabWidgets);
+	}
+
+	/** The part of the screen the tabs show in, which they're cut off at. */
+	public @Nullable ScreenRectangle tabArea() {
+		return this.tabArea;
+	}
+
+	/**
+	 * Scrolls the shown tab just far enough for the whole widget to show, as vanilla's lists do for
+	 * the one the keyboard moves to. Tests click through this too, as a player scrolls to a setting.
+	 */
+	public void reveal(AbstractWidget widget) {
+		if (!(this.tabManager.getCurrentTab() instanceof SettingsTab tab) || tab.area == null || !this.tabWidgets.contains(widget)) {
+			return;
+		}
+		int top = tab.area.top() + 4;
+		int bottom = tab.area.bottom() - 4;
+		if (widget.getY() < top) {
+			tab.scrollTo(tab.scroll - (top - widget.getY()));
+		} else if (widget.getBottom() > bottom) {
+			tab.scrollTo(tab.scroll + Math.min(widget.getBottom() - bottom, widget.getY() - top));
+		}
+	}
+
+	private void addTabWidget(AbstractWidget widget) {
+		this.tabWidgets.add(widget);
+		this.addWidget(widget);
+	}
+
+	/** A tab's widget leaving with it: the tab starts at the top again when it's next picked. */
+	private void removeTabWidget(AbstractWidget widget) {
+		this.tabWidgets.remove(widget);
+		this.removeWidget(widget);
+		if (this.tabManager.getCurrentTab() instanceof SettingsTab tab) {
+			tab.scroll = 0;
+		}
+	}
+
+	private static boolean inside(@Nullable ScreenRectangle area, double x, double y) {
+		return area != null && x >= area.left() && x < area.right() && y >= area.top() && y < area.bottom();
+	}
+
+	/**
+	 * A mouse event, with the tab's widgets kept out of it where they're cut off: a click above or
+	 * below the tab's area never reaches a widget scrolled under the tab bar or Done.
+	 */
+	private boolean clipped(double x, double y, BooleanSupplier event) {
+		if (inside(this.tabArea, x, y)) {
+			return event.getAsBoolean();
+		}
+		List<AbstractWidget> hidden = new ArrayList<>();
+		for (AbstractWidget widget : this.tabWidgets) {
+			if (widget.visible && x >= widget.getX() && x < widget.getRight() && y >= widget.getY() && y < widget.getBottom()) {
+				widget.visible = false;
+				hidden.add(widget);
+			}
+		}
+		try {
+			return event.getAsBoolean();
+		} finally {
+			hidden.forEach(widget -> widget.visible = true);
+		}
+	}
+
+	/** A left click on the scrollbar takes hold of it, and moves the tab to where it was clicked. */
+	private boolean grabScrollbar(double x, double y) {
+		if (this.tabManager.getCurrentTab() instanceof SettingsTab tab && tab.barX >= 0 && tab.area != null
+			&& x >= tab.barX && x < tab.barX + ScreenArt.SCROLLBAR_WIDTH && y >= tab.area.top() && y < tab.area.bottom()) {
+			this.draggingScrollbar = true;
+			this.dragScrollbar(y);
+			return true;
+		}
+		return false;
+	}
+
+	/** The scrollbar's handle follows the mouse, its middle on it, while it's held. */
+	private boolean dragScrollbar(double y) {
+		if (!this.draggingScrollbar || !(this.tabManager.getCurrentTab() instanceof SettingsTab tab) || tab.area == null) {
+			return false;
+		}
+		int handle = tab.handle();
+		int track = tab.area.height() - handle;
+		double along = track <= 0 ? 0 : (y - tab.area.top() - handle / 2.0) / track;
+		tab.scrollTo((int) Math.round(along * tab.maxScroll()));
+		return true;
+	}
+
+	/** The wheel over the settings side scrolls the shown tab, wherever the pointer is on it. */
+	private boolean wheel(double x, double y, double amount) {
+		if (x < this.side && inside(this.tabArea, x, y) && this.tabManager.getCurrentTab() instanceof SettingsTab tab && tab.maxScroll() > 0) {
+			tab.scrollTo(tab.scroll - (int) Math.round(amount * WHEEL_STEP));
+			return true;
+		}
+		return false;
+	}
+
+	@Override
+	public void setFocused(@Nullable GuiEventListener focused) {
+		super.setFocused(focused);
+		// Moved to with Tab or the arrow keys: scrolled to, as vanilla's lists do.
+		if (focused instanceof AbstractWidget widget && this.minecraft != null && this.minecraft.getLastInputType().isKeyboard()) {
+			this.reveal(widget);
+		}
+	}
+
+	/**
+	 * The settings in one tab: checkboxes two to a row, then buttons and sliders the full width, or
+	 * two or three to a row. Scrolls when it's taller than its area.
+	 */
 	private final class SettingsTab extends GridLayoutTab {
 		private final List<AbstractWidget> checkboxes = new ArrayList<>();
 		private final List<AbstractWidget> wide = new ArrayList<>();
 		/** Wide widgets that share a row with the one after them. */
 		private final java.util.Set<AbstractWidget> pairedWithNext = new java.util.HashSet<>();
 		private final java.util.Set<AbstractWidget> tripled = new java.util.HashSet<>();
-		/** The second of a pair that isn't half the row: its width. */
-		private final java.util.Map<AbstractWidget, Integer> narrow = new java.util.HashMap<>();
 		private final java.util.Set<AbstractWidget> headings = new java.util.HashSet<>();
 		/** Whether the tab says which of its settings the server sets. */
 		private boolean serverNoted;
 		/** The line saying which addon hides the minimap: there with an addon installed, shown while one does. */
 		private @Nullable StringWidget addonNote;
 		private @Nullable ScreenRectangle area;
+		/** How far down the tab is scrolled, and how tall it is, its margins included. */
+		private int scroll;
+		private int contentHeight;
+		/** The scrollbar's left edge, or -1 while the whole tab fits. */
+		private int barX = -1;
 
 		SettingsTab(String key) {
 			super(Component.translatable(key));
@@ -362,9 +520,8 @@ public final class SettingsScreen extends Screen {
 		 * The player's own setting stays as saved, for when they leave.
 		 */
 		void toggle(String key, BooleanSupplier get, Consumer<Boolean> set, @Nullable Boolean serverSet) {
-			int column = (CONTENT - COLUMN_GAP) / 2;
 			boolean shown = serverSet != null ? serverSet : get.getAsBoolean();
-			Checkbox checkbox = checkbox(Component.translatable("diorama.settings." + key), SettingsScreen.this.font, shown, column, set);
+			Checkbox checkbox = checkbox(Component.translatable("diorama.settings." + key), SettingsScreen.this.font, shown, CHECK_COLUMN, set);
 			// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
 			checkbox.setTooltip(serverSet == null ? tooltip(key) : Tooltip.create(Component.empty().append(serverSetLine(false)).append("\n\n")
 				.append(Component.translatable("diorama.settings." + key + ".tooltip"))));
@@ -406,6 +563,11 @@ public final class SettingsScreen extends Screen {
 			this.wide.add(Button.builder(label(label, value), b -> press.run()).size(CONTENT, 20).tooltip(tooltip(key)).build());
 		}
 
+		/** A button that opens a screen of settings, named for them ("New waypoints..."), as vanilla's Controls... is. */
+		void open(String key, Runnable press) {
+			this.wide.add(Button.builder(Component.translatable("diorama.settings." + key), b -> press.run()).size(CONTENT, 20).tooltip(tooltip(key)).build());
+		}
+
 		void slider(String key, int index, int count, IntConsumer set, IntFunction<Component> name) {
 			StepSlider slider = new StepSlider(Component.translatable("diorama.settings." + key), index, count, set, name);
 			slider.setTooltip(tooltip(key));
@@ -414,12 +576,6 @@ public final class SettingsScreen extends Screen {
 
 		void lastTwoSideBySide() {
 			this.pairedWithNext.add(this.wide.get(this.wide.size() - 2));
-		}
-
-		/** The same, the second {@code width} wide and the first with the rest of the row. */
-		void lastTwoSideBySide(int width) {
-			this.lastTwoSideBySide();
-			this.narrow.put(this.wide.get(this.wide.size() - 1), width);
 		}
 
 		void lastThreeSideBySide() {
@@ -473,29 +629,57 @@ public final class SettingsScreen extends Screen {
 		@Override
 		public void doLayout(ScreenRectangle area) {
 			this.area = area;
+			// Centred while it all fits; scrolling, a little narrower, with the scrollbar beside it.
 			int content = Math.min(CONTENT, area.width() - 10);
+			this.contentHeight = this.place(area.left() + (area.width() - content) / 2, content, area.top());
+			if (this.contentHeight <= area.height()) {
+				this.scroll = 0;
+				this.barX = -1;
+				return;
+			}
+			content = Math.min(CONTENT, area.width() - 10 - GUTTER);
+			int left = area.left() + (area.width() - GUTTER - content) / 2;
+			this.scroll = Math.max(0, Math.min(this.scroll, this.maxScroll()));
+			this.place(left, content, area.top() - this.scroll);
+			this.barX = left + content + 4;
+		}
+
+		int maxScroll() {
+			return this.area == null ? 0 : Math.max(0, this.contentHeight - this.area.height());
+		}
+
+		void scrollTo(int scroll) {
+			int to = Math.max(0, Math.min(scroll, this.maxScroll()));
+			if (to != this.scroll && this.area != null) {
+				this.scroll = to;
+				this.doLayout(this.area);
+			}
+		}
+
+		/** The scrollbar handle's height: the share of the tab that shows, as vanilla's lists draw it. */
+		int handle() {
+			int track = this.area == null ? 0 : this.area.height();
+			return Math.max(ScreenArt.SCROLLER_MIN, Math.min(track - 8, track * track / Math.max(1, this.contentHeight)));
+		}
+
+		/** Places every widget from {@code top}, {@code content} wide from {@code left}; returns how tall the tab is. */
+		private int place(int left, int content, int top) {
 			int column = (content - COLUMN_GAP) / 2;
-			int left = area.left() + (area.width() - content) / 2;
-			int rows = this.wide.size() - this.pairedWithNext.size() - this.tripled.size() * 2 - this.headings.size();
-			int checkRows = (this.checkboxes.size() + 1) / 2;
-			// The addon line takes no room while it isn't shown.
-			int headings = this.headings.size() - (this.addonNote != null && !this.addonNote.visible ? 1 : 0);
-			// On a small window, closer together rather than into the buttons below.
-			boolean tight = 22 + checkRows * 22 + rows * 24 + headings * HEADING > area.height();
-			int rowStep = tight ? 22 : 24;
-			int y = area.top() + (tight ? 6 : 12);
+			int y = top + TOP;
 			for (int i = 0; i < this.checkboxes.size(); i++) {
-				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * (tight ? 20 : 22));
+				this.checkboxes.get(i).setPosition(left + (i % 2) * (column + COLUMN_GAP), y + (i / 2) * CHECK_ROW);
 			}
 			if (!this.checkboxes.isEmpty()) {
-				y += checkRows * (tight ? 20 : 22) + (tight ? 3 : 10);
+				y += (this.checkboxes.size() + 1) / 2 * CHECK_ROW + AFTER_CHECKS;
 			}
 			for (int i = 0; i < this.wide.size(); i++) {
 				AbstractWidget widget = this.wide.get(i);
 				if (this.headings.contains(widget)) {
+					// The addon line takes no room while it isn't shown.
 					if (!widget.visible) {
 						continue;
 					}
+					y += HEADING_GAP;
 					widget.setPosition(left, y);
 					widget.setWidth(content);
 					y += HEADING;
@@ -512,18 +696,17 @@ public final class SettingsScreen extends Screen {
 				} else if (this.pairedWithNext.contains(widget) && i + 1 < this.wide.size()) {
 					AbstractWidget next = this.wide.get(++i);
 					int half = (content - 4) / 2;
-					int second = Math.min(half, this.narrow.getOrDefault(next, half));
 					widget.setPosition(left, y);
-					// Halves as they've always been; the first only takes the rest beside a narrow second.
-					widget.setWidth(second == half ? half : content - 4 - second);
-					next.setPosition(left + content - second, y);
-					next.setWidth(second);
+					widget.setWidth(half);
+					next.setPosition(left + content - half, y);
+					next.setWidth(half);
 				} else {
 					widget.setPosition(left, y);
 					widget.setWidth(content);
 				}
-				y += rowStep;
+				y += ROW;
 			}
+			return y + BOTTOM - top;
 		}
 	}
 
@@ -693,26 +876,48 @@ public final class SettingsScreen extends Screen {
 		}
 	}
 
-	/** A checkbox no wider than {@code maxWidth} that saves the settings after telling {@code set} its new value. */
+	/**
+	 * A checkbox no wider than {@code maxWidth}, label and all, that saves the settings after telling
+	 * {@code set} its new value. A label too long for that goes onto a second line.
+	 */
 	static Checkbox checkbox(Component label, net.minecraft.client.gui.Font font, boolean selected, int maxWidth, Consumer<Boolean> set) {
 		//? if >=1.21 {
-		return Checkbox.builder(label, font)
+		// Vanilla wraps the label at the checkbox's whole width but draws it right of the box, so a
+		// long one ran that far past maxWidth: it wraps at what's left beside the box instead.
+		int beside = Checkbox.getBoxSize(font) + 4;
+		Checkbox checkbox = Checkbox.builder(label, font)
 			.selected(selected)
-			.maxWidth(maxWidth)
+			.maxWidth(Math.max(1, maxWidth - beside))
 			.onValueChange((box, value) -> {
 				set.accept(value);
 				Settings.get().save();
 			})
 			.build();
+		// Clicked anywhere on the label, as wide as it's drawn.
+		checkbox.setWidth(Math.min(beside + font.width(label), maxWidth));
+		return checkbox;
 		//?} else {
 		/*// 1.20.1's checkbox has no builder and tells no one it changed. It's a 20 pixel box with
-		// the label 4 pixels right of it, as wide as both, and no wider than the column.
-		return new Checkbox(0, 0, Math.min(24 + font.width(label), maxWidth), 20, label, selected) {
+		// the label 4 pixels right of it, as wide as both, and no wider than the column. It draws
+		// its label on one line whatever its width, so a long one is drawn here, wrapped.
+		java.util.List<net.minecraft.util.FormattedCharSequence> lines = font.split(label, Math.max(1, maxWidth - 24));
+		return new Checkbox(0, 0, Math.min(24 + font.width(label), maxWidth), 20, label, selected, false) {
 			@Override
 			public void onPress() {
 				super.onPress();
 				set.accept(this.selected());
 				Settings.get().save();
+			}
+
+			@Override
+			public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float a) {
+				super.renderWidget(graphics, mouseX, mouseY, a);
+				int color = 0xE0E0E0 | net.minecraft.util.Mth.ceil(this.alpha * 255.0F) << 24;
+				int y = this.getY() + (this.height - lines.size() * font.lineHeight) / 2 + 1;
+				for (net.minecraft.util.FormattedCharSequence line : lines) {
+					graphics.drawString(font, line, this.getX() + 24, y, color);
+					y += font.lineHeight;
+				}
 			}
 		};
 		*///?}
@@ -805,12 +1010,83 @@ public final class SettingsScreen extends Screen {
 		/*this.drawBackground(graphics);
 		*///?}
 		super.extractRenderState(graphics, mouseX, mouseY, a);
+		ScreenRectangle area = this.tabArea;
+		if (area != null) {
+			// The tab, cut off at its area. Away from the area the pointer is over none of it, so a
+			// widget scrolled out of sight shows no highlight or tooltip.
+			boolean over = inside(area, mouseX, mouseY);
+			int x = over ? mouseX : -1;
+			int y = over ? mouseY : -1;
+			graphics.enableScissor(area.left(), area.top(), area.right(), area.bottom());
+			for (AbstractWidget widget : this.tabWidgets) {
+				widget.extractRenderState(graphics, x, y, a);
+			}
+			graphics.disableScissor();
+			if (this.tabManager.getCurrentTab() instanceof SettingsTab tab && tab.barX >= 0) {
+				int handle = tab.handle();
+				int max = tab.maxScroll();
+				ScreenArt.scrollbar(graphics, tab.barX, area.top(), area.bottom(), handle, max == 0 ? 0 : (area.height() - handle) * tab.scroll / max);
+			}
+		}
 		if (this.tabBar != null) {
 			graphics.enableScissor(0, 0, this.side, TAB_BAR_HEIGHT);
 			this.tabBar.extractRenderState(graphics, mouseX, mouseY, a);
 			graphics.disableScissor();
 		}
 	}
+
+	// The mouse wheel had only the one axis on 1.20.1.
+	@Override
+	//? if >=1.21 {
+	public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
+		return this.wheel(x, y, scrollY) || super.mouseScrolled(x, y, scrollX, scrollY);
+	}
+	//?} else {
+	/*public boolean mouseScrolled(double x, double y, double scrollY) {
+		return this.wheel(x, y, scrollY) || super.mouseScrolled(x, y, scrollY);
+	}
+	*///?}
+
+	// Mouse events came as separate numbers before 1.21.9.
+	//? if >=1.21.9 {
+	@Override
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (event.button() == 0 && this.grabScrollbar(event.x(), event.y())) {
+			return true;
+		}
+		return this.clipped(event.x(), event.y(), () -> super.mouseClicked(event, doubleClick));
+	}
+
+	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		return this.dragScrollbar(event.y()) || super.mouseDragged(event, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		this.draggingScrollbar = false;
+		return super.mouseReleased(event);
+	}
+	//?} else {
+	/*@Override
+	public boolean mouseClicked(double x, double y, int button) {
+		if (button == 0 && this.grabScrollbar(x, y)) {
+			return true;
+		}
+		return this.clipped(x, y, () -> super.mouseClicked(x, y, button));
+	}
+
+	@Override
+	public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
+		return this.dragScrollbar(y) || super.mouseDragged(x, y, button, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(double x, double y, int button) {
+		this.draggingScrollbar = false;
+		return super.mouseReleased(x, y, button);
+	}
+	*///?}
 
 	// Ctrl+Tab and Ctrl+1 to 5 switch tabs, as in vanilla's tabbed screens, whatever has focus.
 	//? if >=1.21.9 {

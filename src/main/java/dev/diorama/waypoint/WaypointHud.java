@@ -77,7 +77,7 @@ public final class WaypointHud implements HudElement {
 			this.beams.begin(mc.level, eye, width, height, z, opacity);
 			try {
 				for (Waypoint waypoint : waypoints) {
-					if (WaypointBeams.has(waypoint, beamsShown) && WaypointStore.isShown(waypoint) && WaypointStore.inWorld(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
+					if (WaypointBeams.has(waypoint, beamsShown) && store.shownOn(waypoint, Waypoint.Surface.WORLD) && WaypointStore.inWorld(waypoint) && WaypointStore.isNear(waypoint, viewer)) {
 						this.beams.add(waypoint);
 					}
 				}
@@ -87,7 +87,7 @@ public final class WaypointHud implements HudElement {
 			}
 		}
 		for (Waypoint waypoint : waypoints) {
-			if (!WaypointStore.isShown(waypoint) || !WaypointStore.inWorld(waypoint) || !WaypointStore.isNear(waypoint, viewer)) {
+			if (!store.shownOn(waypoint, Waypoint.Surface.WORLD) || !WaypointStore.inWorld(waypoint) || !WaypointStore.isNear(waypoint, viewer)) {
 				continue;
 			}
 			double dx = waypoint.x + 0.5 - eye.x;

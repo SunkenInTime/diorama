@@ -184,6 +184,12 @@ final class ShimInput implements TestInput {
 	}
 
 	@Override
+	public void scroll(double amount) {
+		ShimThreading.checkOnTestThread("scroll");
+		context.runOnClient(minecraft -> mouse(minecraft).diorama$onScroll(window(minecraft), 0, amount));
+	}
+
+	@Override
 	public void resizeWindow(int width, int height) {
 		ShimThreading.checkOnTestThread("resizeWindow");
 		if (width <= 0 || height <= 0) {

@@ -240,6 +240,7 @@ final class ServerLocksTest {
 					if (widget.active == locked) {
 						throw new AssertionError(label + " is " + (widget.active ? "" : "not ") + "active with " + (locked ? "" : "no ") + "lock (" + name + ")");
 					}
+					DioramaClientTest.revealSetting(mc, widget);
 					double scale = mc.getWindow().getGuiScale();
 					return new double[] {(widget.getX() + 8) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 				}

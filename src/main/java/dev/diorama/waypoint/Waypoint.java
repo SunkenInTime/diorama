@@ -67,7 +67,21 @@ public final class Waypoint {
 	/** Dimension id, e.g. {@code minecraft:overworld}. */
 	public String dimension = "minecraft:overworld";
 	public int color = PALETTE[0];
+	/**
+	 * Whether it shows at all: the list's Hide and Show, Xaero's Minimap's disabled flag, and what
+	 * addons read as visible. Where it shows while it does is {@link #showInWorld},
+	 * {@link #showOnMinimap} and {@link #showOnMap}.
+	 */
 	public boolean visible = true;
+	/**
+	 * Where it shows while it's {@link #visible}, each of the three places on its own. At least one
+	 * is always on: unticking all three in the editor hides the waypoint instead
+	 * ({@link #setShownOn}), so Show brings it back where it was. A file from before these were
+	 * saved has none of them, which reads as all three on.
+	 */
+	public boolean showInWorld = true;
+	public boolean showOnMinimap = true;
+	public boolean showOnMap = true;
 	/** The custom folder it's in, or empty for its dimension's own folder. See {@link WaypointStore#folderKey}. */
 	public String folder = "";
 	public Kind kind = Kind.MANUAL;
@@ -124,6 +138,9 @@ public final class Waypoint {
 		int alpha = this.color >>> 24 == 0 ? 0xFF : this.color >>> 24;
 		copy.color = Math.max(1, alpha * 3 / 5) << 24 | this.color & 0xFFFFFF;
 		copy.visible = this.visible;
+		copy.showInWorld = this.showInWorld;
+		copy.showOnMinimap = this.showOnMinimap;
+		copy.showOnMap = this.showOnMap;
 		copy.folder = this.folder;
 		copy.kind = this.kind;
 		copy.created = this.created;
@@ -132,6 +149,56 @@ public final class Waypoint {
 		copy.edited = this.edited;
 		copy.original = this;
 		return copy;
+	}
+
+	/** The three places a waypoint can show: in the world, on the minimap, on the full map. */
+	public enum Surface {
+		WORLD,
+		MINIMAP,
+		MAP
+	}
+
+	/** Whether it's set to show on {@code surface} while it's {@link #visible}. */
+	public boolean showsOn(Surface surface) {
+		return switch (surface) {
+			case WORLD -> this.showInWorld;
+			case MINIMAP -> this.showOnMinimap;
+			case MAP -> this.showOnMap;
+		};
+	}
+
+	/**
+	 * Where it shows, as the editor's three boxes set it: on the places ticked. With none ticked it's
+	 * hidden, as Hide in the list hides it, and keeps the places it had, so Show puts it back there.
+	 */
+	public void setShownOn(boolean world, boolean minimap, boolean map) {
+		if (world || minimap || map) {
+			this.visible = true;
+			this.showInWorld = world;
+			this.showOnMinimap = minimap;
+			this.showOnMap = map;
+		} else {
+			this.visible = false;
+		}
+	}
+
+	/** Takes where new waypoints show from the settings ({@link dev.diorama.Settings#newWaypointInWorld} and the rest). */
+	public void showAsNew() {
+		dev.diorama.Settings settings = dev.diorama.Settings.get();
+		this.showInWorld = true;
+		this.showOnMinimap = true;
+		this.showOnMap = true;
+		this.setShownOn(settings.newWaypointInWorld, settings.newWaypointOnMinimap, settings.newWaypointOnMap);
+	}
+
+	/** A file edited by hand can turn all three places off: that's hidden, and Show brings it back everywhere. */
+	void normaliseShownOn() {
+		if (!this.showInWorld && !this.showOnMinimap && !this.showOnMap) {
+			this.visible = false;
+			this.showInWorld = true;
+			this.showOnMinimap = true;
+			this.showOnMap = true;
+		}
 	}
 
 	/** Whether the player can edit or delete it here: everything but waystones, which Waystones owns. */

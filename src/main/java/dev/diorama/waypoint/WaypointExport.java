@@ -55,6 +55,14 @@ public final class WaypointExport {
 	static final int NORMAL = 0;
 	static final int DEATH = 1;
 	static final int OLD_DEATH = 2;
+	/**
+	 * Xaero's visibility types: Local (0), shown in the world and on the minimap within the waypoint
+	 * distance, and World Map Local (2), shown on its world map alone; plus {@link #GLOBAL} for
+	 * either at any distance, Global (1) and World Map Global (3). {@link XaeroImport} reads all four.
+	 */
+	static final int LOCAL = 0;
+	static final int GLOBAL = 1;
+	static final int MAP_ONLY = 2;
 	/** The folder in a singleplayer export with a world folder for each map not in use. */
 	private static final String OTHER_MAPS = "Other maps";
 
@@ -264,13 +272,19 @@ public final class WaypointExport {
 	/**
 	 * A waypoint's line, {@code waypoint:name:initials:x:y:z:colour:disabled:type:set:rotate_on_tp:tp_yaw:visibility_type:destination},
 	 * with the name the player sees: an automatic pin's in their language, a death's with its date,
-	 * since the format has no other place for it. The rest are Xaero's defaults.
+	 * since the format has no other place for it. One shown on the map alone is Xaero's World Map
+	 * Local visibility ({@link #MAP_ONLY}), kept out of the world and the minimap there too; Xaero's
+	 * shows every other one in both and on its map, having no switch for each on its own. Deaths,
+	 * beds and temporary pins show at any distance ({@link WaypointStore#isNear}), Xaero's Global
+	 * types, as Xaero's reads its own death points. The rest are Xaero's defaults.
 	 */
 	static String line(Waypoint waypoint, int type, String set, boolean disabled) {
 		String name = WaypointShare.chatSafe(waypoint.shownName()).trim();
+		boolean global = waypoint.kind == Waypoint.Kind.DEATH || waypoint.kind == Waypoint.Kind.BED || waypoint.kind == Waypoint.Kind.TEMPORARY;
+		int visibility = (!waypoint.showInWorld && !waypoint.showOnMinimap && waypoint.showOnMap ? MAP_ONLY : LOCAL) + (global ? GLOBAL : 0);
 		return "waypoint:" + safe(name.isEmpty() ? "Waypoint" : name) + ":" + safe(WaypointShare.chatSafe(waypoint.label())) + ":"
 			+ waypoint.x + ":" + waypoint.y + ":" + waypoint.z + ":" + colorIndex(waypoint.color) + ":" + disabled + ":" + type + ":" + set
-			+ ":false:0:0:false";
+			+ ":false:0:" + visibility + ":false";
 	}
 
 	/** Xaero's escape for the colons that would split a field. */

@@ -42,7 +42,8 @@ final class WaypointExportTest {
 	private static final String OLD = "Old";
 
 	/** What a waypoint was when exported: what the files should carry. */
-	private record Expected(String name, String initials, int x, int y, int z, String dimension, int color, boolean shown, boolean death, String set) {
+	/** {@code mapOnly}: shown on the map alone, which Xaero's calls the World Map Local visibility type. */
+	private record Expected(String name, String initials, int x, int y, int z, String dimension, int color, boolean shown, boolean death, String set, boolean mapOnly) {
 	}
 
 	private WaypointExportTest() {
@@ -88,6 +89,11 @@ final class WaypointExportTest {
 			}
 			if (!fields[8].equals(e.death() ? "1" : "0")) {
 				throw new AssertionError(e.name() + " should be of type " + (e.death() ? 1 : 0) + ": " + line);
+			}
+			// Xaero's Local or World Map Local, a death Global or World Map Global: shown at any distance.
+			int visibility = (e.mapOnly() ? 2 : 0) + (e.death() ? 1 : 0);
+			if (fields.length != 14 || !fields[12].equals(Integer.toString(visibility))) {
+				throw new AssertionError(e.name() + " should have visibility type " + visibility + ": " + line);
 			}
 		}
 
@@ -380,7 +386,7 @@ final class WaypointExportTest {
 	 */
 	static void readByXaero(ClientGameTestContext context) {
 		context.waitFor(mc -> XaeroRealTest.xaeroWorld() != null, 1200);
-		// Each of Xaero's worlds here by its node: set|name|initials|x|y|z|colour|disabled|type for its waypoints.
+		// Each of Xaero's worlds here by its node: set|name|initials|x|y|z|colour|disabled|type|visibility for its waypoints.
 		Map<String, List<String>> worlds = context.computeOnClient(mc -> xaeroWorlds());
 		String opened = context.computeOnClient(mc -> xaeroNode(XaeroRealTest.xaeroWorld()));
 		dev.diorama.Diorama.LOGGER.info("waypoint-export-xaero: Xaero's Minimap opened {} and has {}", opened, worlds);
@@ -427,7 +433,7 @@ final class WaypointExportTest {
 			if (line.startsWith("waypoint:")) {
 				String[] f = line.split(":");
 				out.add(f[9] + "|" + f[1].replace("§§", ":") + "|" + f[2].replace("§§", ":") + "|" + f[3] + "|" + f[4] + "|" + f[5]
-					+ "|" + f[6] + "|" + f[7] + "|" + f[8]);
+					+ "|" + f[6] + "|" + f[7] + "|" + f[8] + "|" + f[12]);
 			}
 		}
 		return out;
@@ -466,7 +472,7 @@ final class WaypointExportTest {
 					out.add(setName + "|" + c.getMethod("getName").invoke(w) + "|" + c.getMethod("getInitials").invoke(w)
 						+ "|" + c.getMethod("getX").invoke(w) + "|" + c.getMethod("getY").invoke(w) + "|" + c.getMethod("getZ").invoke(w)
 						+ "|" + ((Enum<?>) c.getMethod("getWaypointColor").invoke(w)).ordinal() + "|" + c.getMethod("isDisabled").invoke(w)
-						+ "|" + c.getMethod("getWaypointType").invoke(w));
+						+ "|" + c.getMethod("getWaypointType").invoke(w) + "|" + c.getMethod("getVisibilityType").invoke(w));
 				}
 			}
 			return out;
@@ -513,6 +519,11 @@ final class WaypointExportTest {
 			Waypoint secret = new Waypoint("Secret", home.getX() - 90, 70, home.getZ() + 30, OVERWORLD, Waypoint.PALETTE[6]);
 			secret.visible = false;
 			made.add(secret);
+			// Kept to the map: Xaero's World Map visibility type, out of the world and off the minimap.
+			Waypoint lookout = new Waypoint("Lookout", home.getX() - 40, 90, home.getZ() - 70, OVERWORLD, Waypoint.PALETTE[3]);
+			lookout.showInWorld = false;
+			lookout.showOnMinimap = false;
+			made.add(lookout);
 			Waypoint camp = new Waypoint("Old camp", home.getX() + 15, 64, home.getZ() + 200, OVERWORLD, Waypoint.PALETTE[14]);
 			camp.folder = OLD;
 			made.add(camp);
@@ -571,7 +582,7 @@ final class WaypointExportTest {
 	private static Expected expect(WaypointStore store, Waypoint w) {
 		String folder = store.folderName(w.folder);
 		return new Expected(w.shownName(), w.label(), w.x, w.y, w.z, w.dimension, w.color, store.shown(w), w.kind == Waypoint.Kind.DEATH,
-			folder == null ? "gui.xaero_default" : folder.replace(':', '-'));
+			folder == null ? "gui.xaero_default" : folder.replace(':', '-'), !w.showInWorld && !w.showOnMinimap && w.showOnMap);
 	}
 
 	/** Every expected waypoint is there once, as it was, and nothing else is. */
@@ -598,6 +609,10 @@ final class WaypointExportTest {
 			}
 			if (w.visible != e.shown()) {
 				wrong.add(w.visible ? "shown, though hidden" : "hidden, though shown");
+			}
+			if (w.showInWorld == e.mapOnly() || w.showOnMinimap == e.mapOnly() || !w.showOnMap) {
+				wrong.add("shown in the world " + w.showInWorld + ", on the minimap " + w.showOnMinimap + ", on the map " + w.showOnMap
+					+ (e.mapOnly() ? " for the map alone" : " for everywhere"));
 			}
 			if ((w.kind == Waypoint.Kind.DEATH) != e.death()) {
 				wrong.add("kind " + w.kind);

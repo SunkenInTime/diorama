@@ -23,7 +23,9 @@ import net.minecraft.world.entity.Entity;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Creates or edits one waypoint: name, initials, position, colour, folder and whether it shows. A
+ * Creates or edits one waypoint: name, initials, position, colour, folder and where it shows (in
+ * the world, on the minimap, on the map, each on its own; Xaero's Minimap has only one switch for
+ * the world and the minimap together, its visibility type, beside its disabled flag). A
  * preview on the right stands its pin on the piece of the map where it is, in its own dimension, as
  * the map will draw it, and follows the position, colour and initials as they change; the folder,
  * Share in chat and Teleport sit under it. The footer is only
@@ -45,6 +47,8 @@ public final class WaypointEditScreen extends Screen {
 	private static final int LABEL = 0xFFA0A0A0;
 	/** The most characters a waypoint name can have. */
 	private static final int MAX_NAME = 32;
+	/** The Visibility boxes' row, under their caption, which sits 11 above it as the other captions do. */
+	private static final int VISIBILITY_Y = 168;
 
 	private final @Nullable Screen parent;
 	private final Waypoint waypoint;
@@ -61,7 +65,10 @@ public final class WaypointEditScreen extends Screen {
 	private @Nullable Button share;
 	private @Nullable Button teleport;
 	private int color;
-	private boolean visible;
+	/** The three Visibility boxes: in the world, on the minimap, on the map. All three unticked is hidden. */
+	private boolean inWorld;
+	private boolean onMinimap;
+	private boolean onMap;
 	private EditBox hex;
 	private int swatchX;
 	private int swatchY;
@@ -88,7 +95,8 @@ public final class WaypointEditScreen extends Screen {
 	 */
 	private final Opened opened;
 
-	private record Opened(String name, String shownName, String initials, String dimension, int x, int y, int z, int color, boolean visible, String icon, String folder) {
+	private record Opened(String name, String shownName, String initials, String dimension, int x, int y, int z, int color, boolean inWorld, boolean onMinimap,
+		boolean onMap, String icon, String folder) {
 	}
 
 	public WaypointEditScreen(@Nullable Screen parent, Waypoint waypoint, boolean isNew) {
@@ -96,14 +104,21 @@ public final class WaypointEditScreen extends Screen {
 		this.parent = parent;
 		this.waypoint = waypoint;
 		this.isNew = isNew;
+		if (isNew && waypoint.kind == Waypoint.Kind.MANUAL) {
+			// One the player is making: it starts where the Waypoints tab says new ones show.
+			waypoint.showAsNew();
+		}
 		this.color = waypoint.color;
-		this.visible = waypoint.visible;
+		// A hidden waypoint shows no box ticked: what's ticked is where it shows now.
+		this.inWorld = waypoint.visible && waypoint.showInWorld;
+		this.onMinimap = waypoint.visible && waypoint.showOnMinimap;
+		this.onMap = waypoint.visible && waypoint.showOnMap;
 		this.icon = waypoint.icon == null ? "" : waypoint.icon;
 		WaypointStore store = WaypointStore.get();
 		String known = store == null ? null : store.folderName(waypoint.folder);
 		this.folder = known == null ? "" : known;
-		this.opened = new Opened(waypoint.name, waypoint.shownName(), waypoint.initials, waypoint.dimension, waypoint.x, waypoint.y, waypoint.z, this.color, this.visible, this.icon,
-			this.folder);
+		this.opened = new Opened(waypoint.name, waypoint.shownName(), waypoint.initials, waypoint.dimension, waypoint.x, waypoint.y, waypoint.z, this.color,
+			this.inWorld, this.onMinimap, this.onMap, this.icon, this.folder);
 		this.matchBars();
 	}
 
@@ -149,24 +164,24 @@ public final class WaypointEditScreen extends Screen {
 		// Always a new colour, never close to the one shown.
 		this.addRenderableWidget(Button.builder(Component.translatable("diorama.waypoint.random"), b -> this.pick(WaypointColours.random(this.color)))
 			.bounds(left + 98, top + 132, FORM - 98, 20).build());
-		//? if >=1.21 {
-		this.addRenderableWidget(Checkbox.builder(Component.translatable("diorama.waypoint.show_on_maps"), this.font)
-			.pos(left, top + 157)
-			.selected(this.visible)
-			.onValueChange((box, value) -> this.visible = value)
-			.build());
-		//?} else {
-		/*// 1.20.1's checkbox has no builder and tells no one it changed: a 20 pixel box with the
-		// label 4 pixels right of it.
-		Component showOnMaps = Component.translatable("diorama.waypoint.show_on_maps");
-		this.addRenderableWidget(new Checkbox(left, top + 157, 24 + this.font.width(showOnMaps), 20, showOnMaps, this.visible) {
-			@Override
-			public void onPress() {
-				super.onPress();
-				WaypointEditScreen.this.visible = this.selected();
-			}
-		});
-		*///?}
+		// Where it shows, a box for each place, under their caption. None ticked hides it.
+		List<Checkbox> places = this.placeBoxes(FORM);
+		int span = 0;
+		for (Checkbox box : places) {
+			span += box.getWidth();
+		}
+		// Side by side with a gap, or in equal thirds, cut short, if a language's names don't fit so.
+		int gap = Math.min(12, (FORM - span) / 2);
+		if (gap < 4) {
+			gap = 2;
+			places = this.placeBoxes((FORM - 2 * gap) / 3);
+		}
+		int at = left;
+		for (Checkbox box : places) {
+			box.setPosition(at, top + VISIBILITY_Y);
+			at += box.getWidth() + gap;
+			this.addRenderableWidget(box);
+		}
 
 		// What to do with this place, under its preview. A new waypoint has none until it's saved.
 		int previewLeft = left + PREVIEW_LEFT;
@@ -193,6 +208,39 @@ public final class WaypointEditScreen extends Screen {
 			.bounds(left + WIDTH - half, top + 192, half, 20).build());
 		this.validate();
 		this.setInitialFocus(this.name);
+	}
+
+	/** The three Visibility boxes, each no wider than {@code maxWidth}, unplaced. */
+	private List<Checkbox> placeBoxes(int maxWidth) {
+		return List.of(
+			this.placeBox("in_world", this.inWorld, maxWidth, value -> this.inWorld = value),
+			this.placeBox("on_minimap", this.onMinimap, maxWidth, value -> this.onMinimap = value),
+			this.placeBox("on_map", this.onMap, maxWidth, value -> this.onMap = value));
+	}
+
+	/** One Visibility box, {@code diorama.waypoint.<key>}, its tooltip saying what it does in full. */
+	private Checkbox placeBox(String key, boolean selected, int maxWidth, java.util.function.Consumer<Boolean> set) {
+		Component label = Component.translatable("diorama.waypoint." + key);
+		//? if >=1.21 {
+		Checkbox box = Checkbox.builder(label, this.font)
+			.selected(selected)
+			.maxWidth(maxWidth)
+			.onValueChange((checkbox, value) -> set.accept(value))
+			.build();
+		//?} else {
+		/*// 1.20.1's checkbox has no builder and tells no one it changed: a 20 pixel box with the
+		// label 4 pixels right of it.
+		Checkbox box = new Checkbox(0, 0, Math.min(24 + this.font.width(label), maxWidth), 20, label, selected) {
+			@Override
+			public void onPress() {
+				super.onPress();
+				set.accept(this.selected());
+			}
+		};
+		*///?}
+		// Not through the builder: from 26.2 it keeps a tooltip only for a label too long to show.
+		box.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("diorama.waypoint." + key + ".tooltip")));
+		return box;
 	}
 
 	/** The icon's name cut to fit its narrow button. */
@@ -364,6 +412,7 @@ public final class WaypointEditScreen extends Screen {
 		graphics.text(this.font, Component.translatable("diorama.waypoint.icon"), left + 116, top + 5, LABEL, true);
 		graphics.text(this.font, Component.translatable("diorama.waypoint.initials"), left + 160, top + 5, LABEL, true);
 		graphics.text(this.font, Component.translatable("diorama.waypoint.position"), left, top + 45, LABEL, true);
+		graphics.text(this.font, Component.translatable("diorama.waypoint.visibility"), left, top + VISIBILITY_Y - 11, LABEL, true);
 		Component colourLabel = Component.translatable("diorama.waypoint.colour");
 		graphics.text(this.font, colourLabel, left, top + 81, LABEL, true);
 		WaypointColours.Swatch current = WaypointColours.named(this.color);
@@ -791,8 +840,9 @@ public final class WaypointEditScreen extends Screen {
 		if (all || !this.icon.equals(this.opened.icon())) {
 			this.waypoint.icon = this.icon;
 		}
-		if (all || this.visible != this.opened.visible()) {
-			this.waypoint.visible = this.visible;
+		// The three boxes go together: ticking one can show a hidden waypoint, unticking the last hides it.
+		if (all || this.inWorld != this.opened.inWorld() || this.onMinimap != this.opened.onMinimap() || this.onMap != this.opened.onMap()) {
+			this.waypoint.setShownOn(this.inWorld, this.onMinimap, this.onMap);
 		}
 		if (all || !this.folder.equals(this.opened.folder())) {
 			this.waypoint.folder = this.folder;

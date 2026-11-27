@@ -1099,8 +1099,9 @@ public final class WaypointListScreen extends Screen {
 					detail = this.folderName(key) + " · " + detail;
 				}
 			}
-			if (!waypoint.visible) {
-				detail += "  ·  " + Component.translatable("diorama.waypoint.hidden").getString();
+			String places = places(waypoint);
+			if (places != null) {
+				detail += "  ·  " + Component.translatable(places).getString();
 			}
 			String shownDetail = this.fit(detail, room);
 			graphics.text(this.font, shownDetail, left + textLeft, y + 14, DETAIL, true);
@@ -1122,6 +1123,24 @@ public final class WaypointListScreen extends Screen {
 		// Under the list, like the line under the map: nothing else says several rows can be selected.
 		String hint = Component.translatable("diorama.waypoints.select_hint", MAC ? "Cmd" : "Ctrl").getString();
 		graphics.centeredText(this.font, Component.literal(this.fit(hint, this.width - 8)), cx, this.hintY, HINT);
+	}
+
+	/**
+	 * What a row says about where its waypoint shows, as a translation key: Hidden, the one place it
+	 * shows ("Map only") or the one it doesn't ("Not in the world"); null when it shows everywhere.
+	 */
+	public static @Nullable String places(Waypoint waypoint) {
+		if (!waypoint.visible) {
+			return "diorama.waypoint.hidden";
+		}
+		int on = (waypoint.showInWorld ? 1 : 0) + (waypoint.showOnMinimap ? 1 : 0) + (waypoint.showOnMap ? 1 : 0);
+		if (on == 3) {
+			return null;
+		}
+		if (on == 1) {
+			return waypoint.showInWorld ? "diorama.waypoint.only_world" : waypoint.showOnMinimap ? "diorama.waypoint.only_minimap" : "diorama.waypoint.only_map";
+		}
+		return !waypoint.showInWorld ? "diorama.waypoint.not_world" : !waypoint.showOnMinimap ? "diorama.waypoint.not_minimap" : "diorama.waypoint.not_map";
 	}
 
 	/** The scrollbar: its x, the handle's height and how far down the track it sits. */

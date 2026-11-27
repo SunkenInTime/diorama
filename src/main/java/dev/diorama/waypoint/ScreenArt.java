@@ -25,7 +25,7 @@ public final class ScreenArt {
 	private static final int SEPARATOR_LIGHT = 0x33FFFFFF;
 	*///?}
 	/** Vanilla's scrollbar width and shortest handle. */
-	static final int SCROLLBAR_WIDTH = 6;
+	public static final int SCROLLBAR_WIDTH = 6;
 	public static final int SCROLLER_MIN = 32;
 
 	private ScreenArt() {

@@ -74,6 +74,9 @@ public interface TestInput {
 	/** Moves the cursor by an offset in window pixels. */
 	void moveCursor(double deltaX, double deltaY);
 
+	/** Turns the mouse wheel, up for positive amounts, as Fabric API's TestInput does. */
+	void scroll(double amount);
+
 	/**
 	 * Resizes the game's framebuffer, and the window as far as the screen allows. Screenshots
 	 * come out at exactly this size.

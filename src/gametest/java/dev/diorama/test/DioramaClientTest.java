@@ -166,6 +166,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("portals-world")) {
 				PortalsWorldTest.run(context, world);
 			}
+			if (tests.contains("waypoint-visibility")) {
+				WaypointVisibilityTest.run(context, world);
+			}
 			if (tests.contains("waypoints-key")) {
 				WaypointsKeyTest.run(context, world);
 			}
@@ -1283,6 +1286,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 					context.getInput().setCursorPos(2, 2);
 					context.waitTicks(3);
 					context.takeScreenshot("languages-" + language + "-4-settings-tab-" + (tab + 1));
+					// A tab taller than the window at its bottom too, scrolled there with the wheel.
+					if (context.computeOnClient(mc -> ((SettingsScreen) mc.gui.screen()).maxScroll()) > 0) {
+						SettingsScrollTest.wheelToBottom(context);
+						context.takeScreenshot("languages-" + language + "-4-settings-tab-" + (tab + 1) + "-bottom");
+						SettingsScrollTest.wheelToTop(context);
+					}
 					String label = net.minecraft.network.chat.Component.translatable("diorama.settings." + tooltips[tab][0]).getString();
 					double[] at = context.computeOnClient(mc -> {
 						java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
@@ -1290,6 +1299,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 						double scale = mc.getWindow().getGuiScale();
 						for (var widget : widgets) {
 							if (widget.getMessage().getString().startsWith(label)) {
+								revealSetting(mc, widget);
 								return new double[] {(widget.getX() + 8) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 							}
 						}
@@ -1321,6 +1331,20 @@ public class DioramaClientTest implements FabricClientGameTest {
 					context.waitTicks(14);
 					context.takeScreenshot("languages-" + language + "-5-tooltip-addons");
 				}
+				// The smallest window the settings are laid out for, 1280x720 at GUI scale 3: every tab
+				// laid out with no label past its column, and Waypoints at its top and bottom.
+				int languageScale = context.computeOnClient(mc -> mc.options.guiScale().get());
+				context.getInput().resizeWindow(1280, 720);
+				setGuiScale(context, 3);
+				context.getInput().setCursorPos(2, 2);
+				SettingsScrollTest.checkTabs(context, "1280x720 in " + language);
+				context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(3));
+				context.waitTicks(3);
+				context.takeScreenshot("languages-" + language + "-4-small-waypoints-top");
+				SettingsScrollTest.wheelToBottom(context);
+				context.takeScreenshot("languages-" + language + "-4-small-waypoints-bottom");
+				context.getInput().resizeWindow(1600, 900);
+				setGuiScale(context, languageScale);
 				context.setScreen(() -> null);
 				context.getInput().setCursorPos(2, 2);
 
@@ -1453,6 +1477,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 
 	/** Moves to a widget and clicks it with the mouse. */
 	static void clickWidget(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
+		context.runOnClient(mc -> revealSetting(mc, widget));
 		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
 		moveCursor(context, (widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale);
 		holdFrames(context, 6);
@@ -4366,21 +4391,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
 		}
-		// Unticking Show on maps and in the world and saving hides it; ticking it again shows it.
+		// Unticking all three Visibility boxes and saving hides it; ticking them again shows it.
 		for (boolean shown : new boolean[] {false, true}) {
 			context.setScreen(() -> new WaypointEditScreen(null, picked, false));
 			context.waitTicks(3);
-			clickAt(context, context.computeOnClient(mc -> {
-				for (var child : mc.gui.screen().children()) {
-					if (child instanceof net.minecraft.client.gui.components.Checkbox box) {
-						return box;
-					}
-				}
-				throw new AssertionError("The editor has no visibility checkbox");
-			}));
+			List<net.minecraft.client.gui.components.Checkbox> boxes = context.computeOnClient(mc -> mc.gui.screen().children().stream()
+				.filter(child -> child instanceof net.minecraft.client.gui.components.Checkbox).map(child -> (net.minecraft.client.gui.components.Checkbox) child).toList());
+			if (boxes.size() != 3) {
+				throw new AssertionError("The editor should have three Visibility boxes, and has " + boxes.size());
+			}
+			for (var box : boxes) {
+				clickAt(context, box);
+			}
 			clickButton(context, "diorama.waypoint.save");
 			if (context.computeOnClient(mc -> picked.visible) != shown) {
-				throw new AssertionError("Saving with the box " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
+				throw new AssertionError("Saving with the boxes " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
 			}
 		}
 		context.setScreen(() -> null);
@@ -6542,6 +6567,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 	/** Clicks the middle of a widget with the mouse, the way a player does. */
 	static void clickAt(ClientGameTestContext context, net.minecraft.client.gui.components.AbstractWidget widget) {
 		double[] at = context.computeOnClient(mc -> {
+			revealSetting(mc, widget);
 			double scale = mc.getWindow().getGuiScale();
 			return new double[] {(widget.getX() + widget.getWidth() / 2.0) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 		});
@@ -7183,41 +7209,12 @@ public class DioramaClientTest implements FabricClientGameTest {
 		context.waitTicks(3);
 		context.setScreen(() -> null);
 
-		// A small window: 1280x720 is a 427x240 GUI. No settings button may overlap another, and a
-		// bottom-corner minimap must stay clear of the hotbar.
+		// A small window: 1280x720 is a 427x240 GUI. Every tab fits by scrolling, and a bottom-corner
+		// minimap must stay clear of the hotbar.
 		context.getInput().resizeWindow(1280, 720);
 		context.waitTicks(10);
-		context.setScreen(() -> new SettingsScreen(null));
-		context.waitTicks(5);
-		context.takeScreenshot("settings-05-small-screen");
-		// Every tab: no setting may overlap another or reach under the minimap preview.
-		for (int tab = 0; tab < 5; tab++) {
-			int index = tab;
-			context.runOnClient(mc -> {
-				((SettingsScreen) mc.gui.screen()).selectTab(index);
-				java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
-				collectWidgets(mc.gui.screen(), widgets);
-				int width = mc.gui.screen().width;
-				int height = mc.gui.screen().height;
-				// The preview's frame, at the default size in the top right.
-				int preview = width - 6 - 128 - 2;
-				for (var a : widgets) {
-					if (a.getX() < 0 || a.getY() < 0 || a.getRight() > width || a.getBottom() > height) {
-						throw new AssertionError(a.getMessage().getString() + " runs off the screen");
-					}
-					if (a.getRight() > preview && a.getY() < 6 + 128 + 2) {
-						throw new AssertionError(a.getMessage().getString() + " reaches under the minimap preview");
-					}
-					for (var b : widgets) {
-						if (a != b && a.getX() < b.getRight() && b.getX() < a.getRight() && a.getY() < b.getBottom() && b.getY() < a.getBottom()) {
-							throw new AssertionError(a.getMessage().getString() + " overlaps " + b.getMessage().getString());
-						}
-					}
-				}
-			});
-		}
-		context.runOnClient(mc -> ((SettingsScreen) mc.gui.screen()).selectTab(0));
-		context.setScreen(() -> null);
+		// Every tab laid out, scrolled and clicked on the small window.
+		SettingsScrollTest.run(context);
 		context.runOnClient(mc -> {
 			Settings s = Settings.get();
 			s.minimapCorner = Settings.Corner.BOTTOM_LEFT;
@@ -7449,10 +7446,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "waypoint-visibility", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "waypoint-visibility", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
@@ -7534,6 +7531,13 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 	}
 
+	/** On the settings screen, scrolls the tab until the widget shows whole, as a player scrolls to a setting before clicking it. */
+	static void revealSetting(Minecraft mc, net.minecraft.client.gui.components.AbstractWidget widget) {
+		if (mc.gui.screen() instanceof SettingsScreen settings) {
+			settings.reveal(widget);
+		}
+	}
+
 	/** The open screen's widget whose label starts with this text. */
 	static net.minecraft.client.gui.components.@Nullable AbstractWidget widget(Minecraft mc, String label) {
 		java.util.List<net.minecraft.client.gui.components.AbstractWidget> widgets = new java.util.ArrayList<>();
@@ -7558,6 +7562,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			collectWidgets(mc.gui.screen(), widgets);
 			for (var widget : widgets) {
 				if (widget instanceof net.minecraft.client.gui.components.Checkbox && widget.getMessage().getString().equals(label)) {
+					revealSetting(mc, widget);
 					double scale = mc.getWindow().getGuiScale();
 					return new double[] {(widget.getX() + along * widget.getWidth()) * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};
 				}
@@ -7582,6 +7587,7 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (widget == null) {
 				throw new AssertionError("No widget labelled " + label);
 			}
+			revealSetting(mc, widget);
 			double scale = mc.getWindow().getGuiScale();
 			double x = widget.getX() + 1 + along * (widget.getWidth() - 2);
 			return new double[] {x * scale, (widget.getY() + widget.getHeight() / 2.0) * scale};

@@ -409,6 +409,11 @@ public final class XaeroImport {
 					waypoint.initials = initials;
 				}
 				waypoint.visible = !args[7].equals("true");
+				// Xaero's World Map visibility types keep it out of the world and off the minimap, on its map alone.
+				if (args.length > 12 && (args[12].equals("2") || args[12].equals("3"))) {
+					waypoint.showInWorld = false;
+					waypoint.showOnMinimap = false;
+				}
 				if (type == 1 || type == 2) {
 					waypoint.kind = Waypoint.Kind.DEATH;
 				}
@@ -477,6 +482,9 @@ public final class XaeroImport {
 		Waypoint to = new Waypoint(from.name, from.x, from.y, from.z, from.dimension, from.color);
 		to.initials = from.initials;
 		to.visible = from.visible;
+		to.showInWorld = from.showInWorld;
+		to.showOnMinimap = from.showOnMinimap;
+		to.showOnMap = from.showOnMap;
 		to.kind = from.kind;
 		return to;
 	}
