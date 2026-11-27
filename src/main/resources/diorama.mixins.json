@@ -22,7 +22,6 @@
 		"LevelChunkMixin",
 		"PufferfishRendererAccessor",
 		"RealmsServerMixin",
-		"ScreenMixin",
 		"SpriteContentsMixin",
 		"TropicalFishRendererAccessor"
 	],

@@ -69,6 +69,10 @@ import net.minecraft.world.entity.EntityType;
  *       zoom() says so; project() and worldAt() undo each other, facing north and east.</li>
  *   <li>Views drawn past the most a frame draws return false and draw nothing, with one warning;
  *       closing a view lets its fog go, and a closed view draws nothing.</li>
+ *   <li>Inside an addon's scissor, or with its pose moved, a view draws only where it lands, its
+ *       fog included; drawn with graphics kept from an earlier frame it shows nothing.</li>
+ *   <li>A resource reload with the view's screen open draws the screen under the loading overlay
+ *       without a throw.</li>
  *   <li>With the map off in the player's dimension, a view draws nothing and returns false.</li>
  * </ul>
  * Then, on 26.x Fabric, bytes a frame for a view against the full map at the same place. Everything
@@ -140,14 +144,16 @@ final class AddonViewTest {
 			onceAFrame(context, scene, opened, wrong);
 			renderThenClose(context, scene, wrong);
 			scissored(context, scene, opened, wrong);
+			movedPose(context, scene, opened, wrong);
 			balanced(context, scene, opened, wrong);
 			legacyState(context, scene, opened, wrong);
-			outsideScreen(context, scene, wrong);
+			keptGraphics(context, scene, wrong);
 			closed(context, scene, wrong);
 			showcase(context, scene, opened, wrong);
 			//? if >=26.1 && fabric {
 			ViewMeasure.run(context, scene.px(), scene.py(), scene.pz());
 			//?}
+			reloadWithScreenOpen(context, scene, wrong);
 			reloadLetsGo(context, scene, wrong);
 			mapOff(context, scene, wrong);
 			twoLevels(context, world, scene, wrong);
@@ -886,6 +892,68 @@ final class AddonViewTest {
 		Diorama.LOGGER.info("addon-api view: inside a narrower scissor, nothing drawn outside it on Fast or Fancy");
 	}
 
+	/**
+	 * With Fast fog (from 1.21.6, where the fog is cut to a rectangle of its own), a view drawn with
+	 * the caller's pose moved 100 pixels right looks as the same view drawn 100 pixels right
+	 * without the move, its fog included, and draws nothing round where it lands.
+	 */
+	private static void movedPose(ClientGameTestContext context, Scene scene, List<MapView> opened, List<String> wrong) {
+		//? if >=1.21.6 {
+		int[] gui = screen(context);
+		int size = 50;
+		int shift = 100;
+		int x = gui[0] / 2 - (size + shift) / 2;
+		int y = gui[1] / 2 - size / 2;
+		ViewPlace moved = ViewPlace.builder(x, y, size, size).center(scene.px() + 250, scene.py(), scene.pz()).zoom(1).build();
+		ViewPlace there = ViewPlace.builder(x + shift, y, size, size).center(scene.px() + 250, scene.py(), scene.pz()).zoom(1).build();
+		Settings.Quality was = context.computeOnClient(mc -> Settings.get().quality);
+		MapView view = open(context, opened);
+		BufferedImage straight;
+		BufferedImage shifted;
+		double scale = context.computeOnClient(mc -> mc.getWindow().getGuiScale());
+		try {
+			context.runOnClient(mc -> {
+				Settings.get().quality = Settings.Quality.FAST;
+				Settings.get().apply();
+			});
+			DioramaClientTest.settle(context, 10);
+			try (WorldPause paused = WorldPause.pause(context)) {
+				show(context, new ViewScreen.Draw(view, there));
+				straight = read(context.takeScreenshot("addon-view-20-fast-fog-in-place"));
+				showAround(context, (g, a, draws) -> {
+					g.pose().pushMatrix();
+					g.pose().translate(shift, 0);
+					try {
+						draws.run();
+					} finally {
+						g.pose().popMatrix();
+					}
+				}, new ViewScreen.Draw(view, moved));
+				shifted = read(context.takeScreenshot("addon-view-20-fast-fog-pose-moved"));
+			}
+		} finally {
+			context.runOnClient(mc -> {
+				Settings.get().quality = was;
+				Settings.get().apply();
+			});
+			close(context, opened, view);
+		}
+		DioramaClientTest.settle(context, 10);
+		int left = there.x();
+		int right = there.x() + size;
+		int shown = drawnIn(straight, scale, left + 1, y + 1, right - 1, y + size - 1);
+		double differ = differing(straight, shifted, there, scale, 0);
+		int round = drawnIn(shifted, scale, x - 20, y - 20, left - 1, y + size + 20) + drawnIn(shifted, scale, right + 1, y - 20, right + 20, y + size + 20)
+			+ drawnIn(shifted, scale, left, y - 20, right, y - 1) + drawnIn(shifted, scale, left, y + size + 1, right, y + size + 20);
+		if (shown == 0 || differ > 0.03 || round > 0) {
+			wrong.add(String.format(Locale.ROOT, "Fast fog with the pose moved: %.2f%% of the view differs from it drawn in place without the move (%d pixels drawn in place); %d pixels drawn round where it landed",
+				differ * 100, shown, round));
+			return;
+		}
+		Diorama.LOGGER.info(String.format(Locale.ROOT, "addon-api view: with the pose moved %d px, Fast fog and land differ %.2f%% from the view drawn in place; nothing drawn round it", shift, differ * 100));
+		//?}
+	}
+
 	/** Pixels in this GUI rectangle that aren't the view screen's backdrop, sampled every third. */
 	private static int drawnIn(BufferedImage image, double scale, int x0, int y0, int x1, int y1) {
 		int count = 0;
@@ -1066,10 +1134,10 @@ final class AddonViewTest {
 	*///?}
 
 	/**
-	 * Outside a screen's drawing (here a client tick, with the graphics object of an earlier
-	 * frame), render() is refused before it does any map work.
+	 * With the graphics object of an earlier frame, called from a client tick, render() throws
+	 * nothing and nothing shows: the game never draws what's handed to graphics outside a frame.
 	 */
-	private static void outsideScreen(ClientGameTestContext context, Scene scene, List<String> wrong) {
+	private static void keptGraphics(ClientGameTestContext context, Scene scene, List<String> wrong) {
 		ViewPlace place = middle(context, scene, ZOOM);
 		AddonView view = (AddonView) context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
 		try {
@@ -1078,19 +1146,63 @@ final class AddonViewTest {
 			String result = context.computeOnClient(mc -> {
 				try {
 					return "returned " + view.render(kept, place, 0);
-				} catch (IllegalStateException e) {
-					return "refused";
+				} catch (RuntimeException e) {
+					return "threw " + e;
 				}
 			});
-			boolean held = context.computeOnClient(mc -> view.holdsMemory());
-			if (!"refused".equals(result) || held) {
-				wrong.add("render() from a tick with an earlier frame's graphics " + result + "; the view " + (held ? "made" : "didn't make") + " its fog of war");
+			int from = screen.frames;
+			context.waitFor(mc -> screen.frames >= from + 2, 600);
+			BufferedImage shot = read(context.takeScreenshot("addon-view-21-kept-graphics"));
+			boolean nothing = blank(shot, place, context);
+			if (result.startsWith("threw") || !nothing) {
+				wrong.add("render() from a tick with an earlier frame's graphics " + result + "; the place " + (nothing ? "shows" : "doesn't show") + " only the backdrop");
 				return;
 			}
-			Diorama.LOGGER.info("addon-api view: render() from a tick with an earlier frame's graphics was refused and made nothing");
+			Diorama.LOGGER.info("addon-api view: render() from a tick with an earlier frame's graphics {} and nothing showed", result);
 		} finally {
 			context.runOnClient(mc -> view.close());
 			context.setScreen(() -> null);
+		}
+	}
+
+	/**
+	 * A screen drawing a view stays open through a resource reload. While the loading overlay is up
+	 * the game draws the open screen itself (through 1.21.5 by calling its render straight, not
+	 * through the method screens are drawn by otherwise), and the view's draws there throw nothing.
+	 */
+	private static void reloadWithScreenOpen(ClientGameTestContext context, Scene scene, List<String> wrong) {
+		ViewPlace place = middle(context, scene, ZOOM);
+		MapView view = context.computeOnClient(mc -> api().openView(EnumSet.noneOf(MapView.Part.class)));
+		java.util.concurrent.atomic.AtomicInteger underOverlay = new java.util.concurrent.atomic.AtomicInteger();
+		try {
+			ViewScreen screen = showAround(context, (g, a, draws) -> {
+				if (net.minecraft.client.Minecraft.getInstance().gui.overlay() != null) {
+					underOverlay.incrementAndGet();
+				}
+				draws.run();
+			}, new ViewScreen.Draw(view, place));
+			java.util.concurrent.CompletableFuture<Void> done = context.computeOnClient(mc -> mc.reloadResourcePacks());
+			context.waitFor(mc -> done.isDone() && mc.gui.overlay() == null, 2400);
+			done.join();
+			context.waitTicks(10);
+			boolean open = context.computeOnClient(mc -> mc.gui.screen() == screen);
+			// Through 1.21.5 the overlay draws the screen as it fades in and out; later versions are
+			// only counted.
+			//? if <=1.21.5 {
+			/*boolean drawnUnder = underOverlay.get() > 0;
+			*///?} else {
+			boolean drawnUnder = true;
+			//?}
+			if (screen.thrown != null || !drawnUnder || !open) {
+				wrong.add("A resource reload with a view's screen open: " + (screen.thrown == null ? "nothing thrown" : "the screen's draw threw " + screen.thrown) + "; the screen drawn "
+					+ underOverlay.get() + " times under the loading overlay; " + (open ? "still open" : "no longer open"));
+				return;
+			}
+			Diorama.LOGGER.info("addon-api view: a resource reload with a view's screen open drew it {} times under the loading overlay, nothing thrown", underOverlay.get());
+		} finally {
+			context.runOnClient(mc -> view.close());
+			context.setScreen(() -> null);
+			DioramaClientTest.settle(context, 20);
 		}
 	}
 

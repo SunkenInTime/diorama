@@ -111,7 +111,9 @@ public interface MapView extends Handle {
 	 * Draws the map in this place, now, into what the screen is drawing this frame: over what was
 	 * drawn before, and under what is drawn after. Call it from the screen's own drawing (its
 	 * {@code render}, {@code extractRenderState} from Minecraft 26.1), with the graphics object the
-	 * game handed it. Nothing is drawn outside the place's rectangle, nor outside a scissor the
+	 * game handed that call. Drawn with a graphics object kept from another frame, or from a tick,
+	 * it shows nothing, and still counts as the view's draw for the frame. Nothing is drawn outside
+	 * the place's rectangle, nor outside a scissor the
 	 * screen has on (a scrolling panel's), and the graphics' scissors and transforms are left as
 	 * they were, even if the drawing throws. On a closed view this draws nothing.
 	 *
@@ -136,9 +138,8 @@ public interface MapView extends Handle {
 	 * @throws IllegalArgumentException if {@code graphics} isn't this Minecraft version's graphics
 	 *     object
 	 * @throws NullPointerException if {@code graphics} or {@code place} is null
-	 * @throws IllegalStateException if called off the client thread, outside a screen's drawing
-	 *     (from a tick, say, with graphics kept from an earlier frame, whose drawing the game never
-	 *     shows), or from inside a view's own drawing
+	 * @throws IllegalStateException if called off the client thread, or from inside a view's own
+	 *     drawing
 	 */
 	boolean render(Object graphics, ViewPlace place, float partialTick);
 

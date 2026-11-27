@@ -59,8 +59,6 @@ public final class AddonView implements MapView {
 	private static long frame;
 	private static long drawnFrame = -1;
 	private static int drawn;
-	/** How deep in screens' drawing the game is now: 0 outside it. */
-	private static int screenDraws;
 	/** A view is drawing now. */
 	private static boolean drawing;
 	private static boolean overSaid;
@@ -117,24 +115,11 @@ public final class AddonView implements MapView {
 	 */
 	public static void frame() {
 		frame++;
-		screenDraws = 0;
 		if (!RETIRING.isEmpty()) {
 			for (MapViewport viewport : RETIRING) {
 				viewport.close();
 			}
 			RETIRING.clear();
-		}
-	}
-
-	/** A screen starts drawing (ScreenMixin). */
-	public static void screenDrawStarts() {
-		screenDraws++;
-	}
-
-	/** A screen is done drawing (ScreenMixin). One that threw leaves the count up until the next frame starts. */
-	public static void screenDrawEnds() {
-		if (screenDraws > 0) {
-			screenDraws--;
 		}
 	}
 
@@ -191,9 +176,6 @@ public final class AddonView implements MapView {
 		if (!(graphics instanceof GuiGraphicsExtractor g)) {
 			throw new IllegalArgumentException("render() takes the graphics object the game hands a screen's drawing ("
 				+ GuiGraphicsExtractor.class.getName() + " on this version), not " + graphics.getClass().getName());
-		}
-		if (screenDraws == 0) {
-			throw new IllegalStateException("render() draws only from inside a screen's own drawing, with the graphics object the game handed it: what's drawn anywhere else is never shown");
 		}
 		if (drawing) {
 			throw new IllegalStateException("render() was called while a map view was drawing");
@@ -259,7 +241,8 @@ public final class AddonView implements MapView {
 		Consumer<GuiGraphicsExtractor> inside = insideDrawForTests;
 		drawing = true;
 		// Drawn on a pose stack of Diorama's own, inside the caller's scissor (a scissor pushed is cut
-		// to the one under it), with every scissor pushed popped again however the drawing ends.
+		// to the one under it), with the graphics' scissors popped back to where they were however the
+		// drawing ends.
 		GuiStacks.enter(g);
 		try {
 			g.enableScissor(left, top, right, bottom);
@@ -287,8 +270,11 @@ public final class AddonView implements MapView {
 					Markers.onMap(viewer.getViewYRot(a)), 6 * settings.arrowScale());
 			}
 		} finally {
-			GuiStacks.leave(g);
-			drawing = false;
+			try {
+				GuiStacks.leave(g);
+			} finally {
+				drawing = false;
+			}
 		}
 		return true;
 	}
