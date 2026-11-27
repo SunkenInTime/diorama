@@ -127,8 +127,14 @@ public final class Settings {
 	public boolean radarHostile = true;
 	public boolean radarNeutral = true;
 	public boolean radarPassive = true;
-	/** Items lying on the ground, as small dots. */
+	/** Items lying on the ground. */
 	public boolean radarItems = true;
+	/**
+	 * Whether those items show as themselves where there's room (see {@code Radar.itemPictures}),
+	 * as they have since 0.11.0. Off, they're always the small dots they were before: around a mob
+	 * farm the pictures crowd the map. Xaero's Minimap sets dots or icons per radar category.
+	 */
+	public boolean radarItemPictures = true;
 	public int radarRange = 32;
 	/** How players and mobs are drawn: their pixel-art heads, faces in framed boxes, or plain dots. */
 	public RadarStyle radarStyle = RadarStyle.HEADS;

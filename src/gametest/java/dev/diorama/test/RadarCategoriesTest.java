@@ -253,6 +253,8 @@ final class RadarCategoriesTest {
 			}
 			Settings s = Settings.reload();
 			boolean kept = !s.radarPassive && !s.radarItems && s.radarHostile && s.radarIconScale == 150
+				// A file from before Item pictures has them on, as they were (#461).
+				&& s.radarItemPictures
 				// None but the one Diorama makes itself, if this game has a Pokémon mod.
 				&& s.radarCategories.stream().allMatch(category -> category.builtIn != null)
 				&& !RadarCategories.kind(Radar.Kind.PASSIVE).shown() && RadarCategories.kind(Radar.Kind.HOSTILE).shown()
