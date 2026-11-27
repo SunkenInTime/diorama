@@ -31,8 +31,8 @@ public final class GuiStacks {
 	/**
 	 * The graphics' scissor stack and the list inside it, which the game keeps private on every
 	 * version. Found by their types, not their names, which differ between loaders and versions:
-	 * the field whose type is a class inside the graphics' class that pushes a rectangle and holds
-	 * a deque.
+	 * the field whose type is a class inside the graphics' class that takes a rectangle (its push)
+	 * and holds a deque.
 	 */
 	private static final Field SCISSOR_STACK;
 	private static final Field SCISSOR_LIST;
@@ -85,7 +85,7 @@ public final class GuiStacks {
 
 	private static boolean pushesRectangles(Class<?> type) {
 		for (Method method : type.getDeclaredMethods()) {
-			if (method.getReturnType() == ScreenRectangle.class && method.getParameterCount() == 1 && method.getParameterTypes()[0] == ScreenRectangle.class) {
+			if (method.getParameterCount() == 1 && method.getParameterTypes()[0] == ScreenRectangle.class) {
 				return true;
 			}
 		}
