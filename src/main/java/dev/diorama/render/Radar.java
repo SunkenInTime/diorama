@@ -325,8 +325,8 @@ public final class Radar {
 	}
 
 	/**
-	 * The dropped items as themselves, or null where they're dots: on the fullscreen map unless the
-	 * radar style is dots, and on the minimap while the player list key (Tab) is held, as Xaero's
+	 * The dropped items as themselves, or null where they're dots: never with Item pictures off,
+	 * otherwise on the fullscreen map unless the radar style is dots, and on the minimap while the player list key (Tab) is held, as Xaero's
 	 * shows its icons. A pile would be one picture hiding the rest, so the items on one square of
 	 * ground, two pictures wide, show once per kind, up to four kinds two by two around the pile's
 	 * middle: a farm's hundreds of drops come to a few pictures, which is also what keeps this cheap.
@@ -336,7 +336,8 @@ public final class Radar {
 		if (blips.isEmpty() || blips.get(0).kind() != Kind.ITEM) {
 			return null;
 		}
-		if (fullscreen ? Settings.get().radarStyle == Settings.RadarStyle.DOTS : !Minecraft.getInstance().options.keyPlayerList.isDown()) {
+		if (!Settings.get().radarItemPictures
+			|| (fullscreen ? Settings.get().radarStyle == Settings.RadarStyle.DOTS : !Minecraft.getInstance().options.keyPlayerList.isDown())) {
 			return null;
 		}
 		Map<Long, Pile> piles = new LinkedHashMap<>();

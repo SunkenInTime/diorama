@@ -3709,6 +3709,30 @@ public class DioramaClientTest implements FabricClientGameTest {
 				throw new AssertionError("Dropped items are drawn as themselves with the radar style set to dots");
 			}
 			Settings.get().radarStyle = style;
+			// With Item pictures off they're dots too, the pile and the diamond each one or more (#461).
+			Settings.get().radarItemPictures = false;
+		});
+		context.getInput().setCursorPos(0, 0);
+		context.waitTicks(3);
+		context.takeScreenshot("radar-02d2-item-pictures-off");
+		context.runOnClient(mc -> {
+			MapScreen screen = (MapScreen) mc.gui.screen();
+			if (Radar.itemPictures(screen.view(), screen.blips(), true) != null) {
+				throw new AssertionError("Dropped items are drawn as themselves with Item pictures off");
+			}
+			if (!showsItem(screen)) {
+				throw new AssertionError("Dropped items are gone from the map with Item pictures off; they should be dots");
+			}
+			// Dropped items off still hides them, whatever Item pictures says.
+			Settings.get().radarItems = false;
+		});
+		context.waitTicks(2);
+		context.runOnClient(mc -> {
+			if (showsItem((MapScreen) mc.gui.screen())) {
+				throw new AssertionError("The dropped items are on the radar with Dropped items and Item pictures off");
+			}
+			Settings.get().radarItems = true;
+			Settings.get().radarItemPictures = true;
 		});
 		context.setScreen(() -> null);
 		// On the minimap they're dots, and themselves while the player list key is held.
@@ -3725,6 +3749,18 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (dots < 8 || held > dots / 4 || released < dots * 3 / 4) {
 			throw new AssertionError("The minimap's dropped items should be aqua dots, gone for pictures while the player list key is held: it has "
 				+ dots + " aqua pixels before, " + held + " held and " + released + " after");
+		}
+		// With Item pictures off, holding the key leaves them dots.
+		context.runOnClient(mc -> Settings.get().radarItemPictures = false);
+		context.getInput().holdKey(playerList);
+		context.waitTicks(5);
+		int heldOff = itemDotInk(context, context.takeScreenshot("radar-02h-minimap-items-key-held-pictures-off"));
+		context.getInput().releaseKey(playerList);
+		context.runOnClient(mc -> Settings.get().radarItemPictures = true);
+		context.waitTicks(5);
+		if (heldOff < dots * 3 / 4) {
+			throw new AssertionError("With Item pictures off the minimap's dropped items should stay aqua dots while the player list key is held: it has "
+				+ dots + " aqua pixels before and " + heldOff + " held");
 		}
 
 		// A lineup of mobs, hostile in one row and the rest in another, babies at the ends: each

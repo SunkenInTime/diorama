@@ -142,6 +142,8 @@ public final class SettingsScreen extends Screen {
 		radar.toggle("neutral", () -> s.radarNeutral, v -> s.radarNeutral = v);
 		radar.toggle("passive", () -> s.radarPassive, v -> s.radarPassive = v);
 		radar.toggle("items", () -> s.radarItems, v -> s.radarItems = v);
+		// In the cell nine checkboxes left free: the tab is no taller for it.
+		radar.toggle("item_pictures", () -> s.radarItemPictures, v -> s.radarItemPictures = v);
 		radar.toggle("type_outline", () -> s.radarTypeOutline, v -> s.radarTypeOutline = v);
 		radar.toggle("height_arrows", () -> s.radarHeightArrows, v -> s.radarHeightArrows = v);
 		radar.choice("radar_style", Settings.RadarStyle.values(), () -> s.radarStyle, v -> s.radarStyle = v);
