@@ -118,7 +118,11 @@ public final class DioramaPipelines {
 			.withFragmentShader(Diorama.id("core/" + name))
 			.withSampler("Sampler0")
 			.withVertexFormat(DefaultVertexFormat.POSITION_TEX_COLOR, VertexFormat.Mode.QUADS)
-			.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST);
+			.withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+			// Nothing is written with the test off, but left at its default of on the pipeline counts
+			// as wanting a depth texture: NeoForge's development runs then warn on every fog layer
+			// draw, whose pass has none.
+			.withDepthWrite(false);
 		if (blended) {
 			builder.withBlend(BlendFunction.TRANSLUCENT);
 		} else {
