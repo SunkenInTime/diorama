@@ -43,8 +43,10 @@ public final class WaypointOverlay {
 		float cx = view.x() + view.width() / 2.0F;
 		float cy = view.y() + view.height() / 2.0F;
 		Circle circle = view.round() ? Circle.in(view) : null;
+		// The full map and views like it (an addon's map view) go by Show on the map; the minimap by its own.
+		Waypoint.Surface surface = fullscreen ? Waypoint.Surface.MAP : Waypoint.Surface.MINIMAP;
 		for (Waypoint waypoint : waypoints) {
-			if (!WaypointStore.isShown(waypoint)) {
+			if (!WaypointStore.isShownOn(waypoint, surface)) {
 				continue;
 			}
 			// Badges with icons are bigger, so they sit further in.

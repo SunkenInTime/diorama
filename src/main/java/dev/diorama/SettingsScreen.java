@@ -166,6 +166,9 @@ public final class SettingsScreen extends Screen {
 		overlays.toggle("map_waypoints_button", () -> s.mapWaypointsButton, v -> s.mapWaypointsButton = v);
 		overlays.toggle("map_settings_button", () -> s.mapSettingsButton, v -> s.mapSettingsButton = v);
 		overlays.toggle("map_coordinates", () -> s.mapCoordinates, v -> s.mapCoordinates = v);
+		// The map's right-click menu, beside its buttons: Waypoints needed its cell for New waypoints.
+		// In the cell seven checkboxes left free, so this tab is no taller for it.
+		overlays.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
 		Settings.SpawnSpots[] spots = Settings.SpawnSpots.values();
 		overlays.cycle("spawn_spots", () -> s.spawnSpots.ordinal(), spots.length, i -> s.spawnSpots = spots[i],
 			i -> Component.translatable("diorama.settings.spawn_spots." + spots[i].name().toLowerCase(Locale.ROOT)));
@@ -185,9 +188,10 @@ public final class SettingsScreen extends Screen {
 		waypoints.toggle("deaths_reached", () -> s.removeReachedDeaths, v -> s.removeReachedDeaths = v);
 		waypoints.toggle("beds", () -> s.bedMarkers, v -> s.bedMarkers = v);
 		waypoints.toggle("portals", () -> s.portalMarkers, v -> s.portalMarkers = v);
-		waypoints.toggle("map_add_waypoints", () -> s.mapAddWaypoints, v -> s.mapAddWaypoints = v);
-		// Under Portal pins, in the cell seven checkboxes left free: the tab is no taller for it.
 		waypoints.toggle("portals_world", () -> s.portalMarkersInWorld, v -> s.portalMarkersInWorld = v);
+		// Where new waypoints show, three boxes on a screen of their own: a button in the last cell of
+		// the checkboxes, since the tab has no room for another row on a small screen.
+		waypoints.openCell("new_waypoints", () -> this.minecraft.gui.setScreen(new NewWaypointsScreen(this)));
 		waypoints.choice("waypoint_labels", Settings.WaypointLabels.values(), () -> s.waypointLabels, v -> s.waypointLabels = v);
 		// How big those labels are, beside what they say: the tab has no room for another row.
 		int[] labelSizes = TextSize.sizes();
@@ -378,6 +382,12 @@ public final class SettingsScreen extends Screen {
 				}
 			}
 			this.checkboxes.add(checkbox);
+		}
+
+		/** A button the width of a checkbox column, in the checkboxes' grid, that opens a screen. */
+		void openCell(String key, Runnable press) {
+			int column = (CONTENT - COLUMN_GAP) / 2;
+			this.checkboxes.add(Button.builder(Component.translatable("diorama.settings." + key), b -> press.run()).size(column, 20).tooltip(tooltip(key)).build());
 		}
 
 		Button cycle(String key, IntSupplier get, int count, IntConsumer set, IntFunction<Component> name) {

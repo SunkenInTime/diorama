@@ -64,6 +64,7 @@ public final class Waypoints {
 		String name = net.minecraft.network.chat.Component.translatable("diorama.waypoint.temporary").getString();
 		Waypoint temporary = new Waypoint(name, pos.getX(), pos.getY(), pos.getZ(), dimension, 0xFFFFFFFF);
 		temporary.kind = Waypoint.Kind.TEMPORARY;
+		// Everywhere, whatever new waypoints are set to: it's a spot to head for now, beam and all.
 		store.add(temporary);
 	}
 
@@ -183,7 +184,8 @@ public final class Waypoints {
 		long now = System.currentTimeMillis();
 		for (Waypoint waypoint : store.all()) {
 			if (waypoint.kind == Waypoint.Kind.DEATH && waypoint.dimension.equals(dimension) && now - waypoint.created > DEATH_GRACE_MS
-				&& store.shown(waypoint) && waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) < DEATH_REACHED) {
+				// Reached only where it can be seen on the way, as in Xaero's: in the world or on the minimap.
+				&& (store.shownOn(waypoint, Waypoint.Surface.WORLD) || store.shownOn(waypoint, Waypoint.Surface.MINIMAP)) && waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) < DEATH_REACHED) {
 				store.remove(waypoint);
 			}
 		}

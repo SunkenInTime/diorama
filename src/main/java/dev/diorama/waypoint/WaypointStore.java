@@ -578,6 +578,16 @@ public final class WaypointStore {
 		return store == null ? waypoint.visible : store.shown(waypoint);
 	}
 
+	/** Whether a waypoint shows on one of the three places: it's {@link #shown}, and set to show there. */
+	public boolean shownOn(Waypoint waypoint, Waypoint.Surface surface) {
+		return waypoint.showsOn(surface) && this.shown(waypoint);
+	}
+
+	/** {@link #shownOn} for the current world's store; a waypoint with no store loaded goes by its own settings. */
+	public static boolean isShownOn(Waypoint waypoint, Waypoint.Surface surface) {
+		return waypoint.showsOn(surface) && isShown(waypoint);
+	}
+
 	/**
 	 * Whether a waypoint stands in the world as well as on the maps, where it's shown at all: every
 	 * one but the portal pins, which the player can keep to the maps.
@@ -841,6 +851,7 @@ public final class WaypointStore {
 		if (waypoint.map != null && waypoint.map.isEmpty()) {
 			waypoint.map = null;
 		}
+		waypoint.normaliseShownOn();
 		return waypoint;
 	}
 

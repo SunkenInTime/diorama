@@ -201,6 +201,14 @@ public final class Settings {
 	 * beam alike. Xaero's Minimap has the same setting, Waypoint Opacity in World (#412).
 	 */
 	public int waypointWorldOpacity = MAX_OPACITY;
+	/**
+	 * Where a waypoint the player makes in the editor shows at first: in the world, on the minimap
+	 * and on the map ({@link dev.diorama.waypoint.Waypoint#showAsNew}). All three off, new ones
+	 * start hidden. Xaero's Minimap has nothing like it; its waypoints all start shown.
+	 */
+	public boolean newWaypointInWorld = true;
+	public boolean newWaypointOnMinimap = true;
+	public boolean newWaypointOnMap = true;
 	/** The Waypoints and Settings buttons on the map. A modpack can hide them; their keys still open both. */
 	public boolean mapWaypointsButton = true;
 	public boolean mapSettingsButton = true;

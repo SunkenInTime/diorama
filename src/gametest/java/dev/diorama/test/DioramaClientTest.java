@@ -166,6 +166,9 @@ public class DioramaClientTest implements FabricClientGameTest {
 			if (tests.contains("portals-world")) {
 				PortalsWorldTest.run(context, world);
 			}
+			if (tests.contains("waypoint-visibility")) {
+				WaypointVisibilityTest.run(context, world);
+			}
 			if (tests.contains("waypoints-key")) {
 				WaypointsKeyTest.run(context, world);
 			}
@@ -4330,21 +4333,21 @@ public class DioramaClientTest implements FabricClientGameTest {
 		if (!onRay || !solid) {
 			throw new AssertionError("Picked " + picked.x + "," + picked.y + "," + picked.z + " is not the block shown at the click");
 		}
-		// Unticking Show on maps and in the world and saving hides it; ticking it again shows it.
+		// Unticking all three Visibility boxes and saving hides it; ticking them again shows it.
 		for (boolean shown : new boolean[] {false, true}) {
 			context.setScreen(() -> new WaypointEditScreen(null, picked, false));
 			context.waitTicks(3);
-			clickAt(context, context.computeOnClient(mc -> {
-				for (var child : mc.gui.screen().children()) {
-					if (child instanceof net.minecraft.client.gui.components.Checkbox box) {
-						return box;
-					}
-				}
-				throw new AssertionError("The editor has no visibility checkbox");
-			}));
+			List<net.minecraft.client.gui.components.Checkbox> boxes = context.computeOnClient(mc -> mc.gui.screen().children().stream()
+				.filter(child -> child instanceof net.minecraft.client.gui.components.Checkbox).map(child -> (net.minecraft.client.gui.components.Checkbox) child).toList());
+			if (boxes.size() != 3) {
+				throw new AssertionError("The editor should have three Visibility boxes, and has " + boxes.size());
+			}
+			for (var box : boxes) {
+				clickAt(context, box);
+			}
 			clickButton(context, "diorama.waypoint.save");
 			if (context.computeOnClient(mc -> picked.visible) != shown) {
-				throw new AssertionError("Saving with the box " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
+				throw new AssertionError("Saving with the boxes " + (shown ? "ticked" : "unticked") + " left the waypoint " + (shown ? "hidden" : "shown"));
 			}
 		}
 		context.setScreen(() -> null);
@@ -7413,10 +7416,10 @@ public class DioramaClientTest implements FabricClientGameTest {
 		}
 		if (env == null || env.isBlank()) {
 			//? if >=1.21.4 && fabric {
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "waypoint-visibility", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions", "multiplayer", "share-settings", "shared-map", "unsent-chunks", "game-time-server", "spectate-server", "server-id", "tracked-players", "realms");
 			//?} else {
 			/*// On NeoForge and before 1.21.4 the tests run on src/gameshim, which can't start a dedicated server.
-			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
+			return Set.of("tour", "radar", "radar-sneaking", "radar-categories", "go-to-coordinates", "xaero-icons", "model-faces", "waypoints", "waypoint-sort", "waypoint-search", "folder-list", "folder-editor", "folder-many", "waypoint-select", "icons", "portal-pins", "portal-roof", "portal-unlit", "portals-world", "waypoint-visibility", "xaero-import", "unnumbered-states", "failing-model", "failing-shape", "vanilla-table", "fog-of-war", "fog-mask", "fog-hud-layers", "settings", "overlays", "screens", "enlarge", "minimap-position", "boss-bars", "minimap-frames", "game-time", "day-night", "light-flicker", "map-mouse-keys", "image-export", "tile-filter", "saved-chunks", "biome-edge", "facing", "packed-chunks", "redraw", "spectate", "dimensions", "saved-map", "recreated-world", "tall-world", "sub-maps", "map-dimensions");
 			*///?}
 		}
 		return Set.of(env.split(","));
