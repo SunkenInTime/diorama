@@ -90,8 +90,10 @@ final class WaypointExportTest {
 			if (!fields[8].equals(e.death() ? "1" : "0")) {
 				throw new AssertionError(e.name() + " should be of type " + (e.death() ? 1 : 0) + ": " + line);
 			}
-			if (fields.length != 14 || !fields[12].equals(e.mapOnly() ? "2" : "0")) {
-				throw new AssertionError(e.name() + " should have visibility type " + (e.mapOnly() ? 2 : 0) + ": " + line);
+			// Xaero's Local or World Map Local, a death Global or World Map Global: shown at any distance.
+			int visibility = (e.mapOnly() ? 2 : 0) + (e.death() ? 1 : 0);
+			if (fields.length != 14 || !fields[12].equals(Integer.toString(visibility))) {
+				throw new AssertionError(e.name() + " should have visibility type " + visibility + ": " + line);
 			}
 		}
 
