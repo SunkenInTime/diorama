@@ -173,7 +173,8 @@ public final class Waypoints {
 		LocalPlayer player = mc.player;
 		// While the death screen is up, the player still stands where they died. With any screen open
 		// it waits, so a pin doesn't go from under its editor or the waypoint list.
-		if (player == null || !player.isAlive() || mc.gui.screen() != null || !Settings.get().removeReachedDeaths) {
+		Settings settings = Settings.get();
+		if (player == null || !player.isAlive() || mc.gui.screen() != null || !settings.removeReachedDeaths) {
 			return;
 		}
 		WaypointStore store = WaypointStore.get();
@@ -183,9 +184,11 @@ public final class Waypoints {
 		}
 		long now = System.currentTimeMillis();
 		for (Waypoint waypoint : store.all()) {
+			// Reached only where it can be seen on the way, as in Xaero's: in the world or on the minimap.
+			boolean seen = (settings.waypointsInWorld && store.shownOn(waypoint, Waypoint.Surface.WORLD))
+				|| (settings.minimap && settings.waypointsOnMap && store.shownOn(waypoint, Waypoint.Surface.MINIMAP));
 			if (waypoint.kind == Waypoint.Kind.DEATH && waypoint.dimension.equals(dimension) && now - waypoint.created > DEATH_GRACE_MS
-				// Reached only where it can be seen on the way, as in Xaero's: in the world or on the minimap.
-				&& (store.shownOn(waypoint, Waypoint.Surface.WORLD) || store.shownOn(waypoint, Waypoint.Surface.MINIMAP)) && waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) < DEATH_REACHED) {
+				&& seen && waypoint.distanceTo(player.getX(), player.getY(), player.getZ()) < DEATH_REACHED) {
 				store.remove(waypoint);
 			}
 		}
