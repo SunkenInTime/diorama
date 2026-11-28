@@ -54,6 +54,6 @@ Don't give Diorama an upper version bound in your metadata. Check `DioramaApi.ap
 
 ## Which Diorama has it
 
-No Diorama release carries the API yet. The first one that does will say so in its release notes, with the API version it provides. Until then, build Diorama from `master` (see [development.md](development.md)) to try your addon in game.
+Diorama 0.12.0 and later carry the API. Diorama 0.12.0 provides `1.0.0-alpha.2`.
 
 The repository's `testaddon/` folder is a working example: an addon built against the API jar alone.
